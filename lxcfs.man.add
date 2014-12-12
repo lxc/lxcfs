@@ -1,0 +1,8 @@
+[DESCRIPTION]
+
+lxcfs implements a FUSE fs which allows containers to have virtualized
+cgroup filesystems and virtualized views of /proc/cpuinfo and /proc/meminfo.
+
+[SEE ALSO]
+cgmanager(1),
+lxc(1)
