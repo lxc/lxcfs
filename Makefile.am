@@ -11,3 +11,35 @@ AM_LDFLAGS = $(DBUS_LIBS) $(NIH_LIBS) $(NIH_DBUS_LIBS) $(CGMANAGER_LIBS) $(FUSE_
 bin_PROGRAMS = lxcfs
 
 lxcfs_SOURCES = lxcfs.c cgmanager.c
+
+man_MANS = lxcfs.1
+
+lxcfs.1: lxcfs lxcfs.man.add
+	$(HELP2MAN) -n "Set up cgroup fs for containers" --no-discard-stderr -s 1 -I lxcfs.man.add -N ./lxcfs > lxcfs.1
+
+distclean:
+	rm -rf .deps/ \
+		INSTALL \
+		Makefile \
+		Makefile.in \
+		aclocal.m4 \
+		autom4te.cache/ \
+		cgmanager.o \
+		compile \
+		config.guess \
+		config.h \
+		config.h.in \
+		config.log \
+		config.status \
+		config.sub \
+		configure \
+		depcomp \
+		install-sh \
+		libtool \
+		ltmain.sh \
+		lxcfs \
+		lxcfs.1 \
+		lxcfs.o \
+		m4/ \
+		missing \
+		stamp-h1
