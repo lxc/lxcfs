@@ -49,13 +49,78 @@ struct lxcfs_state {
 };
 #define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
 
+/*
+ * Given a open file * to /proc/pid/{u,g}id_map, and an id
+ * valid in the caller's namespace, return the id mapped into
+ * pid's namespace.
+ * Returns the mapped id, or -1 on error.
+ */
+unsigned int
+convert_id_to_ns(FILE *idfile, unsigned int in_id)
+{
+	unsigned int nsuid,   // base id for a range in the idfile's namespace
+		     hostuid, // base id for a range in the caller's namespace
+		     count;   // number of ids in this range
+	char line[400];
+	int ret;
+
+	fseek(idfile, 0L, SEEK_SET);
+	while (fgets(line, 400, idfile)) {
+		ret = sscanf(line, "%u %u %u\n", &nsuid, &hostuid, &count);
+		if (ret != 3)
+			continue;
+		if (hostuid + count < hostuid || nsuid + count < nsuid) {
+			/*
+			 * uids wrapped around - unexpected as this is a procfile,
+			 * so just bail.
+			 */
+			fprintf(stderr, "pid wrapparound at entry %u %u %u in %s",
+				nsuid, hostuid, count, line);
+			return -1;
+		}
+		if (hostuid <= in_id && hostuid+count > in_id) {
+			/*
+			 * now since hostuid <= in_id < hostuid+count, and
+			 * hostuid+count and nsuid+count do not wrap around,
+			 * we know that nsuid+(in_id-hostuid) which must be
+			 * less that nsuid+(count) must not wrap around
+			 */
+			return (in_id - hostuid) + nsuid;
+		}
+	}
+
+	// no answer found
+	return -1;
+}
+
 static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim)
 {
+	nih_local char *fpath = NULL;
+	bool answer = false;
+	uid_t nsuid;
+
 	if (uid == victim)
 		return true;
 
 	/* check /proc/pid/uid_map */
-	return false;
+	fpath = NIH_MUST( nih_sprintf(NULL, "/proc/%d/uid_map", pid) );
+	FILE *f = fopen(fpath, "r");
+	if (!f)
+		return false;
+
+	nsuid = convert_id_to_ns(f, uid);
+	if (nsuid)
+		goto out;
+
+	nsuid = convert_id_to_ns(f, victim);
+	if (nsuid == -1)
+		goto out;
+
+	answer = true;
+
+out:
+	fclose(f);
+	return answer;
 }
 
 static bool perms_include(int fmode, mode_t req_mode)
@@ -92,8 +157,6 @@ static bool fc_may_access(struct fuse_context *fc, const char *contrl, const cha
 	for (i = 0; list[i]; i++) {
 		if (strcmp(list[i]->name, file) == 0) {
 			struct cgm_keys *k = list[i];
-			fprintf(stderr, "XXX fc_may_access: found %s\n", file);
-			// check list[i]->uid, gid, mode against fc
 			if (is_privileged_over(fc->pid, fc->uid, k->uid)) {
 				if (perms_include(k->mode >> 6, mode))
 					return true;
@@ -207,13 +270,6 @@ static struct cgm_keys *get_cgroup_key(const char *contr, const char *dir, const
 
 static void get_cgdir_and_path(const char *cg, char **dir, char **file)
 {
-#if 0
-	nih_local char *cgcopy = NULL;
-	nih_local struct cgm_keys *k = NULL;
-	char *cgdir, *fpath = strrchr(cgroup, '/');
-	cgcopy = NIH_MUST( nih_strdup(NULL, cgroup) );
-	cgdir = dirname(cgcopy);
-#endif
 	char *p;
 
 	*dir = NIH_MUST( nih_strdup(NULL, cg) );
@@ -261,7 +317,6 @@ static int cg_getattr(const char *path, struct stat *sb)
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
 		return -EIO;
-	fprintf(stderr, "XXX getattr controller %s\n", controller);
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
 		/* this is just /cgroup/controller, return it as a dir */
@@ -270,8 +325,6 @@ static int cg_getattr(const char *path, struct stat *sb)
 		return 0;
 	}
 	
-	fprintf(stderr, "XXX getattr controller %s cgroup %s\n", controller, cgroup);
-
 	get_cgdir_and_path(cgroup, &cgdir, &fpath);
 
 	if (!fpath) {
@@ -282,8 +335,6 @@ static int cg_getattr(const char *path, struct stat *sb)
 		path2 = fpath;
 	}
 
-	fprintf(stderr, "XXX gettattr: dir is %s, basename %s\n", path1, path2);
-
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
 	 * Then check that caller's cgroup is under path if fpath is a child
 	 * cgroup, or cgdir if fpath is a file */
@@ -292,9 +343,18 @@ static int cg_getattr(const char *path, struct stat *sb)
 		if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
 			return -EPERM;
 
-		sb->st_mode = S_IFDIR | 00755;   // TODO what to use?
-		// TODO - how to get uid, gid
-		sb->st_uid = sb->st_gid = 0;
+		// get uid, gid, from '/tasks' file and make up a mode
+		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
+		sb->st_mode = S_IFDIR | 00755;
+		k = get_cgroup_key(controller, cgroup, "tasks");
+		if (!k) {
+			fprintf(stderr, "Failed to find a tasks file for %s\n", cgroup);
+			sb->st_uid = sb->st_gid = 0;
+		} else {
+			fprintf(stderr, "found a tasks file for %s\n", cgroup);
+			sb->st_uid = k->uid;
+			sb->st_gid = k->gid;
+		}
 		sb->st_nlink = 2;
 		return 0;
 	}
@@ -303,13 +363,10 @@ static int cg_getattr(const char *path, struct stat *sb)
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
 			return -EPERM;
 
-		fprintf(stderr, "XXX getattr mode on %s %s %s is %d\n", controller, path1, path2, k->mode);
-
-		// TODO - convert uid, gid
 		sb->st_mode = S_IFREG | k->mode;
+		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
-		sb->st_nlink = 1;
 		return 0;
 	}
 
