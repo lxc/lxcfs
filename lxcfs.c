@@ -282,6 +282,15 @@ static void get_cgdir_and_path(const char *cg, char **dir, char **file)
 	*p = '\0';
 }
 
+static size_t get_file_size(const char *contrl, const char *cg, const char *f)
+{
+	nih_local char *data = NULL;
+	size_t s;
+	if (!cgm_get_value(contrl, cg, f, &data))
+		return -EINVAL;
+	s = strlen(data);
+	return s;
+}
 /*
  * gettattr fn for anything under /cgroup
  */
@@ -367,6 +376,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
+		sb->st_size = get_file_size(controller, path1, path2);
 		return 0;
 	}
 
@@ -452,6 +462,99 @@ static int cg_releasedir(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+static int cg_open(const char *path, struct fuse_file_info *fi)
+{
+	nih_local char *controller = NULL;
+	const char *cgroup;
+	char *fpath = NULL, *path1, *path2;
+	nih_local char * cgdir = NULL;
+	nih_local struct cgm_keys *k = NULL;
+	struct fuse_context *fc = fuse_get_context();
+
+	if (!fc)
+		return -EIO;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	if (!fpath) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = fpath;
+	}
+
+	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+		if (!fc_may_access(fc, controller, path1, path2, fi->flags))
+			return -EPERM;
+
+		/* TODO - we want to cache this info for read/write */
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static int cg_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	nih_local char *controller = NULL;
+	const char *cgroup;
+	char *fpath = NULL, *path1, *path2;
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char * cgdir = NULL;
+	nih_local struct cgm_keys *k = NULL;
+
+	if (offset)
+		return -EIO;
+
+	if (!fc)
+		return -EIO;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	if (!fpath) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = fpath;
+	}
+
+	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+		nih_local char *data = NULL;
+		int s;
+
+		if (!fc_may_access(fc, controller, path1, path2, fi->flags))
+			return -EPERM;
+
+		if (!cgm_get_value(controller, path1, path2, &data))
+			return -EINVAL;
+
+		s = strlen(data);
+		if (s > size)
+			s = size;
+		memcpy(buf, data, s);
+
+fprintf(stderr, "cg_read: returning %d: %s\n", s, buf);
+		return s;
+	}
+
+	return -EINVAL;
+}
+
 /*
  * So far I'm not actually using cg_ops and proc_ops, but listing them
  * here makes it clearer who is supporting what.  Still I prefer to 
@@ -472,8 +575,8 @@ const struct fuse_operations cg_ops = {
 	.chown = NULL,
 	.truncate = NULL,
 	.utime = NULL,
-	.open = NULL,
-	.read = NULL,
+	.open = cg_open,
+	.read = cg_read,
 	.write = NULL,
 	.statfs = NULL,
 	.flush = NULL,
@@ -600,9 +703,38 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 	return -EINVAL;
 }
 
-void *bb_init(struct fuse_conn_info *conn)
+static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 {
-	return LXCFS_DATA;
+	if (strncmp(path, "/cgroup", 7) == 0) {
+		return cg_open(path, fi);
+	}
+
+	return -EINVAL;
+}
+
+static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	if (strncmp(path, "/cgroup", 7) == 0) {
+		return cg_read(path, buf, size, offset, fi);
+	}
+
+	return -EINVAL;
+}
+
+static int lxcfs_flush(const char *path, struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int lxcfs_release(const char *path, struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int lxcfs_fsync(const char *path, int datasync, struct fuse_file_info *fi)
+{
+	return 0;
 }
 
 const struct fuse_operations lxcfs_ops = {
@@ -620,13 +752,15 @@ const struct fuse_operations lxcfs_ops = {
 	.chown = NULL,
 	.truncate = NULL,
 	.utime = NULL,
-	.open = NULL,
-	.read = NULL,
+
+	.open = lxcfs_open,
+	.read = lxcfs_read,
+	.release = lxcfs_release,
 	.write = NULL,
+
 	.statfs = NULL,
-	.flush = NULL,
-	.release = NULL,
-	.fsync = NULL,
+	.flush = lxcfs_flush,
+	.fsync = lxcfs_fsync,
 
 	.setxattr = NULL,
 	.getxattr = NULL,
@@ -646,7 +780,7 @@ const struct fuse_operations lxcfs_ops = {
 	.fgetattr = NULL,
 };
 
-void usage(const char *me)
+static void usage(const char *me)
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
@@ -654,7 +788,7 @@ void usage(const char *me)
 	exit(1);
 }
 
-bool is_help(char *w)
+static bool is_help(char *w)
 {
 	if (strcmp(w, "-h") == 0 ||
 			strcmp(w, "--help") == 0 ||

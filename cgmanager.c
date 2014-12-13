@@ -203,3 +203,24 @@ bool cgm_escape_cgroup(void)
 	cgm_dbus_disconnect();
 	return true;
 }
+
+bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
+		char **value)
+{
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_get_value_sync(NULL, cgroup_manager, controller, cgroup,
+			file, value) != 0 ) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to get_value failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
