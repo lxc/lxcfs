@@ -39,6 +39,7 @@
 #include <sys/param.h>
 #include <sys/inotify.h>
 #include <sys/mount.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <net/if.h>
 #include <stdbool.h>
@@ -224,3 +225,98 @@ bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
 	cgm_dbus_disconnect();
 	return true;
 }
+
+static int wait_for_pid(pid_t pid)
+{
+	int status, ret;
+
+again:
+	ret = waitpid(pid, &status, 0);
+	if (ret == -1) {
+		if (errno == EINTR)
+			goto again;
+		return -1;
+	}
+	if (ret != pid)
+		goto again;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return -1;
+	return 0;
+}
+
+bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
+{
+	int32_t e;
+	pid_t pid = fork();
+
+	if (pid) {
+		if (wait_for_pid(pid) != 0)
+			return false;
+		return true;
+	}
+
+	if (setgroups(0, NULL))
+		exit(1);
+	if (setresgid(gid, gid, gid))
+		exit(1);
+	if (setresuid(uid, uid, uid))
+		exit(1);
+
+	if (!cgm_dbus_connect()) {
+		exit(1);
+	}
+
+	if ( cgmanager_create_sync(NULL, cgroup_manager, controller, cg, &e) != 0) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to create failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		exit(1);
+	}
+
+	cgm_dbus_disconnect();
+	exit(0);
+}
+
+#if 0
+bool cgm_chown(const char *controller, const char *cg, uid_t uid, gid_t gid)
+{
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_chown_sync(NULL, cgroup_manager, controller, cg, uid, gid) != 0) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to chown failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
+
+bool cgm_remove(const char *controller, const char *cg)
+{
+	int32_t r = 1, e;
+
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_remove_sync(NULL, cgroup_manager, controller, cg, r, &e) != 0) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to remove failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
+#endif

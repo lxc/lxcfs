@@ -380,7 +380,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		return 0;
 	}
 
-	return -EINVAL;
+	return -ENOENT;
 }
 
 static int cg_opendir(const char *path, struct fuse_file_info *fi)
@@ -555,6 +555,44 @@ fprintf(stderr, "cg_read: returning %d: %s\n", s, buf);
 	return -EINVAL;
 }
 
+int cg_mkdir(const char *path, mode_t mode)
+{
+	struct fuse_context *fc = fuse_get_context();
+	nih_local struct cgm_keys **list = NULL;
+	char *fpath = NULL, *path1;
+	nih_local char * cgdir = NULL;
+	const char *cgroup;
+	nih_local char *controller = NULL;
+
+fprintf(stderr, "XXX cg_mkdir: starting for %s\n", path);
+	if (!fc)
+		return -EIO;
+
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EIO;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	if (!fpath)
+		path1 = "/";
+	else
+		path1 = cgdir;
+
+	if (!fc_may_access(fc, controller, path1, NULL, O_RDWR))
+		return -EPERM;
+
+
+	if (!cgm_create(controller, cgroup, fc->uid, fc->gid))
+		return -EINVAL;
+
+	return 0;
+}
+
 /*
  * So far I'm not actually using cg_ops and proc_ops, but listing them
  * here makes it clearer who is supporting what.  Still I prefer to 
@@ -565,7 +603,7 @@ const struct fuse_operations cg_ops = {
 	.readlink = NULL,
 	.getdir = NULL,
 	.mknod = NULL,
-	.mkdir = NULL,
+	.mkdir = cg_mkdir,
 	.unlink = NULL,
 	.rmdir = NULL,
 	.symlink = NULL,
@@ -737,12 +775,20 @@ static int lxcfs_fsync(const char *path, int datasync, struct fuse_file_info *fi
 	return 0;
 }
 
+int lxcfs_mkdir(const char *path, mode_t mode)
+{
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return cg_mkdir(path, mode);
+
+	return -EINVAL;
+}
+
 const struct fuse_operations lxcfs_ops = {
 	.getattr = lxcfs_getattr,
 	.readlink = NULL,
 	.getdir = NULL,
 	.mknod = NULL,
-	.mkdir = NULL,
+	.mkdir = lxcfs_mkdir,
 	.unlink = NULL,
 	.rmdir = NULL,
 	.symlink = NULL,
