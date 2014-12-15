@@ -125,9 +125,22 @@ out:
 
 static bool perms_include(int fmode, mode_t req_mode)
 {
-	fprintf(stderr, "perms_include: checking whether %d includes %d\n",
-		fmode, req_mode);
-	return (fmode & req_mode) == req_mode;
+	mode_t r;
+
+	switch (req_mode & O_ACCMODE) {
+	case O_RDONLY:
+		r = S_IROTH;
+		break;
+	case O_WRONLY:
+		r = S_IWOTH;
+		break;
+	case O_RDWR:
+		r = S_IROTH | S_IWOTH;
+		break;
+	default:
+		return false;
+	}
+	return ((fmode & r) == r);
 }
 
 /*
@@ -291,9 +304,11 @@ static size_t get_file_size(const char *contrl, const char *cg, const char *f)
 	s = strlen(data);
 	return s;
 }
+
 /*
- * gettattr fn for anything under /cgroup
+ * FUSE ops for /cgroup
  */
+
 static int cg_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
@@ -388,9 +403,6 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-/*
- * readdir function for anything under /cgroup
- */
 static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi)
 {
@@ -437,7 +449,6 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	if (!cgm_list_keys(controller, cgroup, &list))
 		return -EINVAL;
 	for (i = 0; list[i]; i++) {
-		fprintf(stderr, "adding key %s\n", list[i]->name);
 		if (filler(buf, list[i]->name, NULL, 0) != 0) {
 			return -EIO;
 		}
@@ -449,7 +460,6 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	if (!cgm_list_children(controller, cgroup, &clist))
 		return 0;
 	for (i = 0; clist[i]; i++) {
-		fprintf(stderr, "adding child %s\n", clist[i]);
 		if (filler(buf, clist[i], NULL, 0) != 0) {
 			return -EIO;
 		}
@@ -537,7 +547,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		nih_local char *data = NULL;
 		int s;
 
-		if (!fc_may_access(fc, controller, path1, path2, fi->flags))
+		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
 			return -EPERM;
 
 		if (!cgm_get_value(controller, path1, path2, &data))
@@ -548,12 +558,59 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 			s = size;
 		memcpy(buf, data, s);
 
-fprintf(stderr, "cg_read: returning %d: %s\n", s, buf);
 		return s;
 	}
 
 	return -EINVAL;
 }
+
+int cg_write(const char *path, const char *buf, size_t size, off_t offset,
+	     struct fuse_file_info *fi)
+{
+	nih_local char *controller = NULL;
+	const char *cgroup;
+	char *fpath = NULL, *path1, *path2;
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char * cgdir = NULL;
+	nih_local struct cgm_keys *k = NULL;
+
+fprintf(stderr, "cg_write: starting\n");
+
+	if (offset)
+		return -EIO;
+
+	if (!fc)
+		return -EIO;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	if (!fpath) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = fpath;
+	}
+
+	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+		if (!fc_may_access(fc, controller, path1, path2, O_WRONLY))
+			return -EPERM;
+
+		if (!cgm_set_value(controller, path1, path2, buf))
+			return -EINVAL;
+
+		return size;
+	}
+
+	return -EINVAL;
+}
+
 
 int cg_mkdir(const char *path, mode_t mode)
 {
@@ -564,7 +621,6 @@ int cg_mkdir(const char *path, mode_t mode)
 	const char *cgroup;
 	nih_local char *controller = NULL;
 
-fprintf(stderr, "XXX cg_mkdir: starting for %s\n", path);
 	if (!fc)
 		return -EIO;
 
@@ -594,50 +650,8 @@ fprintf(stderr, "XXX cg_mkdir: starting for %s\n", path);
 }
 
 /*
- * So far I'm not actually using cg_ops and proc_ops, but listing them
- * here makes it clearer who is supporting what.  Still I prefer to 
- * call the real functions and not cg_ops->getattr.
+ * FUSE ops for /proc
  */
-const struct fuse_operations cg_ops = {
-	.getattr = cg_getattr,
-	.readlink = NULL,
-	.getdir = NULL,
-	.mknod = NULL,
-	.mkdir = cg_mkdir,
-	.unlink = NULL,
-	.rmdir = NULL,
-	.symlink = NULL,
-	.rename = NULL,
-	.link = NULL,
-	.chmod = NULL,
-	.chown = NULL,
-	.truncate = NULL,
-	.utime = NULL,
-	.open = cg_open,
-	.read = cg_read,
-	.write = NULL,
-	.statfs = NULL,
-	.flush = NULL,
-	.release = NULL,
-	.fsync = NULL,
-
-	.setxattr = NULL,
-	.getxattr = NULL,
-	.listxattr = NULL,
-	.removexattr = NULL,
-
-	.opendir = cg_opendir,
-	.readdir = cg_readdir,
-	.releasedir = cg_releasedir,
-
-	.fsyncdir = NULL,
-	.init = NULL,
-	.destroy = NULL,
-	.access = NULL,
-	.create = NULL,
-	.ftruncate = NULL,
-	.fgetattr = NULL,
-};
 
 static int proc_getattr(const char *path, struct stat *sb)
 {
@@ -648,46 +662,11 @@ static int proc_getattr(const char *path, struct stat *sb)
 	return 0;
 }
 
-const struct fuse_operations proc_ops = {
-	.getattr = proc_getattr,
-	.readlink = NULL,
-	.getdir = NULL,
-	.mknod = NULL,
-	.mkdir = NULL,
-	.unlink = NULL,
-	.rmdir = NULL,
-	.symlink = NULL,
-	.rename = NULL,
-	.link = NULL,
-	.chmod = NULL,
-	.chown = NULL,
-	.truncate = NULL,
-	.utime = NULL,
-	.open = NULL,
-	.read = NULL,
-	.write = NULL,
-	.statfs = NULL,
-	.flush = NULL,
-	.release = NULL,
-	.fsync = NULL,
-
-	.setxattr = NULL,
-	.getxattr = NULL,
-	.listxattr = NULL,
-	.removexattr = NULL,
-
-	.opendir = NULL,
-	.readdir = NULL,
-	.releasedir = NULL,
-
-	.fsyncdir = NULL,
-	.init = NULL,
-	.destroy = NULL,
-	.access = NULL,
-	.create = NULL,
-	.ftruncate = NULL,
-	.fgetattr = NULL,
-};
+/*
+ * FUSE ops for /
+ * these just delegate to the /proc and /cgroup ops as
+ * needed
+ */
 
 static int lxcfs_getattr(const char *path, struct stat *sb)
 {
@@ -760,6 +739,16 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 	return -EINVAL;
 }
 
+int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
+	     struct fuse_file_info *fi)
+{
+	if (strncmp(path, "/cgroup", 7) == 0) {
+		return cg_write(path, buf, size, offset, fi);
+	}
+
+	return -EINVAL;
+}
+
 static int lxcfs_flush(const char *path, struct fuse_file_info *fi)
 {
 	return 0;
@@ -783,6 +772,18 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 	return -EINVAL;
 }
 
+/*
+ * cat first does a truncate before doing ops->write.  This doesn't
+ * really make sense for cgroups.  So just return 0 always but do
+ * nothing.
+ */
+int lxcfs_truncate(const char *path, off_t newsize)
+{
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return 0;
+	return -EINVAL;
+}
+
 const struct fuse_operations lxcfs_ops = {
 	.getattr = lxcfs_getattr,
 	.readlink = NULL,
@@ -796,13 +797,13 @@ const struct fuse_operations lxcfs_ops = {
 	.link = NULL,
 	.chmod = NULL,
 	.chown = NULL,
-	.truncate = NULL,
+	.truncate = lxcfs_truncate,
 	.utime = NULL,
 
 	.open = lxcfs_open,
 	.read = lxcfs_read,
 	.release = lxcfs_release,
-	.write = NULL,
+	.write = lxcfs_write,
 
 	.statfs = NULL,
 	.flush = lxcfs_flush,

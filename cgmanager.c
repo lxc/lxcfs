@@ -226,6 +226,27 @@ bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
 	return true;
 }
 
+bool cgm_set_value(const char *controller, const char *cgroup, const char *file,
+		const char *value)
+{
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_set_value_sync(NULL, cgroup_manager, controller, cgroup,
+			file, value) != 0 ) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to set_value failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
+
 static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
