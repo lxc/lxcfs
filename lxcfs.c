@@ -728,6 +728,40 @@ int cg_mkdir(const char *path, mode_t mode)
 	return 0;
 }
 
+static int cg_rmdir(const char *path)
+{
+	struct fuse_context *fc = fuse_get_context();
+	nih_local struct cgm_keys **list = NULL;
+	char *fpath = NULL;
+	nih_local char * cgdir = NULL;
+	const char *cgroup;
+	nih_local char *controller = NULL;
+
+	if (!fc)
+		return -EIO;
+
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EIO;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	if (!fpath)
+		return -EINVAL;
+
+	if (!fc_may_access(fc, controller, cgdir, NULL, O_WRONLY))
+		return -EPERM;
+
+	if (!cgm_remove(controller, cgroup))
+		return -EINVAL;
+
+	return 0;
+}
+
 /*
  * FUSE ops for /proc
  */
@@ -871,6 +905,13 @@ int lxcfs_truncate(const char *path, off_t newsize)
 	return -EINVAL;
 }
 
+int lxcfs_rmdir(const char *path)
+{
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return cg_rmdir(path);
+	return -EINVAL;
+}
+
 const struct fuse_operations lxcfs_ops = {
 	.getattr = lxcfs_getattr,
 	.readlink = NULL,
@@ -878,7 +919,7 @@ const struct fuse_operations lxcfs_ops = {
 	.mknod = NULL,
 	.mkdir = lxcfs_mkdir,
 	.unlink = NULL,
-	.rmdir = NULL,
+	.rmdir = lxcfs_rmdir,
 	.symlink = NULL,
 	.rename = NULL,
 	.link = NULL,
