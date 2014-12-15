@@ -393,10 +393,8 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_mode = S_IFDIR | 00755;
 		k = get_cgroup_key(controller, cgroup, "tasks");
 		if (!k) {
-			fprintf(stderr, "Failed to find a tasks file for %s\n", cgroup);
 			sb->st_uid = sb->st_gid = 0;
 		} else {
-			fprintf(stderr, "found a tasks file for %s\n", cgroup);
 			sb->st_uid = k->uid;
 			sb->st_gid = k->gid;
 		}
@@ -595,8 +593,6 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	nih_local char * cgdir = NULL;
 	nih_local struct cgm_keys *k = NULL;
 
-fprintf(stderr, "cg_write: starting\n");
-
 	if (offset)
 		return -EIO;
 
@@ -689,6 +685,10 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 	if (!cgm_chown_file(controller, cgroup, uid, gid))
 		return -EINVAL;
 	return 0;
+}
+
+int cg_chmod(const char *path, mode_t mode)
+{
 }
 
 int cg_mkdir(const char *path, mode_t mode)
@@ -912,6 +912,13 @@ int lxcfs_rmdir(const char *path)
 	return -EINVAL;
 }
 
+int lxcfs_chmod(const char *path, mode_t mode)
+{
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return cg_chmod(path, mode);
+	return -EINVAL;
+}
+
 const struct fuse_operations lxcfs_ops = {
 	.getattr = lxcfs_getattr,
 	.readlink = NULL,
@@ -923,7 +930,7 @@ const struct fuse_operations lxcfs_ops = {
 	.symlink = NULL,
 	.rename = NULL,
 	.link = NULL,
-	.chmod = NULL,
+	.chmod = lxcfs_chmod,
 	.chown = lxcfs_chown,
 	.truncate = lxcfs_truncate,
 	.utime = NULL,
