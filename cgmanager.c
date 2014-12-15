@@ -300,8 +300,7 @@ bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	exit(0);
 }
 
-#if 0
-bool cgm_chown(const char *controller, const char *cg, uid_t uid, gid_t gid)
+bool cgm_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
 	if (!cgm_dbus_connect()) {
 		return false;
@@ -320,6 +319,7 @@ bool cgm_chown(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	return true;
 }
 
+#if 0
 bool cgm_remove(const char *controller, const char *cg)
 {
 	int32_t r = 1, e;

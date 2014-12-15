@@ -13,6 +13,9 @@ bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
 bool cgm_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value);
 bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid);
+
+bool cgm_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid);
+
 #if 0
 bool cgm_chown(const char *controller, const char *cg, uid_t uid, gid_t gid);
 bool cgm_remove(const char *controller, const char *cg);

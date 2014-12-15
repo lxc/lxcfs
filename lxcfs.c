@@ -93,25 +93,46 @@ convert_id_to_ns(FILE *idfile, unsigned int in_id)
 	return -1;
 }
 
-static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim)
+/*
+ * for is_privileged_over,
+ * specify whether we require the calling uid to be root in his
+ * namespace
+ */
+#define NS_ROOT_REQD true
+#define NS_ROOT_OPT false
+
+static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_root)
 {
 	nih_local char *fpath = NULL;
 	bool answer = false;
 	uid_t nsuid;
 
-	if (uid == victim)
+	if (victim == -1 || uid == -1)
+		return false;
+
+	/*
+	 * If the request is one not requiring root in the namespace,
+	 * then having the same uid suffices.  (i.e. uid 1000 has write
+	 * access to files owned by uid 1000
+	 */
+	if (!req_ns_root && uid == victim)
 		return true;
 
-	/* check /proc/pid/uid_map */
 	fpath = NIH_MUST( nih_sprintf(NULL, "/proc/%d/uid_map", pid) );
 	FILE *f = fopen(fpath, "r");
 	if (!f)
 		return false;
 
+	/* if caller's not root in his namespace, reject */
 	nsuid = convert_id_to_ns(f, uid);
 	if (nsuid)
 		goto out;
 
+	/*
+	 * If victim is not mapped into caller's ns, reject.
+	 * XXX I'm not sure this check is needed given that fuse
+	 * will be sending requests where the vfs has converted
+	 */
 	nsuid = convert_id_to_ns(f, victim);
 	if (nsuid == -1)
 		goto out;
@@ -170,7 +191,7 @@ static bool fc_may_access(struct fuse_context *fc, const char *contrl, const cha
 	for (i = 0; list[i]; i++) {
 		if (strcmp(list[i]->name, file) == 0) {
 			struct cgm_keys *k = list[i];
-			if (is_privileged_over(fc->pid, fc->uid, k->uid)) {
+			if (is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_OPT)) {
 				if (perms_include(k->mode >> 6, mode))
 					return true;
 			}
@@ -348,7 +369,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 2;
 		return 0;
 	}
-	
+
 	get_cgdir_and_path(cgroup, &cgdir, &fpath);
 
 	if (!fpath) {
@@ -611,6 +632,64 @@ fprintf(stderr, "cg_write: starting\n");
 	return -EINVAL;
 }
 
+int cg_chown(const char *path, uid_t uid, gid_t gid)
+{
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char * cgdir = NULL;
+	char *fpath = NULL, *path1, *path2;
+	nih_local struct cgm_keys *k = NULL;
+	const char *cgroup;
+	nih_local char *controller = NULL;
+
+
+	if (!fc)
+		return -EIO;
+
+	if (strcmp(path, "/cgroup") == 0)
+		return -EINVAL;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		/* this is just /cgroup/controller */
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+
+	if (!fpath) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = fpath;
+	}
+
+	if (is_child_cgroup(controller, path1, path2)) {
+		// get uid, gid, from '/tasks' file and make up a mode
+		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
+		k = get_cgroup_key(controller, cgroup, "tasks");
+
+	} else
+		k = get_cgroup_key(controller, path1, path2);
+
+	if (!k)
+		return -EINVAL;
+
+	/*
+	 * This being a fuse request, the uid and gid must be valid
+	 * in the caller's namespace.  So we can just check to make
+	 * sure that the caller is root in his uid, and privileged
+	 * over the file's current owner.
+	 */
+	if (!is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_REQD))
+		return -EPERM;
+
+	if (!cgm_chown_file(controller, cgroup, uid, gid))
+		return -EINVAL;
+	return 0;
+}
 
 int cg_mkdir(const char *path, mode_t mode)
 {
@@ -772,6 +851,14 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 	return -EINVAL;
 }
 
+int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
+{
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return cg_chown(path, uid, gid);
+
+	return -EINVAL;
+}
+
 /*
  * cat first does a truncate before doing ops->write.  This doesn't
  * really make sense for cgroups.  So just return 0 always but do
@@ -796,7 +883,7 @@ const struct fuse_operations lxcfs_ops = {
 	.rename = NULL,
 	.link = NULL,
 	.chmod = NULL,
-	.chown = NULL,
+	.chown = lxcfs_chown,
 	.truncate = lxcfs_truncate,
 	.utime = NULL,
 
