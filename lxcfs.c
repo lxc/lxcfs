@@ -433,7 +433,6 @@ static int cg_getattr(const char *path, struct stat *sb)
 		return -EIO;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
-empty:
 		/* this is just /cgroup/controller, return it as a dir */
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
@@ -455,10 +454,14 @@ empty:
 	 * cgroup, or cgdir if fpath is a file */
 
 	if (is_child_cgroup(controller, path1, path2)) {
-		if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL))
-			goto empty;
+		if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL)) {
+			/* this is just /cgroup/controller, return it as a dir */
+			sb->st_mode = S_IFDIR | 00555;
+			sb->st_nlink = 2;
+			return 0;
+		}
 		if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
-			return -EPERM;
+			return -EACCES;
 
 		// get uid, gid, from '/tasks' file and make up a mode
 		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
@@ -478,7 +481,7 @@ empty:
 		if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL))
 			return -ENOENT;
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
-			return -EPERM;
+			return -EACCES;
 
 		sb->st_mode = S_IFREG | k->mode;
 		sb->st_nlink = 1;
@@ -538,7 +541,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	}
 
 	if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
-		return -EPERM;
+		return -EACCES;
 
 	if (!cgm_list_keys(controller, cgroup, &list))
 		// not a valid cgroup
@@ -608,7 +611,8 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
 		if (!fc_may_access(fc, controller, path1, path2, fi->flags))
-			return -EPERM;
+			// should never get here
+			return -EACCES;
 
 		/* TODO - we want to cache this info for read/write */
 		return 0;
@@ -635,7 +639,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		return -EINVAL;
@@ -654,7 +658,8 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		int s;
 
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
-			return -EPERM;
+			// should never get here
+			return -EACCES;
 
 		if (!cgm_get_value(controller, path1, path2, &data))
 			return -EINVAL;
@@ -681,14 +686,14 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	nih_local struct cgm_keys *k = NULL;
 
 	if (offset)
-		return -EIO;
+		return -EINVAL;
 
 	if (!fc)
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		return -EINVAL;
@@ -704,7 +709,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
 		if (!fc_may_access(fc, controller, path1, path2, O_WRONLY))
-			return -EPERM;
+			return -EACCES;
 
 		if (!cgm_set_value(controller, path1, path2, buf))
 			return -EINVAL;
@@ -733,7 +738,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -767,7 +772,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 	 * over the file's current owner.
 	 */
 	if (!is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_REQD))
-		return -EPERM;
+		return -EACCES;
 
 	if (!cgm_chown_file(controller, cgroup, uid, gid))
 		return -EINVAL;
@@ -791,7 +796,7 @@ int cg_chmod(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -847,11 +852,11 @@ int cg_mkdir(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EIO;
+		return -EINVAL;
 
 	get_cgdir_and_path(cgroup, &cgdir, &fpath);
 	if (!fpath)
@@ -860,7 +865,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		path1 = cgdir;
 
 	if (!fc_may_access(fc, controller, path1, NULL, O_RDWR))
-		return -EPERM;
+		return -EACCES;
 
 
 	if (!cgm_create(controller, cgroup, fc->uid, fc->gid))
@@ -884,18 +889,18 @@ static int cg_rmdir(const char *path)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -EINVAL;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EIO;
+		return -EINVAL;
 
 	get_cgdir_and_path(cgroup, &cgdir, &fpath);
 	if (!fpath)
 		return -EINVAL;
 
 	if (!fc_may_access(fc, controller, cgdir, NULL, O_WRONLY))
-		return -EPERM;
+		return -EACCES;
 
 	if (!cgm_remove(controller, cgroup))
 		return -EINVAL;
