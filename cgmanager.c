@@ -319,6 +319,25 @@ bool cgm_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid
 	return true;
 }
 
+bool cgm_chmod_file(const char *controller, const char *file, mode_t mode)
+{
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_chmod_sync(NULL, cgroup_manager, controller, file, "", mode) != 0) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to chmod failed: %s", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
+
 bool cgm_remove(const char *controller, const char *cg)
 {
 	/*

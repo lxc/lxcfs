@@ -689,6 +689,60 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 
 int cg_chmod(const char *path, mode_t mode)
 {
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char * cgdir = NULL;
+	char *fpath = NULL, *path1, *path2;
+	nih_local struct cgm_keys *k = NULL;
+	const char *cgroup;
+	nih_local char *controller = NULL;
+
+	if (!fc)
+		return -EIO;
+
+	if (strcmp(path, "/cgroup") == 0)
+		return -EINVAL;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		/* this is just /cgroup/controller */
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+
+	if (!fpath) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = fpath;
+	}
+
+	if (is_child_cgroup(controller, path1, path2)) {
+		// get uid, gid, from '/tasks' file and make up a mode
+		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
+		k = get_cgroup_key(controller, cgroup, "tasks");
+
+	} else
+		k = get_cgroup_key(controller, path1, path2);
+
+	if (!k)
+		return -EINVAL;
+
+	/*
+	 * This being a fuse request, the uid and gid must be valid
+	 * in the caller's namespace.  So we can just check to make
+	 * sure that the caller is root in his uid, and privileged
+	 * over the file's current owner.
+	 */
+	if (!is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_OPT))
+		return -EPERM;
+
+	if (!cgm_chmod_file(controller, cgroup, mode))
+		return -EINVAL;
+	return 0;
 }
 
 int cg_mkdir(const char *path, mode_t mode)
