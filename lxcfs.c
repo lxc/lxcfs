@@ -494,8 +494,38 @@ static int cg_getattr(const char *path, struct stat *sb)
 	return -ENOENT;
 }
 
+/*
+ * TODO - cache these results in a table for use in opendir, free
+ * in releasedir
+ */
 static int cg_opendir(const char *path, struct fuse_file_info *fi)
 {
+	struct fuse_context *fc = fuse_get_context();
+	nih_local struct cgm_keys **list = NULL;
+	const char *cgroup;
+	nih_local char *controller = NULL;
+	int i;
+	nih_local char *nextcg = NULL;
+
+	if (!fc)
+		return -EIO;
+
+	if (strcmp(path, "/cgroup") == 0)
+		return 0;
+
+	// return list of keys for the controller, and list of child cgroups
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup) {
+		/* this is just /cgroup/controller, return its contents */
+		cgroup = "/";
+	}
+
+	if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
+		return -EACCES;
 	return 0;
 }
 
@@ -514,7 +544,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 
 		if (!list)
 			return -EIO;
-		/* TODO - collect the list of controllers at fuse_init */
+
 		for (i = 0;  list[i]; i++) {
 			if (filler(buf, list[i], NULL, 0) != 0) {
 				return -EIO;
