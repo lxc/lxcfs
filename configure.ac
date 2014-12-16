@@ -22,5 +22,6 @@ PKG_CHECK_MODULES([CGMANAGER], [libcgmanager >= 0.0.0])
 PKG_CHECK_MODULES(FUSE, fuse)
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
+AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //" ])
 
 AC_OUTPUT
