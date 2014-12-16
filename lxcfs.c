@@ -164,6 +164,25 @@ static bool perms_include(int fmode, mode_t req_mode)
 	return ((fmode & r) == r);
 }
 
+static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
+{
+	char *start, *end;
+
+	if (strlen(taskcg) <= strlen(querycg)) {
+		fprintf(stderr, "%s: I was fed bad input\n", __func__);
+		return NULL;
+	}
+
+	if (strcmp(querycg, "/") == 0)
+		start = NIH_MUST( nih_strdup(NULL, taskcg + 1) );
+	else
+		start = NIH_MUST( nih_strdup(NULL, taskcg + strlen(querycg) + 1) );
+	end = strchr(start, '/');
+	if (end)
+		*end = '\0';
+	return start;
+}
+
 /*
  * check whether a fuse context may access a cgroup dir or file
  *
@@ -204,6 +223,67 @@ static bool fc_may_access(struct fuse_context *fc, const char *contrl, const cha
 	}
 
 	return false;
+}
+
+static void stripnewline(char *x)
+{
+	size_t l = strlen(x);
+	if (l && x[l-1] == '\n')
+		x[l-1] = '\0';
+}
+
+/*
+ * If caller is in /a/b/c/d, he may only act on things under cg=/a/b/c/d.
+ * If caller is in /a, he may act on /a/b, but not on /b.
+ * if the answer is false and nextcg is not NULL, then *nextcg will point
+ * to a nih_alloc'd string containing the next cgroup directory under cg
+ */
+static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg, char **nextcg)
+{
+	nih_local char *fnam = NULL;
+	FILE *f;
+	bool answer = false;
+	char *line = NULL;
+	size_t len = 0;
+
+	fnam = NIH_MUST( nih_sprintf(NULL, "/proc/%d/cgroup", pid) );
+	if (!(f = fopen(fnam, "r")))
+		return false;
+
+	while (getline(&line, &len, f) != -1) {
+		char *c1, *c2, *linecmp;
+		if (!line[0])
+			continue;
+		c1 = strchr(line, ':');
+		if (!c1)
+			goto out;
+		c1++;
+		c2 = strchr(c1, ':');
+		if (!c2)
+			goto out;
+		*c2 = '\0';
+		if (strcmp(c1, contrl) != 0)
+			continue;
+		c2++;
+		stripnewline(c2);
+		/*
+		 * callers pass in '/' for root cgroup, otherwise they pass
+		 * in a cgroup without leading '/'
+		 */
+		linecmp = *cg == '/' ? c2 : c2+1;
+		if (strncmp(linecmp, cg, strlen(linecmp)) != 0) {
+			if (nextcg)
+				*nextcg = get_next_cgroup_dir(linecmp, cg);
+			goto out;
+		}
+		answer = true;
+		goto out;
+	}
+
+out:
+	fclose(f);
+	free(line);
+	return answer;
 }
 
 /*
@@ -364,6 +444,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		return -EIO;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
+empty:
 		/* this is just /cgroup/controller, return it as a dir */
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
@@ -385,6 +466,8 @@ static int cg_getattr(const char *path, struct stat *sb)
 	 * cgroup, or cgdir if fpath is a file */
 
 	if (is_child_cgroup(controller, path1, path2)) {
+		if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL))
+			goto empty;
 		if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
 			return -EPERM;
 
@@ -403,6 +486,8 @@ static int cg_getattr(const char *path, struct stat *sb)
 	}
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+		if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL))
+			return -ENOENT;
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
 			return -EPERM;
 
@@ -451,6 +536,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	const char *cgroup;
 	nih_local char *controller = NULL;
 	int i;
+	nih_local char *nextcg = NULL;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
@@ -466,7 +552,19 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		return -EPERM;
 
 	if (!cgm_list_keys(controller, cgroup, &list))
+		// not a valid cgroup
 		return -EINVAL;
+
+	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, &nextcg)) {
+		if (nextcg) {
+			int ret;
+			ret = filler(buf, nextcg,  NULL, 0);
+			if (ret != 0)
+				return -EIO;
+		}
+		return 0;
+	}
+
 	for (i = 0; list[i]; i++) {
 		if (filler(buf, list[i]->name, NULL, 0) != 0) {
 			return -EIO;
