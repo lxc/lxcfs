@@ -610,6 +610,9 @@ static int cg_releasedir(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+/*
+ * TODO - cache info here for read/write, release in cg_release.
+ */
 static int cg_open(const char *path, struct fuse_file_info *fi)
 {
 	nih_local char *controller = NULL;
@@ -643,7 +646,6 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 			// should never get here
 			return -EACCES;
 
-		/* TODO - we want to cache this info for read/write */
 		return 0;
 	}
 
