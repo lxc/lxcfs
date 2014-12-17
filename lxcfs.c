@@ -985,13 +985,10 @@ int cpuset_getrange(const char *c, int *a, int *b)
  * cpusets are in format "1,2-3,4"
  * iow, comma-delimited ranges
  */
-static bool cpuset_in_set(const char *line, const char *cpuset)
+static bool cpu_in_cpuset(int cpu, const char *cpuset)
 {
-	int cpu;
 	const char *c;
 
-	if (sscanf(line, "processor       : %d", &cpu) != 1)
-		return false;
 	for (c = cpuset; c; c = cpuset_nexttok(c)) {
 		int a, b, ret;
 
@@ -1005,6 +1002,15 @@ static bool cpuset_in_set(const char *line, const char *cpuset)
 	}
 
 	return false;
+}
+
+static bool cpuline_in_cpuset(const char *line, const char *cpuset)
+{
+	int cpu;
+
+	if (sscanf(line, "processor       : %d", &cpu) != 1)
+		return false;
+	return cpu_in_cpuset(cpu, cpuset);
 }
 
 /*
@@ -1086,7 +1092,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	while (getline(&line, &linelen, f) != -1) {
 		size_t l;
 		if (is_processor_line(line)) {
-			am_printing = cpuset_in_set(line, cpuset);
+			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
 				curcpu ++;
 				l = snprintf(buf, size, "processor	: %d\n", curcpu);
@@ -1110,7 +1116,55 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 static int proc_stat_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	return 0;
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
+	nih_local char *cpuset = NULL;
+	char *line = NULL;
+	size_t linelen = 0, total_len = 0;
+	int curcpu = 0;
+	FILE *f;
+
+	if (offset)
+		return -EINVAL;
+
+	if (!cg)
+		return 0;
+
+	cpuset = get_cpuset(cg);
+	if (!cpuset)
+		return 0;
+
+	f = fopen("/proc/stat", "r");
+	if (!f)
+		return 0;
+
+	while (getline(&line, &linelen, f) != -1) {
+		size_t l;
+		int cpu;
+		char *c;
+
+		if (sscanf(line, "cpu%d", &cpu) != 1) {
+			/* not a ^cpu line, just print it */
+			l = snprintf(buf, size, "%s", line);
+			buf += l;
+			size -= l;
+			total_len += l;
+			continue;
+		}
+		if (!cpu_in_cpuset(cpu, cpuset))
+			continue;
+		curcpu ++;
+
+		c = strchr(line, ' ');
+		if (!c)
+			continue;
+		l = snprintf(buf, size, "cpu%d %s", curcpu, c);
+		buf += l;
+		size -= l;
+		total_len += l;
+	}
+
+	return total_len;
 }
 
 static int proc_uptime_read(char *buf, size_t size, off_t offset,
