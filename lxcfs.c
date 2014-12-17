@@ -504,7 +504,6 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	nih_local struct cgm_keys **list = NULL;
 	const char *cgroup;
 	nih_local char *controller = NULL;
-	int i;
 	nih_local char *nextcg = NULL;
 
 	if (!fc)
@@ -944,11 +943,87 @@ static int cg_rmdir(const char *path)
 
 static int proc_getattr(const char *path, struct stat *sb)
 {
-	if (strcmp(path, "/proc") != 0)
+	struct timespec now;
+
+	memset(sb, 0, sizeof(struct stat));
+	if (clock_gettime(CLOCK_REALTIME, &now) < 0)
 		return -EINVAL;
-	sb->st_mode = S_IFDIR | 00755;
-	sb->st_nlink = 2;
+	sb->st_uid = sb->st_gid = 0;
+	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
+	if (strcmp(path, "/proc") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+	if (strcmp(path, "/proc/meminfo") == 0 ||
+			strcmp(path, "/proc/cpuinfo") == 0 ||
+			strcmp(path, "/proc/uptime") == 0 ||
+			strcmp(path, "/proc/stat") == 0) {
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
+	return -ENOENT;
+}
+
+static int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+		struct fuse_file_info *fi)
+{
+	if (filler(buf, "cpuinfo", NULL, 0) != 0 ||
+				filler(buf, "meminfo", NULL, 0) != 0 ||
+				filler(buf, "stat", NULL, 0) != 0 ||
+				filler(buf, "uptime", NULL, 0) != 0)
+		return -EINVAL;
 	return 0;
+}
+
+static int proc_open(const char *path, struct fuse_file_info *fi)
+{
+	if (strcmp(path, "/proc/meminfo") == 0 ||
+			strcmp(path, "/proc/cpuinfo") == 0 ||
+			strcmp(path, "/proc/uptime") == 0 ||
+			strcmp(path, "/proc/stat") == 0)
+		return 0;
+	return -ENOENT;
+}
+
+static int proc_meminfo_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int proc_cpuinfo_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int proc_stat_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int proc_uptime_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int proc_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	if (strcmp(path, "/proc/meminfo") == 0)
+		return proc_meminfo_read(path, buf, size, offset, fi);
+	if (strcmp(path, "/proc/cpuinfo") == 0)
+		return proc_cpuinfo_read(path, buf, size, offset, fi);
+	if (strcmp(path, "/proc/uptime") == 0)
+		return proc_uptime_read(path, buf, size, offset, fi);
+	if (strcmp(path, "/proc/stat") == 0)
+		return proc_stat_read(path, buf, size, offset, fi);
+	return -EINVAL;
 }
 
 /*
@@ -967,7 +1042,7 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		return cg_getattr(path, sb);
 	}
-	if (strncmp(path, "/proc", 7) == 0) {
+	if (strncmp(path, "/proc", 5) == 0) {
 		return proc_getattr(path, sb);
 	}
 	return -EINVAL;
@@ -981,7 +1056,9 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		return cg_opendir(path, fi);
 	}
-	return -EINVAL;
+	if (strcmp(path, "/proc") == 0)
+		return 0;
+	return -ENOENT;
 }
 
 static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
@@ -993,9 +1070,10 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 			return -EINVAL;
 		return 0;
 	}
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (strncmp(path, "/cgroup", 7) == 0)
 		return cg_readdir(path, buf, filler, offset, fi);
-	}
+	if (strcmp(path, "/proc") == 0)
+		return proc_readdir(path, buf, filler, offset, fi);
 	return -EINVAL;
 }
 
@@ -1006,14 +1084,17 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		return cg_releasedir(path, fi);
 	}
+	if (strcmp(path, "/proc") == 0)
+		return 0;
 	return -EINVAL;
 }
 
 static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 {
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (strncmp(path, "/cgroup", 7) == 0)
 		return cg_open(path, fi);
-	}
+	if (strncmp(path, "/proc", 5) == 0)
+		return proc_open(path, fi);
 
 	return -EINVAL;
 }
@@ -1021,9 +1102,10 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (strncmp(path, "/cgroup", 7) == 0)
 		return cg_read(path, buf, size, offset, fi);
-	}
+	if (strncmp(path, "/proc", 5) == 0)
+		return proc_read(path, buf, size, offset, fi);
 
 	return -EINVAL;
 }
