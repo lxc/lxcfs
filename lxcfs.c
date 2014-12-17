@@ -941,6 +941,198 @@ static int cg_rmdir(const char *path)
  * FUSE ops for /proc
  */
 
+static int proc_meminfo_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+/*
+ * Read the cpuset.cpus for cg
+ * Return the answer in a nih_alloced string
+ */
+static char *get_cpuset(const char *cg)
+{
+	char *answer;
+
+	if (!cgm_get_value("cpuset", cg, "cpuset.cpus", &answer))
+		return NULL;
+	return answer;
+}
+
+/*
+ * Helper functions for cpuset_in-set
+ */
+char *cpuset_nexttok(const char *c)
+{
+	char *r = strchr(c+1, ',');
+	if (r)
+		return r+1;
+	return NULL;
+}
+
+int cpuset_getrange(const char *c, int *a, int *b)
+{
+	int ret;
+
+	ret = sscanf(c, "%d-%d", a, b);
+	return ret;
+}
+
+/*
+ * cpusets are in format "1,2-3,4"
+ * iow, comma-delimited ranges
+ */
+static bool cpuset_in_set(const char *line, const char *cpuset)
+{
+	int cpu;
+	const char *c;
+
+	if (sscanf(line, "processor       : %d", &cpu) != 1)
+		return false;
+	for (c = cpuset; c; c = cpuset_nexttok(c)) {
+		int a, b, ret;
+
+		ret = cpuset_getrange(c, &a, &b);
+		if (ret == 1 && cpu == a)
+			return true;
+		if (ret != 2) // bad cpuset!
+			return false;
+		if (cpu >= a && cpu <= b)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * check whether this is a '^processor" line in /proc/cpuinfo
+ */
+static bool is_processor_line(const char *line)
+{
+	int cpu;
+
+	if (sscanf(line, "processor       : %d", &cpu) == 1)
+		return true;
+	return false;
+}
+
+static char *get_pid_cgroup(pid_t pid, const char *contrl)
+{
+	nih_local char *fnam = NULL;
+	FILE *f;
+	char *answer = NULL;
+	char *line = NULL;
+	size_t len = 0;
+
+	fnam = NIH_MUST( nih_sprintf(NULL, "/proc/%d/cgroup", pid) );
+	if (!(f = fopen(fnam, "r")))
+		return false;
+
+	while (getline(&line, &len, f) != -1) {
+		char *c1, *c2;
+		if (!line[0])
+			continue;
+		c1 = strchr(line, ':');
+		if (!c1)
+			goto out;
+		c1++;
+		c2 = strchr(c1, ':');
+		if (!c2)
+			goto out;
+		*c2 = '\0';
+		if (strcmp(c1, contrl) != 0)
+			continue;
+		c2++;
+		stripnewline(c2);
+		answer = NIH_MUST( nih_strdup(NULL, c2) );
+		goto out;
+	}
+
+out:
+	fclose(f);
+	free(line);
+	return answer;
+}
+
+static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
+	nih_local char *cpuset = NULL;
+	char *line = NULL;
+	size_t linelen = 0, total_len = 0;
+	bool am_printing = false;
+	int curcpu = -1;
+	FILE *f;
+
+	if (offset)
+		return -EINVAL;
+
+	if (!cg)
+		return 0;
+
+	cpuset = get_cpuset(cg);
+	if (!cpuset)
+		return 0;
+
+	f = fopen("/proc/cpuinfo", "r");
+	if (!f)
+		return 0;
+
+	while (getline(&line, &linelen, f) != -1) {
+		size_t l;
+		if (is_processor_line(line)) {
+			am_printing = cpuset_in_set(line, cpuset);
+			if (am_printing) {
+				curcpu ++;
+				l = snprintf(buf, size, "processor	: %d\n", curcpu);
+				buf += l;
+				size -= l;
+				total_len += l;
+			}
+			continue;
+		}
+		if (am_printing) {
+			l = snprintf(buf, size, "%s", line);
+			buf += l;
+			size -= l;
+			total_len += l;
+		}
+	}
+
+	return total_len;
+}
+
+static int proc_stat_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static int proc_uptime_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	return 0;
+}
+
+static off_t get_procfile_size(const char *which)
+{
+	FILE *f = fopen(which, "r");
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t sz, answer = 0;
+	if (!f)
+		return 0;
+
+	while ((sz = getline(&line, &len, f)) != -1)
+		answer += sz;
+	fclose (f);
+
+	return answer;
+}
+
 static int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
@@ -959,6 +1151,8 @@ static int proc_getattr(const char *path, struct stat *sb)
 			strcmp(path, "/proc/cpuinfo") == 0 ||
 			strcmp(path, "/proc/uptime") == 0 ||
 			strcmp(path, "/proc/stat") == 0) {
+
+		sb->st_size = get_procfile_size(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -988,41 +1182,17 @@ static int proc_open(const char *path, struct fuse_file_info *fi)
 	return -ENOENT;
 }
 
-static int proc_meminfo_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
-{
-	return 0;
-}
-
-static int proc_cpuinfo_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
-{
-	return 0;
-}
-
-static int proc_stat_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
-{
-	return 0;
-}
-
-static int proc_uptime_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
-{
-	return 0;
-}
-
 static int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	if (strcmp(path, "/proc/meminfo") == 0)
-		return proc_meminfo_read(path, buf, size, offset, fi);
+		return proc_meminfo_read(buf, size, offset, fi);
 	if (strcmp(path, "/proc/cpuinfo") == 0)
-		return proc_cpuinfo_read(path, buf, size, offset, fi);
+		return proc_cpuinfo_read(buf, size, offset, fi);
 	if (strcmp(path, "/proc/uptime") == 0)
-		return proc_uptime_read(path, buf, size, offset, fi);
+		return proc_uptime_read(buf, size, offset, fi);
 	if (strcmp(path, "/proc/stat") == 0)
-		return proc_stat_read(path, buf, size, offset, fi);
+		return proc_stat_read(buf, size, offset, fi);
 	return -EINVAL;
 }
 
