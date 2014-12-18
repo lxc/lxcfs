@@ -939,6 +939,69 @@ static int cg_rmdir(const char *path)
 	return 0;
 }
 
+static bool startswith(const char *line, const char *pref)
+{
+	if (strncmp(line, pref, strlen(pref)) == 0)
+		return true;
+	return false;
+}
+
+static void get_mem_cached(char *memstat, unsigned long *v)
+{
+	char *eol;
+
+	*v = 0;
+	while (*memstat) {
+		if (startswith(memstat, "total_cache")) {
+			sscanf(memstat + 11, "%lu", v);
+			*v /= 1024;
+			return;
+		}
+		eol = strchr(memstat, '\n');
+		if (!eol)
+			return;
+		memstat = eol+1;
+	}
+}
+
+static char *get_pid_cgroup(pid_t pid, const char *contrl)
+{
+	nih_local char *fnam = NULL;
+	FILE *f;
+	char *answer = NULL;
+	char *line = NULL;
+	size_t len = 0;
+
+	fnam = NIH_MUST( nih_sprintf(NULL, "/proc/%d/cgroup", pid) );
+	if (!(f = fopen(fnam, "r")))
+		return false;
+
+	while (getline(&line, &len, f) != -1) {
+		char *c1, *c2;
+		if (!line[0])
+			continue;
+		c1 = strchr(line, ':');
+		if (!c1)
+			goto out;
+		c1++;
+		c2 = strchr(c1, ':');
+		if (!c2)
+			goto out;
+		*c2 = '\0';
+		if (strcmp(c1, contrl) != 0)
+			continue;
+		c2++;
+		stripnewline(c2);
+		answer = NIH_MUST( nih_strdup(NULL, c2) );
+		goto out;
+	}
+
+out:
+	fclose(f);
+	free(line);
+	return answer;
+}
+
 /*
  * FUSE ops for /proc
  */
@@ -946,7 +1009,71 @@ static int cg_rmdir(const char *path)
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	return 0;
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char *cg = get_pid_cgroup(fc->pid, "memory");
+	nih_local char *memlimit_str = NULL, *memusage_str = NULL, *memstat_str = NULL;
+	unsigned long memlimit = 0, memusage = 0, cached = 0, hosttotal = 0;
+	char *line = NULL;
+	size_t linelen = 0, total_len = 0;
+	FILE *f;
+
+	if (offset)
+		return -EINVAL;
+
+	if (!cg)
+		return 0;
+
+	if (!cgm_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
+		return 0;
+	if (!cgm_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
+		return 0;
+	if (!cgm_get_value("memory", cg, "memory.stat", &memstat_str))
+		return 0;
+	memlimit = strtoul(memlimit_str, NULL, 10);
+	memusage = strtoul(memusage_str, NULL, 10);
+	memlimit /= 1024;
+	memusage /= 1024;
+	get_mem_cached(memstat_str, &cached);
+
+	f = fopen("/proc/meminfo", "r");
+	if (!f)
+		return 0;
+
+	while (getline(&line, &linelen, f) != -1) {
+		size_t l;
+		char *printme, lbuf[100];
+
+		memset(lbuf, 0, 100);
+		if (startswith(line, "MemTotal:")) {
+			sscanf(line+14, "%lu", &hosttotal);
+			if (hosttotal < memlimit)
+				memlimit = hosttotal;
+			snprintf(lbuf, 100, "MemTotal:       %8lu kB\n", memlimit);
+			printme = lbuf;
+		} else if (startswith(line, "MemFree:")) {
+			snprintf(lbuf, 100, "MemFree:        %8lu kB\n", memlimit - memusage);
+			printme = lbuf;
+		} else if (startswith(line, "MemAvailable:")) {
+			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage);
+			printme = lbuf;
+		} else if (startswith(line, "Buffers:")) {
+			snprintf(lbuf, 100, "Buffers:        %8lu kB\n", 0UL);
+			printme = lbuf;
+		} else if (startswith(line, "Cached:")) {
+			snprintf(lbuf, 100, "Cached:         %8lu kB\n", cached);
+			printme = lbuf;
+		} else if (startswith(line, "SwapCached:")) {
+			snprintf(lbuf, 100, "SwapCached:     %8lu kB\n", 0UL);
+			printme = lbuf;
+		} else
+			printme = line;
+		l = snprintf(buf, size, "%s", printme);
+		buf += l;
+		size -= l;
+		total_len += l;
+	}
+
+	return total_len;
 }
 
 /*
@@ -1023,44 +1150,6 @@ static bool is_processor_line(const char *line)
 	if (sscanf(line, "processor       : %d", &cpu) == 1)
 		return true;
 	return false;
-}
-
-static char *get_pid_cgroup(pid_t pid, const char *contrl)
-{
-	nih_local char *fnam = NULL;
-	FILE *f;
-	char *answer = NULL;
-	char *line = NULL;
-	size_t len = 0;
-
-	fnam = NIH_MUST( nih_sprintf(NULL, "/proc/%d/cgroup", pid) );
-	if (!(f = fopen(fnam, "r")))
-		return false;
-
-	while (getline(&line, &len, f) != -1) {
-		char *c1, *c2;
-		if (!line[0])
-			continue;
-		c1 = strchr(line, ':');
-		if (!c1)
-			goto out;
-		c1++;
-		c2 = strchr(c1, ':');
-		if (!c2)
-			goto out;
-		*c2 = '\0';
-		if (strcmp(c1, contrl) != 0)
-			continue;
-		c2++;
-		stripnewline(c2);
-		answer = NIH_MUST( nih_strdup(NULL, c2) );
-		goto out;
-	}
-
-out:
-	fclose(f);
-	free(line);
-	return answer;
 }
 
 static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
