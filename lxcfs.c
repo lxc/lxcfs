@@ -1256,6 +1256,22 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
+/*
+ * How to guess what to present for uptime?
+ * One thing we could do would be to take the date on the caller's
+ * memory.usage_in_bytes file, which should equal the time of creation
+ * of his cgroup.  However, a task could be in a sub-cgroup of the
+ * container.  The same problem exists if we try to look at the ages
+ * of processes in the caller's cgroup.
+ *
+ * So we'll fork a task that will enter the caller's pidns, mount a
+ * fresh procfs, get the age of /proc/1, and pass that back over a pipe.
+ *
+ * For the second uptime #, we'll do as Stéphane had done, just copy
+ * the number from /proc/uptime.  Not sure how to best emulate 'idle'
+ * time.  Maybe someone can come up with a good algorithm and submit a
+ * patch.  Maybe something based on cpushare info?
+ */
 static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
