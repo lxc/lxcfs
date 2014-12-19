@@ -23,6 +23,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <libgen.h>
+#include <sched.h>
+#include <linux/sched.h>
+#include <sys/mount.h>
+#include <wait.h>
 
 #include <nih/alloc.h>
 #include <nih/string.h>
@@ -1272,10 +1276,144 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
  * time.  Maybe someone can come up with a good algorithm and submit a
  * patch.  Maybe something based on cpushare info?
  */
+int wait_for_pid(pid_t pid)
+{
+	int status, ret;
+
+again:
+	ret = waitpid(pid, &status, 0);
+	if (ret == -1) {
+		if (errno == EINTR)
+			goto again;
+		return -1;
+	}
+	if (ret != pid)
+		goto again;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return -1;
+	return 0;
+}
+
+/* return age of the reaper for $pid, taken from ctime of its procdir */
+static long int get_pid1_time(pid_t pid)
+{
+	char fnam[100];
+	int fd;
+	struct stat sb;
+	int ret;
+	pid_t npid;
+
+	if (unshare(CLONE_NEWNS))
+		return 0;
+
+	sprintf(fnam, "/proc/%d/ns/pid", pid);
+	fd = open(fnam, O_RDONLY);
+	if (fd < 0) {
+		perror("get_pid1_time open of ns/pid");
+		return 0;
+	}
+	if (setns(fd, 0)) {
+		perror("get_pid1_time setns 1");
+		close(fd);
+		return 0;
+	}
+	close(fd);
+	npid = fork();
+	if (npid < 0)
+		return 0;
+
+	if (npid) {
+		// child will do the writing for us
+		wait_for_pid(npid);
+		exit(0);
+	}
+
+	umount2("/proc", MNT_DETACH);
+
+	if (mount("proc", "/proc", "proc", 0, NULL)) {
+		perror("get_pid1_time mount");
+		return 0;
+	}
+	ret = lstat("/proc/1", &sb);
+	if (ret) {
+		perror("get_pid1_time lstat");
+		return 0;
+	}
+	return time(NULL) - sb.st_ctime;
+}
+
+static long int getreaperage(pid_t qpid)
+{
+	int pid, mypipe[2], ret;
+	struct timeval tv;
+	fd_set s;
+	long int mtime, answer = 0;
+
+	if (pipe(mypipe)) {
+		return 0;
+	}
+
+	pid = fork();
+
+	if (!pid) { // child
+		mtime = get_pid1_time(qpid);
+		if (write(mypipe[1], &mtime, sizeof(mtime)) != sizeof(mtime))
+			fprintf(stderr, "Warning: bad write from getreaperage\n");
+		exit(0);
+	}
+
+	close(mypipe[1]);
+	FD_ZERO(&s);
+	FD_SET(mypipe[0], &s);
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	ret = select(mypipe[0]+1, &s, NULL, NULL, &tv);
+	if (ret == -1) {
+		perror("select");
+		goto out;
+	}
+	if (!ret) {
+		printf("timed out\n");
+		goto out;
+	}
+	if (read(mypipe[0], &mtime, sizeof(mtime)) != sizeof(mtime)) {
+		perror("read");
+		goto out;
+	}
+	answer = mtime;
+
+out:
+	wait_for_pid(pid);
+	close(mypipe[0]);
+	return answer;
+}
+
+static long int getprocidle(void)
+{
+	FILE *f = fopen("/proc/uptime", "r");
+	long int age, idle;
+	if (!f)
+		return 0;
+	if (fscanf(f, "%ld %ld", &age, &idle) != 2)
+		return 0;
+	return idle;
+}
+
+/*
+ * We read /proc/uptime and reuse its second field.
+ * For the first field, we use the mtime for the reaper for
+ * the calling pid as returned by getreaperage
+ */
 static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	return 0;
+	struct fuse_context *fc = fuse_get_context();
+	long int reaperage = getreaperage(fc->pid);;
+	long int idletime = getprocidle();
+
+	if (offset)
+		return -EINVAL;
+	return snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
 }
 
 static off_t get_procfile_size(const char *which)
