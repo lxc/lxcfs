@@ -63,7 +63,7 @@ convert_id_to_ns(FILE *idfile, unsigned int in_id)
 			 * uids wrapped around - unexpected as this is a procfile,
 			 * so just bail.
 			 */
-			fprintf(stderr, "pid wrapparound at entry %u %u %u in %s",
+			fprintf(stderr, "pid wrapparound at entry %u %u %u in %s\n",
 				nsuid, hostuid, count, line);
 			return -1;
 		}
