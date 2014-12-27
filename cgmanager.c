@@ -136,7 +136,7 @@ bool cgm_list_keys(const char *controller, const char *cgroup, struct cgm_keys *
 				(CgmanagerListKeysOutputElement ***)keys) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to list_keys failed: %s\n", nerr->message);
+		fprintf(stderr, "call to list_keys (%s:%s) failed: %s\n", controller, cgroup, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -155,7 +155,7 @@ bool cgm_list_children(const char *controller, const char *cgroup, char ***list)
 	if ( cgmanager_list_children_sync(NULL, cgroup_manager, controller, cgroup, list) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to list_children failed: %s\n", nerr->message);
+		fprintf(stderr, "call to list_children (%s:%s) failed: %s\n", controller, cgroup, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -176,7 +176,7 @@ char *cgm_get_pid_cgroup(pid_t pid, const char *controller)
 	if ( cgmanager_get_pid_cgroup_sync(NULL, cgroup_manager, controller, pid, &output) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to get_pid_cgroup failed: %s\n", nerr->message);
+		fprintf(stderr, "call to get_pid_cgroup (%s) failed: %s\n", controller, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return NULL;
@@ -195,7 +195,7 @@ bool cgm_escape_cgroup(void)
 	if ( cgmanager_move_pid_abs_sync(NULL, cgroup_manager, "all", "/", (int32_t) getpid()) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to move_pid_abs failed: %s\n", nerr->message);
+		fprintf(stderr, "call to move_pid_abs (all:/) failed: %s\n", nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -215,7 +215,7 @@ bool cgm_move_pid(const char *controller, const char *cgroup, pid_t pid)
 				(int32_t) pid) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to move_pid failed: %s\n", nerr->message);
+		fprintf(stderr, "call to move_pid (%s:%s, %d) failed: %s\n", controller, cgroup, pid, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -236,7 +236,7 @@ bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
 			file, value) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to get_value failed: %s\n", nerr->message);
+		fprintf(stderr, "call to get_value (%s:%s, %s) failed: %s\n", controller, cgroup, file, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -257,7 +257,7 @@ bool cgm_set_value(const char *controller, const char *cgroup, const char *file,
 			file, value) != 0 ) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to set_value failed: %s\n", nerr->message);
+		fprintf(stderr, "call to set_value (%s:%s, %s, %s) failed: %s\n", controller, cgroup, file, value, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -310,7 +310,7 @@ bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	if ( cgmanager_create_sync(NULL, cgroup_manager, controller, cg, &e) != 0) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to create failed: %s\n", nerr->message);
+		fprintf(stderr, "call to create failed (%s:%s): %s\n", controller, cg, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		exit(1);
@@ -329,7 +329,7 @@ bool cgm_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid
 	if ( cgmanager_chown_sync(NULL, cgroup_manager, controller, cg, uid, gid) != 0) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to chown failed: %s\n", nerr->message);
+		fprintf(stderr, "call to chown (%s:%s, %d, %d) failed: %s\n", controller, cg, uid, gid, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -348,7 +348,7 @@ bool cgm_chmod_file(const char *controller, const char *file, mode_t mode)
 	if ( cgmanager_chmod_sync(NULL, cgroup_manager, controller, file, "", mode) != 0) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to chmod failed: %s\n", nerr->message);
+		fprintf(stderr, "call to chmod (%s:%s, %d) failed: %s\n", controller, file, mode, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
@@ -373,7 +373,7 @@ bool cgm_remove(const char *controller, const char *cg)
 	if ( cgmanager_remove_sync(NULL, cgroup_manager, controller, cg, r, &e) != 0) {
 		NihError *nerr;
 		nerr = nih_error_get();
-		fprintf(stderr, "call to remove failed: %s\n", nerr->message);
+		fprintf(stderr, "call to remove (%s:%s) failed: %s\n", controller, cg, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
 		return false;
