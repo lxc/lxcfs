@@ -23,6 +23,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <libgen.h>
+#include <sched.h>
+#include <linux/sched.h>
+#include <sys/socket.h>
+#include <sys/mount.h>
+#include <wait.h>
 
 #include <nih/alloc.h>
 #include <nih/string.h>
@@ -37,6 +42,24 @@ struct lxcfs_state {
 	char **subsystems;
 };
 #define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
+
+static int wait_for_pid(pid_t pid)
+{
+	int status, ret;
+
+again:
+	ret = waitpid(pid, &status, 0);
+	if (ret == -1) {
+		if (errno == EINTR)
+			goto again;
+		return -1;
+	}
+	if (ret != pid)
+		goto again;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return -1;
+	return 0;
+}
 
 /*
  * Given a open file * to /proc/pid/{u,g}id_map, and an id
@@ -652,6 +675,264 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	return -EINVAL;
 }
 
+static int msgrecv(int sockfd, void *buf, size_t len)
+{
+	struct timeval tv;
+	fd_set rfds;
+
+	FD_ZERO(&rfds);
+	FD_SET(sockfd, &rfds);
+	tv.tv_sec = 2;
+	tv.tv_usec = 0;
+
+	if (select(sockfd+1, &rfds, NULL, NULL, &tv) < 0)
+		return -1;
+	return recv(sockfd, buf, len, MSG_DONTWAIT);
+}
+
+static bool send_creds(int sock, struct ucred *cred, char v)
+{
+	struct msghdr msg = { 0 };
+	struct iovec iov;
+	struct cmsghdr *cmsg;
+	char cmsgbuf[CMSG_SPACE(sizeof(*cred))];
+	char buf[1];
+	buf[0] = 'p';
+
+	if (msgrecv(sock, buf, 1) != 1) {
+		printf("%s: Error getting reply from server over socketpair",
+			  __func__);
+		return false;
+	}
+
+	msg.msg_control = cmsgbuf;
+	msg.msg_controllen = sizeof(cmsgbuf);
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_len = CMSG_LEN(sizeof(struct ucred));
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_CREDENTIALS;
+	memcpy(CMSG_DATA(cmsg), cred, sizeof(*cred));
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+
+	buf[0] = v;
+	iov.iov_base = buf;
+	iov.iov_len = sizeof(buf);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+
+	if (sendmsg(sock, &msg, 0) < 0) {
+		printf("%s: failed at sendmsg: %s", __func__,
+			  strerror(errno));
+		if (errno == 3)
+			return true;
+		return false;
+	}
+
+	return true;
+}
+
+static bool recv_creds(int sock, struct ucred *cred, char *v)
+{
+	struct msghdr msg = { 0 };
+	struct iovec iov;
+	struct cmsghdr *cmsg;
+	char cmsgbuf[CMSG_SPACE(sizeof(*cred))];
+	char buf[1];
+	int ret;
+	int optval = 1;
+
+	*v = '1';
+
+	cred->pid = -1;
+	cred->uid = -1;
+	cred->gid = -1;
+
+	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
+		printf("Failed to set passcred: %s", strerror(errno));
+		return false;
+	}
+	buf[0] = '1';
+	if (write(sock, buf, 1) != 1) {
+		printf("Failed to start write on scm fd: %s", strerror(errno));
+		return false;
+	}
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_control = cmsgbuf;
+	msg.msg_controllen = sizeof(cmsgbuf);
+
+	iov.iov_base = buf;
+	iov.iov_len = sizeof(buf);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+
+	// retry logic is not ideal, especially as we are not
+	// threaded.  Sleep at most 1 second waiting for the client
+	// to send us the scm_cred
+	ret = recvmsg(sock, &msg, 0);
+	if (ret < 0) {
+		printf("Failed to receive scm_cred: %s",
+			  strerror(errno));
+		return false;
+	}
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+
+	if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred)) &&
+			cmsg->cmsg_level == SOL_SOCKET &&
+			cmsg->cmsg_type == SCM_CREDENTIALS) {
+		memcpy(cred, CMSG_DATA(cmsg), sizeof(*cred));
+	}
+	*v = buf[0];
+
+	return true;
+}
+
+
+/*
+ * pidreader - reads pids from a ucred over a socket, then writes the
+ * int value back over the socket
+ */
+static void pidreader(int sock, pid_t tpid)
+{
+	char v = '0';
+	struct ucred cred;
+
+	while (recv_creds(sock, &cred, &v)) {
+		if (v == '1')
+			exit(0);
+		printf("CCC: child received %d\n", cred.pid);
+		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
+			exit(1);
+	}
+	exit(0);
+}
+
+/*
+ * pidreader_wrapper: when you setns into a pidns, you yourself remain
+ * in your old pidns.  Only children which you fork will be in the target
+ * pidns.  So the pidreader_wrapper does the setns, then forks a child to
+ * actually convert pids
+ */
+static void pidreader_wrapper(int sock, pid_t tpid)
+{
+	int newnsfd = -1;
+	char fnam[100];
+	pid_t cpid;
+
+	sprintf(fnam, "/proc/%d/ns/pid", tpid);
+	newnsfd = open(fnam, O_RDONLY);
+	if (newnsfd < 0)
+		exit(1);
+	if (setns(newnsfd, 0) < 0)
+		exit(1);
+	close(newnsfd);
+
+	cpid = fork();
+
+	if (cpid < 0)
+		exit(1);
+	if (!cpid)
+		pidreader(sock, tpid);
+	if (!wait_for_pid(cpid))
+		exit(1);
+	exit(0);
+}
+
+/*
+ * To read cgroup files with a particular pid, we will setns into the child
+ * pidns, open a pipe, fork a child - which will be the first to really be in
+ * the child ns - which does the cgm_get_value and writes the data to the pipe.
+ */
+static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const char *file, char **d)
+{
+	int sock[2] = {-1, -1};
+	nih_local char *tmpdata = NULL;
+	int ret;
+	pid_t qpid, cpid = -1;
+	bool answer = false;
+	char v = '0';
+	struct ucred cred;
+	struct timeval tv;
+	fd_set s;
+
+	if (!cgm_get_value(contrl, cg, file, &tmpdata))
+		return false;
+
+	/*
+	 * Now we read the pids from returned data one by one, pass
+	 * them into a child in the target namespace, read back the
+	 * translated pids, and put them into our to-return data
+	 */
+
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
+		perror("socketpair");
+		exit(1);
+	}
+
+	cpid = fork();
+	if (cpid == -1)
+		goto out;
+
+	if (!cpid) // child
+		pidreader_wrapper(sock[1], tpid);
+
+	char *ptr = tmpdata;
+	cred.uid = 0;
+	cred.gid = 0;
+	while (sscanf(ptr, "%d\n", &qpid) == 1) {
+		cred.pid = qpid;
+		printf("AAA: sending %d\n", qpid);
+		if (!send_creds(sock[0], &cred, v))
+			goto out;
+
+		// read converted results
+		FD_ZERO(&s);
+		FD_SET(sock[0], &s);
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		ret = select(sock[0]+1, &s, NULL, NULL, &tv);
+		if (ret <= 0) {
+			kill(cpid, SIGTERM);
+			goto out;
+		}
+		if (read(sock[0], &qpid, sizeof(qpid)) != sizeof(qpid)) {
+			kill(cpid, SIGTERM);
+			perror("read");
+			goto out;
+		}
+		printf("BBB: read %d\n", qpid);
+		NIH_MUST( nih_strcat_sprintf(d, NULL, "%d\n", qpid) );
+		ptr = strchr(ptr, '\n');
+		if (!ptr)
+			break;
+		ptr++;
+	}
+
+	cred.pid = getpid();
+	v = '1';
+	if (!send_creds(sock[0], &cred, v)) {
+		// failed to ask child to exit
+		kill(cpid, SIGTERM);
+		goto out;
+	}
+
+	answer = true;
+
+out:
+	if (cpid != -1)
+		wait_for_pid(cpid);
+	if (sock[0] != -1) {
+		close(sock[0]);
+		close(sock[1]);
+	}
+	return answer;
+}
+
 static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
@@ -686,13 +967,23 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
 		nih_local char *data = NULL;
-		int s;
+		int s, ret;
 
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
 			// should never get here
 			return -EACCES;
 
-		if (!cgm_get_value(controller, path1, path2, &data))
+		printf("XXX path2 is .%s.\n", path2);
+		if (strcmp(path2, "tasks") == 0 ||
+				strcmp(path2, "/tasks") == 0 ||
+				strcmp(path2, "/cgroup.procs") == 0 ||
+				strcmp(path2, "cgroup.procs") == 0)
+			// special case - we have to translate the pids
+			ret = do_read_pids(fc->pid, controller, path1, path2, &data);
+		else
+			ret = cgm_get_value(controller, path1, path2, &data);
+
+		if (ret == 0)
 			return -EINVAL;
 
 		s = strlen(data);
@@ -1272,10 +1563,127 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
  * time.  Maybe someone can come up with a good algorithm and submit a
  * patch.  Maybe something based on cpushare info?
  */
+
+/* return age of the reaper for $pid, taken from ctime of its procdir */
+static long int get_pid1_time(pid_t pid)
+{
+	char fnam[100];
+	int fd;
+	struct stat sb;
+	int ret;
+	pid_t npid;
+
+	if (unshare(CLONE_NEWNS))
+		return 0;
+
+	sprintf(fnam, "/proc/%d/ns/pid", pid);
+	fd = open(fnam, O_RDONLY);
+	if (fd < 0) {
+		perror("get_pid1_time open of ns/pid");
+		return 0;
+	}
+	if (setns(fd, 0)) {
+		perror("get_pid1_time setns 1");
+		close(fd);
+		return 0;
+	}
+	close(fd);
+	npid = fork();
+	if (npid < 0)
+		return 0;
+
+	if (npid) {
+		// child will do the writing for us
+		wait_for_pid(npid);
+		exit(0);
+	}
+
+	umount2("/proc", MNT_DETACH);
+
+	if (mount("proc", "/proc", "proc", 0, NULL)) {
+		perror("get_pid1_time mount");
+		return 0;
+	}
+	ret = lstat("/proc/1", &sb);
+	if (ret) {
+		perror("get_pid1_time lstat");
+		return 0;
+	}
+	return time(NULL) - sb.st_ctime;
+}
+
+static long int getreaperage(pid_t qpid)
+{
+	int pid, mypipe[2], ret;
+	struct timeval tv;
+	fd_set s;
+	long int mtime, answer = 0;
+
+	if (pipe(mypipe)) {
+		return 0;
+	}
+
+	pid = fork();
+
+	if (!pid) { // child
+		mtime = get_pid1_time(qpid);
+		if (write(mypipe[1], &mtime, sizeof(mtime)) != sizeof(mtime))
+			fprintf(stderr, "Warning: bad write from getreaperage\n");
+		exit(0);
+	}
+
+	close(mypipe[1]);
+	FD_ZERO(&s);
+	FD_SET(mypipe[0], &s);
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	ret = select(mypipe[0]+1, &s, NULL, NULL, &tv);
+	if (ret == -1) {
+		perror("select");
+		goto out;
+	}
+	if (!ret) {
+		printf("timed out\n");
+		goto out;
+	}
+	if (read(mypipe[0], &mtime, sizeof(mtime)) != sizeof(mtime)) {
+		perror("read");
+		goto out;
+	}
+	answer = mtime;
+
+out:
+	wait_for_pid(pid);
+	close(mypipe[0]);
+	return answer;
+}
+
+static long int getprocidle(void)
+{
+	FILE *f = fopen("/proc/uptime", "r");
+	long int age, idle;
+	if (!f)
+		return 0;
+	if (fscanf(f, "%ld %ld", &age, &idle) != 2)
+		return 0;
+	return idle;
+}
+
+/*
+ * We read /proc/uptime and reuse its second field.
+ * For the first field, we use the mtime for the reaper for
+ * the calling pid as returned by getreaperage
+ */
 static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	return 0;
+	struct fuse_context *fc = fuse_get_context();
+	long int reaperage = getreaperage(fc->pid);;
+	long int idletime = getprocidle();
+
+	if (offset)
+		return -EINVAL;
+	return snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
 }
 
 static off_t get_procfile_size(const char *which)
