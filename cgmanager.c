@@ -205,6 +205,26 @@ bool cgm_escape_cgroup(void)
 	return true;
 }
 
+bool cgm_move_pid(const char *controller, const char *cgroup, pid_t pid)
+{
+	if (!cgm_dbus_connect()) {
+		return false;
+	}
+
+	if ( cgmanager_move_pid_sync(NULL, cgroup_manager, controller, cgroup,
+				(int32_t) pid) != 0 ) {
+		NihError *nerr;
+		nerr = nih_error_get();
+		fprintf(stderr, "call to move_pid failed: %s\n", nerr->message);
+		nih_free(nerr);
+		cgm_dbus_disconnect();
+		return false;
+	}
+
+	cgm_dbus_disconnect();
+	return true;
+}
+
 bool cgm_get_value(const char *controller, const char *cgroup, const char *file,
 		char **value)
 {

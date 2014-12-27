@@ -43,6 +43,10 @@ struct lxcfs_state {
 };
 #define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
 
+/*
+ * TODO - return value should denote whether child exited with failure
+ * so callers can return errors.  Esp read/write of tasks and cgroup.procs
+ */
 static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
@@ -794,10 +798,11 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 
 
 /*
- * pidreader - reads pids from a ucred over a socket, then writes the
- * int value back over the socket
+ * pid_to_ns - reads pids from a ucred over a socket, then writes the
+ * int value back over the socket.  This shifts the pid from the
+ * sender's pidns into tpid's pidns.
  */
-static void pidreader(int sock, pid_t tpid)
+static void pid_to_ns(int sock, pid_t tpid)
 {
 	char v = '0';
 	struct ucred cred;
@@ -805,7 +810,6 @@ static void pidreader(int sock, pid_t tpid)
 	while (recv_creds(sock, &cred, &v)) {
 		if (v == '1')
 			exit(0);
-		printf("CCC: child received %d\n", cred.pid);
 		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
 			exit(1);
 	}
@@ -813,12 +817,12 @@ static void pidreader(int sock, pid_t tpid)
 }
 
 /*
- * pidreader_wrapper: when you setns into a pidns, you yourself remain
+ * pid_to_ns_wrapper: when you setns into a pidns, you yourself remain
  * in your old pidns.  Only children which you fork will be in the target
- * pidns.  So the pidreader_wrapper does the setns, then forks a child to
+ * pidns.  So the pid_to_ns_wrapper does the setns, then forks a child to
  * actually convert pids
  */
-static void pidreader_wrapper(int sock, pid_t tpid)
+static void pid_to_ns_wrapper(int sock, pid_t tpid)
 {
 	int newnsfd = -1;
 	char fnam[100];
@@ -837,7 +841,7 @@ static void pidreader_wrapper(int sock, pid_t tpid)
 	if (cpid < 0)
 		exit(1);
 	if (!cpid)
-		pidreader(sock, tpid);
+		pid_to_ns(sock, tpid);
 	if (!wait_for_pid(cpid))
 		exit(1);
 	exit(0);
@@ -879,14 +883,13 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 		goto out;
 
 	if (!cpid) // child
-		pidreader_wrapper(sock[1], tpid);
+		pid_to_ns_wrapper(sock[1], tpid);
 
 	char *ptr = tmpdata;
 	cred.uid = 0;
 	cred.gid = 0;
 	while (sscanf(ptr, "%d\n", &qpid) == 1) {
 		cred.pid = qpid;
-		printf("AAA: sending %d\n", qpid);
 		if (!send_creds(sock[0], &cred, v))
 			goto out;
 
@@ -905,7 +908,6 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 			perror("read");
 			goto out;
 		}
-		printf("BBB: read %d\n", qpid);
 		NIH_MUST( nih_strcat_sprintf(d, NULL, "%d\n", qpid) );
 		ptr = strchr(ptr, '\n');
 		if (!ptr)
@@ -967,25 +969,27 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
 		nih_local char *data = NULL;
-		int s, ret;
+		int s;
+		bool r;
 
 		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
 			// should never get here
 			return -EACCES;
 
-		printf("XXX path2 is .%s.\n", path2);
 		if (strcmp(path2, "tasks") == 0 ||
 				strcmp(path2, "/tasks") == 0 ||
 				strcmp(path2, "/cgroup.procs") == 0 ||
 				strcmp(path2, "cgroup.procs") == 0)
 			// special case - we have to translate the pids
-			ret = do_read_pids(fc->pid, controller, path1, path2, &data);
+			r = do_read_pids(fc->pid, controller, path1, path2, &data);
 		else
-			ret = cgm_get_value(controller, path1, path2, &data);
+			r = cgm_get_value(controller, path1, path2, &data);
 
-		if (ret == 0)
+		if (!r)
 			return -EINVAL;
 
+		if (!data)
+			return 0;
 		s = strlen(data);
 		if (s > size)
 			s = size;
@@ -995,6 +999,116 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 
 	return -EINVAL;
+}
+
+static void pid_from_ns(int sock, pid_t tpid)
+{
+	pid_t vpid;
+	struct ucred cred;
+	char v;
+
+	cred.uid = 0;
+	cred.gid = 0;
+	while (read(sock, &vpid, sizeof(pid_t)) == sizeof(pid_t)) {
+		if (vpid == -1) // done
+			exit(0);
+		v = '0';
+		cred.pid = vpid;
+		if (!send_creds(sock, &cred, v)) {
+			v = '1';
+			cred.pid = getpid();
+			if (!send_creds(sock, &cred, v))
+				exit(1);
+		}
+	}
+	exit(0);
+}
+
+static void pid_from_ns_wrapper(int sock, pid_t tpid)
+{
+	int newnsfd = -1;
+	char fnam[100];
+	pid_t cpid;
+
+	sprintf(fnam, "/proc/%d/ns/pid", tpid);
+	newnsfd = open(fnam, O_RDONLY);
+	if (newnsfd < 0)
+		exit(1);
+	if (setns(newnsfd, 0) < 0)
+		exit(1);
+	close(newnsfd);
+
+	cpid = fork();
+
+	if (cpid < 0)
+		exit(1);
+	if (!cpid)
+		pid_from_ns(sock, tpid);
+	if (!wait_for_pid(cpid))
+		exit(1);
+	exit(0);
+}
+
+static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const char *file, const char *buf)
+{
+	int sock[2] = {-1, -1};
+	pid_t qpid, cpid = -1;
+	bool answer = false, fail = false;
+
+	/*
+	 * write the pids to a socket, have helper in writer's pidns
+	 * call movepid for us
+	 */
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
+		perror("socketpair");
+		exit(1);
+	}
+
+	cpid = fork();
+	if (cpid == -1)
+		goto out;
+
+	if (!cpid) // child
+		pid_from_ns_wrapper(sock[1], tpid);
+
+	const char *ptr = buf;
+	while (sscanf(ptr, "%d", &qpid) == 1) {
+		struct ucred cred;
+		char v;
+
+		if (write(sock[0], &qpid, sizeof(qpid)) != sizeof(qpid)) {
+			kill(cpid, SIGTERM);
+			perror("write");
+			goto out;
+		}
+
+		if (recv_creds(sock[0], &cred, &v) && v == '0') {
+			if (!cgm_move_pid(contrl, cg, cred.pid))
+				fail = true;
+		}
+
+		ptr = strchr(ptr, '\n');
+		if (!ptr)
+			break;
+		ptr++;
+	}
+
+	/* All good, write the value */
+	qpid = -1;
+	if (write(sock[0], &qpid ,sizeof(qpid)) != sizeof(qpid))
+		printf("Warning: failed to ask child to exit\n");
+
+	if (!fail)
+		answer = true;
+
+out:
+	if (cpid != -1)
+		wait_for_pid(cpid);
+	if (sock[0] != -1) {
+		close(sock[0]);
+		close(sock[1]);
+	}
+	return answer;
 }
 
 int cg_write(const char *path, const char *buf, size_t size, off_t offset,
@@ -1030,10 +1144,21 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	}
 
 	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+		bool r;
+
 		if (!fc_may_access(fc, controller, path1, path2, O_WRONLY))
 			return -EACCES;
 
-		if (!cgm_set_value(controller, path1, path2, buf))
+		if (strcmp(path2, "tasks") == 0 ||
+				strcmp(path2, "/tasks") == 0 ||
+				strcmp(path2, "/cgroup.procs") == 0 ||
+				strcmp(path2, "cgroup.procs") == 0)
+			// special case - we have to translate the pids
+			r = do_write_pids(fc->pid, controller, path1, path2, buf);
+		else
+			r = cgm_set_value(controller, path1, path2, buf);
+
+		if (!r)
 			return -EINVAL;
 
 		return size;

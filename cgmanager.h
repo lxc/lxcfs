@@ -18,3 +18,4 @@ bool cgm_chmod_file(const char *controller, const char *file, mode_t mode);
 bool cgm_remove(const char *controller, const char *cg);
 
 bool cgm_escape_cgroup(void);
+bool cgm_move_pid(const char *controller, const char *cgroup, pid_t pid);
