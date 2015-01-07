@@ -694,7 +694,10 @@ static int msgrecv(int sockfd, void *buf, size_t len)
 	return recv(sockfd, buf, len, MSG_DONTWAIT);
 }
 
-static bool send_creds(int sock, struct ucred *cred, char v)
+#define SEND_CREDS_OK 0
+#define SEND_CREDS_NOTSK 1
+#define SEND_CREDS_FAIL 2
+static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 {
 	struct msghdr msg = { 0 };
 	struct iovec iov;
@@ -703,10 +706,12 @@ static bool send_creds(int sock, struct ucred *cred, char v)
 	char buf[1];
 	buf[0] = 'p';
 
-	if (msgrecv(sock, buf, 1) != 1) {
-		printf("%s: Error getting reply from server over socketpair",
-			  __func__);
-		return false;
+	if (pingfirst) {
+		if (msgrecv(sock, buf, 1) != 1) {
+			printf("%s: Error getting reply from server over socketpair",
+				  __func__);
+			return SEND_CREDS_FAIL;
+		}
 	}
 
 	msg.msg_control = cmsgbuf;
@@ -731,11 +736,11 @@ static bool send_creds(int sock, struct ucred *cred, char v)
 		printf("%s: failed at sendmsg: %s", __func__,
 			  strerror(errno));
 		if (errno == 3)
-			return true;
-		return false;
+			return SEND_CREDS_NOTSK;
+		return SEND_CREDS_FAIL;
 	}
 
-	return true;
+	return SEND_CREDS_OK;
 }
 
 static bool recv_creds(int sock, struct ucred *cred, char *v)
@@ -890,7 +895,11 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 	cred.gid = 0;
 	while (sscanf(ptr, "%d\n", &qpid) == 1) {
 		cred.pid = qpid;
-		if (!send_creds(sock[0], &cred, v))
+		ret = send_creds(sock[0], &cred, v, true);
+
+		if (ret == SEND_CREDS_NOTSK)
+			goto next;
+		if (ret == SEND_CREDS_FAIL)
 			goto out;
 
 		// read converted results
@@ -909,6 +918,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 			goto out;
 		}
 		NIH_MUST( nih_strcat_sprintf(d, NULL, "%d\n", qpid) );
+next:
 		ptr = strchr(ptr, '\n');
 		if (!ptr)
 			break;
@@ -917,7 +927,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 
 	cred.pid = getpid();
 	v = '1';
-	if (!send_creds(sock[0], &cred, v)) {
+	if (send_creds(sock[0], &cred, v, true) != SEND_CREDS_OK) {
 		// failed to ask child to exit
 		kill(cpid, SIGTERM);
 		goto out;
@@ -1011,13 +1021,13 @@ static void pid_from_ns(int sock, pid_t tpid)
 	cred.gid = 0;
 	while (read(sock, &vpid, sizeof(pid_t)) == sizeof(pid_t)) {
 		if (vpid == -1) // done
-			exit(0);
+			break;
 		v = '0';
 		cred.pid = vpid;
-		if (!send_creds(sock, &cred, v)) {
+		if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK) {
 			v = '1';
 			cred.pid = getpid();
-			if (!send_creds(sock, &cred, v))
+			if (send_creds(sock, &cred, v, false) != SEND_CREDS_OK)
 				exit(1);
 		}
 	}
@@ -1082,9 +1092,11 @@ static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const 
 			goto out;
 		}
 
-		if (recv_creds(sock[0], &cred, &v) && v == '0') {
-			if (!cgm_move_pid(contrl, cg, cred.pid))
-				fail = true;
+		if (recv_creds(sock[0], &cred, &v)) {
+			if (v == '0') {
+				if (!cgm_move_pid(contrl, cg, cred.pid))
+					fail = true;
+			}
 		}
 
 		ptr = strchr(ptr, '\n');
