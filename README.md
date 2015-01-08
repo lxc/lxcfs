@@ -21,8 +21,8 @@ The recommended command to run lxcfs is:
  - -d can also be passed in order to debug lxcfs
 
 In order to use lxcfs with systemd-based containers, copy the hook.lxcfs
-file from this tree to /usr/share/lxc/hooks/lxcfs, then add the following
-two lines to your container configuration:
+file from this tree to /usr/share/lxc/hooks/lxcfs, make sure it is executable,
+then add the following two lines to your container configuration:
 
 lxc.kmsg = 0
 lxc.hook.mount = /usr/share/lxc/hooks/lxcfs
