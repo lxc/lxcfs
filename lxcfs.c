@@ -1132,6 +1132,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	nih_local char * cgdir = NULL;
 	nih_local struct cgm_keys *k = NULL;
+	nih_local char *localbuf = NULL;
 
 	if (offset)
 		return -EINVAL;
@@ -1139,6 +1140,9 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	if (!fc)
 		return -EIO;
 
+	localbuf = NIH_MUST( nih_alloc(NULL, size+1) );
+	localbuf[size] = '\0';
+	memcpy(localbuf, buf, size);
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
 		return -EINVAL;
@@ -1166,9 +1170,9 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 				strcmp(path2, "/cgroup.procs") == 0 ||
 				strcmp(path2, "cgroup.procs") == 0)
 			// special case - we have to translate the pids
-			r = do_write_pids(fc->pid, controller, path1, path2, buf);
+			r = do_write_pids(fc->pid, controller, path1, path2, localbuf);
 		else
-			r = cgm_set_value(controller, path1, path2, buf);
+			r = cgm_set_value(controller, path1, path2, localbuf);
 
 		if (!r)
 			return -EINVAL;
