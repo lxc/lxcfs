@@ -1,0 +1,58 @@
+#!/bin/bash
+
+if [ -d /var/lib/lxcfs/proc/ ]; then
+    for entry in /var/lib/lxcfs/proc/*; do
+        mount --bind $entry ${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)
+    done
+fi
+
+mount -t tmpfs none ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/ -o size=4k,mode=755
+if [ -d /sys/fs/cgroup/cgmanager.lower ]; then
+    mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+    mount --bind /sys/fs/cgroup/cgmanager.lower \
+        ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+elif [ -d /sys/fs/cgroup/cgmanager ]; then
+    mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+    mount --bind /sys/fs/cgroup/cgmanager \
+        ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+fi
+
+if [ -d /var/lib/lxcfs/cgroup ]; then
+    for entry in /var/lib/lxcfs/cgroup/*; do
+        DEST=$(basename $entry)
+        if [ "$DEST" = "name=systemd" ]; then
+            DEST="systemd"
+        fi
+
+        mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+        mount --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+    done
+
+    mkdir -p ${LXC_ROOTFS_MOUNT}/var/lib/lxcfs/
+    mount --bind /var/lib/lxcfs ${LXC_ROOTFS_MOUNT}/var/lib/lxcfs/
+fi
+
+# FIXME: autodev hack
+if ! mountpoint ${LXC_ROOTFS_MOUNT}/dev; then
+    mkdir -p ${LXC_ROOTFS_MOUNT}/.dev
+    mount -t tmpfs none ${LXC_ROOTFS_MOUNT}/.dev -o size=4k,mode=755
+
+    for path in ${LXC_ROOTFS_MOUNT}/dev/*; do
+        DEST="${LXC_ROOTFS_MOUNT}/.dev/$(basename $path)"
+
+        if grep -q $path /proc/mounts; then
+            if [ -d $path ]; then
+                mkdir $DEST
+            else
+                touch $DEST
+            fi
+
+            mount --move $path $DEST
+        else
+            mv $path $DEST
+        fi
+    done
+
+    mount --move ${LXC_ROOTFS_MOUNT}/.dev/ ${LXC_ROOTFS_MOUNT}/dev/
+    rmdir ${LXC_ROOTFS_MOUNT}/.dev/
+fi
