@@ -708,7 +708,7 @@ static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 
 	if (pingfirst) {
 		if (msgrecv(sock, buf, 1) != 1) {
-			printf("%s: Error getting reply from server over socketpair",
+			fprintf(stderr, "%s: Error getting reply from server over socketpair\n",
 				  __func__);
 			return SEND_CREDS_FAIL;
 		}
@@ -733,7 +733,7 @@ static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 	msg.msg_iovlen = 1;
 
 	if (sendmsg(sock, &msg, 0) < 0) {
-		printf("%s: failed at sendmsg: %s", __func__,
+		fprintf(stderr, "%s: failed at sendmsg: %s\n", __func__,
 			  strerror(errno));
 		if (errno == 3)
 			return SEND_CREDS_NOTSK;
@@ -760,12 +760,12 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	cred->gid = -1;
 
 	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
-		printf("Failed to set passcred: %s", strerror(errno));
+		fprintf(stderr, "Failed to set passcred: %s\n", strerror(errno));
 		return false;
 	}
 	buf[0] = '1';
 	if (write(sock, buf, 1) != 1) {
-		printf("Failed to start write on scm fd: %s", strerror(errno));
+		fprintf(stderr, "Failed to start write on scm fd: %s\n", strerror(errno));
 		return false;
 	}
 
@@ -784,7 +784,7 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	// to send us the scm_cred
 	ret = recvmsg(sock, &msg, 0);
 	if (ret < 0) {
-		printf("Failed to receive scm_cred: %s",
+		fprintf(stderr, "Failed to receive scm_cred: %s\n",
 			  strerror(errno));
 		return false;
 	}
@@ -1108,7 +1108,7 @@ static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const 
 	/* All good, write the value */
 	qpid = -1;
 	if (write(sock[0], &qpid ,sizeof(qpid)) != sizeof(qpid))
-		printf("Warning: failed to ask child to exit\n");
+		fprintf(stderr, "Warning: failed to ask child to exit\n");
 
 	if (!fail)
 		answer = true;
@@ -1780,7 +1780,7 @@ static long int getreaperage(pid_t qpid)
 		goto out;
 	}
 	if (!ret) {
-		printf("timed out\n");
+		fprintf(stderr, "timed out\n");
 		goto out;
 	}
 	if (read(mypipe[0], &mtime, sizeof(mtime)) != sizeof(mtime)) {
