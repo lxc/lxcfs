@@ -6,7 +6,8 @@ AC_INIT([lxcfs], [0.01], [lxc-devel@lists.linuxcontainers.org])
 AC_GNU_SOURCE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([
-	Makefile ])
+	Makefile
+	tests/Makefile ])
 
 AM_INIT_AUTOMAKE
 

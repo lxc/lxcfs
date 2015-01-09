@@ -1,5 +1,8 @@
 ACLOCAL_AMFLAGS = -I m4
 
+SUBDIRS = tests
+DIST_SUBDIRS = tests
+
 VERSION_CURRENT  = 0
 VERSION_REVISION = 0
 VERSION_AGE      = 0
@@ -10,7 +13,10 @@ AM_LDFLAGS = $(DBUS_LIBS) $(NIH_LIBS) $(NIH_DBUS_LIBS) $(CGMANAGER_LIBS) $(FUSE_
 
 bin_PROGRAMS = lxcfs
 
-lxcfs_SOURCES = lxcfs.c cgmanager.c
+lxcfs_SOURCES = lxcfs.c cgmanager.c cgmanager.h
+
+EXTRA_DIST = \
+	lxcfs.man.add
 
 if HAVE_HELP2MAN
 man_MANS = lxcfs.1
