@@ -1,0 +1,45 @@
+#!/bin/sh -eu
+
+PASS=0
+
+cleanup() {
+    [ "$PASS" = "1" ] || echo FAIL
+    exit 1
+}
+
+trap cleanup EXIT HUP INT TERM
+
+if ! mountpoint -q /var/lib/lxcfs; then
+    echo "lxcfs isn't mounted on /var/lib/lxcfs"
+    exit 1
+fi
+
+# Initial cleanup
+cgm remove freezer lxcfs_test_cgroup/sub >/dev/null 2>&1 || true
+cgm remove all lxcfs_test_cgroup >/dev/null 2>&1 || true
+
+# Check that the fs is readable
+find /var/lib/lxcfs/cgroup/ >/dev/null
+
+# Do some fs checks
+cgm create all lxcfs_test_cgroup
+cgm removeonempty all lxcfs_test_cgroup
+cgm movepid all lxcfs_test_cgroup $$
+
+CGPATH=$(cgm getpidcgroupabs freezer $$)
+
+echo $((1024*1024)) > \
+    /var/lib/lxcfs/cgroup/memory/$CGPATH/memory.limit_in_bytes
+echo 0 > \
+    /var/lib/lxcfs/cgroup/cpuset/$CGPATH/cpuset.cpus
+
+[ "$(cgm getvalue memory $CGPATH memory.limit_in_bytes)" = "$((1024*1024))" ]
+[ "$(cgm getvalue cpuset $CGPATH cpuset.cpus)" = "0" ]
+
+mkdir /var/lib/lxcfs/cgroup/freezer/$CGPATH/sub
+echo $$ > /var/lib/lxcfs/cgroup/freezer/$CGPATH/sub/tasks
+
+[ "$(cgm getpidcgroupabs freezer $$)" = "$CGPATH/sub" ]
+
+PASS=1
+echo PASS
