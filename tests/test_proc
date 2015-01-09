@@ -1,0 +1,43 @@
+#!/bin/sh -eu
+
+PASS=0
+
+cleanup() {
+    [ "$PASS" = "1" ] || echo FAIL
+    exit 1
+}
+
+trap cleanup EXIT HUP INT TERM
+
+if ! mountpoint -q /var/lib/lxcfs; then
+    echo "lxcfs isn't mounted on /var/lib/lxcfs"
+    exit 1
+fi
+
+cgm remove all lxcfs_test_proc || true
+cgm create all lxcfs_test_proc
+cgm removeonempty all lxcfs_test_proc
+cgm movepid all lxcfs_test_proc $$
+
+cgm setvalue memory $(cgm getpidcgroupabs memory $$) \
+    memory.limit_in_bytes $((1024*1024))
+cgm setvalue cpuset $(cgm getpidcgroupabs cpuset $$) \
+    cpuset.cpus 0
+
+# Test cpuinfo
+[ "$(grep "^processor" /var/lib/lxcfs/proc/cpuinfo | wc -l)" = "1" ]
+grep -q "^processor.*0$" /var/lib/lxcfs/proc/cpuinfo
+
+# Test stat
+[ "$(grep "^cpu" /var/lib/lxcfs/proc/stat | wc -l)" = "1" ]
+
+# Test meminfo
+grep -q "^MemTotal.*1024 kB$" /var/lib/lxcfs/proc/meminfo
+
+# Test uptime
+if [ -e /proc/self/ns/user ]; then
+    [ "$(lxc-unshare -s 'USER|PID' cat /var/lib/lxcfs/proc/uptime)" = "0 0" ]
+fi
+
+PASS=1
+echo PASS
