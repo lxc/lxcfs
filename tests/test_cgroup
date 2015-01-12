@@ -3,8 +3,7 @@
 PASS=0
 
 cleanup() {
-    [ "$PASS" = "1" ] || echo FAIL
-    exit 1
+    [ "$PASS" = "1" ] || (echo FAIL && exit 1)
 }
 
 trap cleanup EXIT HUP INT TERM
