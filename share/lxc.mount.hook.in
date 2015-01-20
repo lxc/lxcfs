@@ -1,0 +1,33 @@
+#!/bin/sh -eu
+if [ -d @LXCFSTARGETDIR@/proc/ ]; then
+    for entry in @LXCFSTARGETDIR@/proc/*; do
+        mount --bind $entry ${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)
+    done
+fi
+
+mount -t tmpfs none ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/ -o size=4k,mode=755
+if [ -d /sys/fs/cgroup/cgmanager.lower ]; then
+    mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+    mount --bind /sys/fs/cgroup/cgmanager.lower \
+        ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+elif [ -d /sys/fs/cgroup/cgmanager ]; then
+    mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+    mount --bind /sys/fs/cgroup/cgmanager \
+        ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
+fi
+
+if [ -d @LXCFSTARGETDIR@/cgroup ]; then
+    for entry in @LXCFSTARGETDIR@/cgroup/*; do
+        DEST=$(basename $entry)
+        if [ "$DEST" = "name=systemd" ]; then
+            DEST="systemd"
+        fi
+
+        mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+        mount --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+    done
+
+    if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
+        mount --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
+    fi
+fi

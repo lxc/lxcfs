@@ -1,7 +1,7 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = tests
-DIST_SUBDIRS = tests
+SUBDIRS = tests share
+DIST_SUBDIRS = tests share
 
 VERSION_CURRENT  = 0
 VERSION_REVISION = 0

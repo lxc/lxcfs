@@ -1,0 +1,1 @@
+lxc.hook.mount = @LXCFSSHAREDIR@/lxc.mount.hook
