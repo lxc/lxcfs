@@ -1717,6 +1717,11 @@ static long int get_pid1_time(pid_t pid)
 	if (unshare(CLONE_NEWNS))
 		return 0;
 
+	if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL)) {
+		perror("rslave mount failed");
+		return 0;
+	}
+
 	sprintf(fnam, "/proc/%d/ns/pid", pid);
 	fd = open(fnam, O_RDONLY);
 	if (fd < 0) {
