@@ -2136,11 +2136,6 @@ int main(int argc, char *argv[])
 	if (!cgm_get_controllers(&d->subsystems))
 		return -1;
 
-	if (mount(NULL, "/", NULL, MS_REC|MS_SLAVE, 0) < 0) {
-		perror("Failed to re-mount / non-shared");
-		return -1;
-	}
-
 	ret = fuse_main(argc, argv, &lxcfs_ops, d);
 
 	return ret;
