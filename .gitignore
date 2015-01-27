@@ -23,3 +23,5 @@ m4/
 missing
 stamp-h1
 lxcfs.1
+share/00-lxcfs.conf
+share/lxc.mount.hook
