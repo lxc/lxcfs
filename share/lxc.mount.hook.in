@@ -4,20 +4,20 @@
 if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     for entry in @LXCFSTARGETDIR@/proc/*; do
         [ -e "${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)" ] || continue
-        mount --bind $entry ${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)
+        mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)
     done
 fi
 
 # /sys/fs/cgroup files
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
-    mount -t tmpfs none ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/ -o size=4k,mode=755
+    mount -n -t tmpfs none ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/ -o size=4k,mode=755
     if [ -d /sys/fs/cgroup/cgmanager.lower ]; then
         mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-        mount --bind /sys/fs/cgroup/cgmanager.lower \
+        mount -n --bind /sys/fs/cgroup/cgmanager.lower \
             ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
     elif [ -d /sys/fs/cgroup/cgmanager ]; then
         mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-        mount --bind /sys/fs/cgroup/cgmanager \
+        mount -n --bind /sys/fs/cgroup/cgmanager \
             ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
     fi
 
@@ -29,11 +29,11 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
             fi
 
             mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
-            mount --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+            mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
         done
 
         if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
-            mount --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
+            mount -n --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
         fi
     fi
 fi
