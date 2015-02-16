@@ -1642,7 +1642,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	nih_local char *cpuset = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0;
-	int curcpu = 0;
+	int curcpu = -1; /* cpu numbering starts at 0 */
 	FILE *f;
 
 	if (offset)
@@ -1662,16 +1662,21 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	while (getline(&line, &linelen, f) != -1) {
 		size_t l;
 		int cpu;
+        char cpu_char[10]; /* That's a lot of cores */
 		char *c;
 
-		if (sscanf(line, "cpu%d", &cpu) != 1) {
-			/* not a ^cpu line, just print it */
+		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
+			/* not a ^cpuN line containing a number N, just print it */
 			l = snprintf(buf, size, "%s", line);
 			buf += l;
 			size -= l;
 			total_len += l;
 			continue;
 		}
+
+        if (sscanf(cpu_char, "%d", &cpu) != 1)
+                continue;
+
 		if (!cpu_in_cpuset(cpu, cpuset))
 			continue;
 		curcpu ++;
