@@ -1505,6 +1505,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		total_len += l;
 	}
 
+	fclose(f);
+	free(line);
 	return total_len;
 }
 
@@ -1631,6 +1633,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		}
 	}
 
+	fclose(f);
+	free(line);
 	return total_len;
 }
 
@@ -1685,6 +1689,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		total_len += l;
 	}
 
+	fclose(f);
+	free(line);
 	return total_len;
 }
 
@@ -1808,9 +1814,12 @@ static long int getprocidle(void)
 {
 	FILE *f = fopen("/proc/uptime", "r");
 	long int age, idle;
+	int ret;
 	if (!f)
 		return 0;
-	if (fscanf(f, "%ld %ld", &age, &idle) != 2)
+	ret = fscanf(f, "%ld %ld", &age, &idle);
+	fclose(f);
+	if (ret != 2)
 		return 0;
 	return idle;
 }
@@ -1844,6 +1853,7 @@ static off_t get_procfile_size(const char *which)
 	while ((sz = getline(&line, &len, f)) != -1)
 		answer += sz;
 	fclose (f);
+	free(line);
 
 	return answer;
 }
