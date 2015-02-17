@@ -28,7 +28,7 @@ cgm setvalue cpuset $(cgm getpidcgroupabs cpuset $$) \
 grep -q "^processor.*0$" /var/lib/lxcfs/proc/cpuinfo
 
 # Test stat
-[ "$(grep "^cpu" /var/lib/lxcfs/proc/stat | wc -l)" = "1" ]
+[ "$(grep "^cpu" /var/lib/lxcfs/proc/stat | wc -l)" = "2" ]
 
 # Test meminfo
 grep -q "^MemTotal.*1024 kB$" /var/lib/lxcfs/proc/meminfo
