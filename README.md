@@ -27,6 +27,8 @@ the lxc.mount.hook file (once built) from this tree to
 /usr/share/lxc/hooks/lxcfs, make sure it is executable, then add the
 following two lines to your container configuration:
 
+```
 lxc.autodev = 1
 lxc.kmsg = 0
 lxc.include = /usr/share/lxcfs/00-lxc.conf
+```
