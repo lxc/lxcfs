@@ -1396,6 +1396,29 @@ static void get_mem_cached(char *memstat, unsigned long *v)
 	}
 }
 
+static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *iotype, unsigned long *v)
+{   
+	char *eol;
+	char key[32];
+	
+	memset(key, 0, 32);
+	snprintf(key, 32, "%u:%u %s", major, minor, iotype);
+	
+	size_t len = strlen(key);
+	*v = 0;
+
+	while (*str) {
+		if (startswith(str, key)) {
+ 			sscanf(str + len, "%lu", v);
+ 			return;
+ 		}
+ 		eol = strchr(str, '\n');
+		if (!eol)
+ 			return;
+		str = eol+1;
+	}
+}
+
 static char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
 	nih_local char *fnam = NULL;
@@ -1845,6 +1868,101 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	return snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
 }
 
+static int proc_diskstats_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	char dev_name[72];
+	struct fuse_context *fc = fuse_get_context();
+	nih_local char *cg = get_pid_cgroup(fc->pid, "blkio");
+	nih_local char *io_serviced_str = NULL, *io_merged_str = NULL, *io_service_bytes_str = NULL,
+			*io_wait_time_str = NULL, *io_service_time_str = NULL;
+	unsigned long read = 0, write = 0;
+	unsigned long read_merged = 0, write_merged = 0;
+	unsigned long read_sectors = 0, write_sectors = 0;
+	unsigned long read_ticks = 0, write_ticks = 0;
+	unsigned long ios_pgr = 0, tot_ticks = 0, rq_ticks = 0;
+	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
+	char *line = NULL;
+	size_t linelen = 0, total_len = 0;
+	unsigned int major = 0, minor = 0;
+	int i = 0;
+	FILE *f;
+
+	if (offset)
+		return -EINVAL;
+
+	if (!cg)
+		return 0;
+
+	if (!cgm_get_value("blkio", cg, "blkio.io_serviced", &io_serviced_str))
+		return 0;
+	if (!cgm_get_value("blkio", cg, "blkio.io_merged", &io_merged_str))
+		return 0;
+	if (!cgm_get_value("blkio", cg, "blkio.io_service_bytes", &io_service_bytes_str))
+		return 0;
+	if (!cgm_get_value("blkio", cg, "blkio.io_wait_time", &io_wait_time_str))
+		return 0;
+	if (!cgm_get_value("blkio", cg, "blkio.io_service_time", &io_service_time_str))
+		return 0;
+
+
+	f = fopen("/proc/diskstats", "r");
+	if (!f)
+		return 0;
+
+	while (getline(&line, &linelen, f) != -1) {
+		size_t l;
+		char *printme, lbuf[256];
+
+		i = sscanf(line, "%u %u %s", &major, &minor, dev_name);
+		if(i == 3){
+			get_blkio_io_value(io_serviced_str, major, minor, "Read", &read);
+			get_blkio_io_value(io_serviced_str, major, minor, "Write", &write);
+			get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
+			get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
+			get_blkio_io_value(io_service_bytes_str, major, minor, "Read", &read_sectors);
+			read_sectors = read_sectors/512;
+			get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
+			write_sectors = write_sectors/512;
+			
+			get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
+			rd_svctm = rd_svctm/1000000;
+			get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
+			rd_wait = rd_wait/1000000;
+			read_ticks = rd_svctm + rd_wait;
+
+			get_blkio_io_value(io_service_time_str, major, minor, "Write", &wr_svctm);
+			wr_svctm =  wr_svctm/1000000;
+			get_blkio_io_value(io_wait_time_str, major, minor, "Write", &wr_wait);
+			wr_wait =  wr_wait/1000000;
+			write_ticks = wr_svctm + wr_wait;
+
+			get_blkio_io_value(io_service_time_str, major, minor, "Total", &tot_ticks);
+			tot_ticks =  tot_ticks/1000000;
+		}else{
+			continue;
+		}
+
+		memset(lbuf, 0, 256);
+		if (read || write || read_merged || write_merged || read_sectors || write_sectors || read_ticks || write_ticks) {
+			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", 
+				major, minor, dev_name, read, read_merged, read_sectors, read_ticks,
+				write, write_merged, write_sectors, write_ticks, ios_pgr, tot_ticks, rq_ticks);
+			printme = lbuf;
+		} else
+			continue;
+
+		l = snprintf(buf, size, "%s", printme);
+		buf += l;
+		size -= l;
+		total_len += l;
+	}
+
+	fclose(f);
+	free(line);
+	return total_len;
+}
+
 static off_t get_procfile_size(const char *which)
 {
 	FILE *f = fopen(which, "r");
@@ -1879,8 +1997,8 @@ static int proc_getattr(const char *path, struct stat *sb)
 	if (strcmp(path, "/proc/meminfo") == 0 ||
 			strcmp(path, "/proc/cpuinfo") == 0 ||
 			strcmp(path, "/proc/uptime") == 0 ||
-			strcmp(path, "/proc/stat") == 0) {
-
+			strcmp(path, "/proc/stat") == 0 ||
+			strcmp(path, "/proc/diskstats") == 0) {
 		sb->st_size = get_procfile_size(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -1896,7 +2014,8 @@ static int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 	if (filler(buf, "cpuinfo", NULL, 0) != 0 ||
 				filler(buf, "meminfo", NULL, 0) != 0 ||
 				filler(buf, "stat", NULL, 0) != 0 ||
-				filler(buf, "uptime", NULL, 0) != 0)
+				filler(buf, "uptime", NULL, 0) != 0 ||
+				filler(buf, "diskstats", NULL, 0) != 0)
 		return -EINVAL;
 	return 0;
 }
@@ -1906,7 +2025,8 @@ static int proc_open(const char *path, struct fuse_file_info *fi)
 	if (strcmp(path, "/proc/meminfo") == 0 ||
 			strcmp(path, "/proc/cpuinfo") == 0 ||
 			strcmp(path, "/proc/uptime") == 0 ||
-			strcmp(path, "/proc/stat") == 0)
+			strcmp(path, "/proc/stat") == 0 || 
+			strcmp(path, "/proc/diskstats") == 0)
 		return 0;
 	return -ENOENT;
 }
@@ -1922,6 +2042,8 @@ static int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		return proc_uptime_read(buf, size, offset, fi);
 	if (strcmp(path, "/proc/stat") == 0)
 		return proc_stat_read(buf, size, offset, fi);
+	if (strcmp(path, "/proc/diskstats") == 0)
+		return proc_diskstats_read(buf, size, offset, fi);
 	return -EINVAL;
 }
 
