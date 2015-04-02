@@ -25,6 +25,11 @@ lxcfs.1: lxcfs lxcfs.man.add
 	$(HELP2MAN) -n "Set up cgroup fs for containers" --no-discard-stderr -s 1 -I lxcfs.man.add -N ./lxcfs > lxcfs.1
 endif
 
+TEST_READ: tests/test-read.c
+	$(CC) -o tests/test-read tests/test-read.c
+
+tests: TEST_READ
+
 distclean:
 	rm -rf .deps/ \
 		INSTALL \
