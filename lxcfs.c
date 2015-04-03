@@ -689,7 +689,7 @@ static int msgrecv(int sockfd, void *buf, size_t len)
 	tv.tv_sec = 2;
 	tv.tv_usec = 0;
 
-	if (select(sockfd+1, &rfds, NULL, NULL, &tv) < 0)
+	if (select(sockfd+1, &rfds, NULL, NULL, &tv) <= 0)
 		return -1;
 	return recv(sockfd, buf, len, MSG_DONTWAIT);
 }
@@ -785,7 +785,7 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	FD_SET(sock, &rfds);
 	tv.tv_sec = 2;
 	tv.tv_usec = 0;
-	if (select(sock+1, &rfds, NULL, NULL, &tv) < 0) {
+	if (select(sock+1, &rfds, NULL, NULL, &tv) <= 0) {
 		fprintf(stderr, "Failed to select for scm_cred: %s\n",
 			  strerror(errno));
 		return false;
@@ -837,9 +837,12 @@ static void pid_to_ns(int sock, pid_t tpid)
  */
 static void pid_to_ns_wrapper(int sock, pid_t tpid)
 {
-	int newnsfd = -1;
+	int newnsfd = -1, ret, cpipe[2];
 	char fnam[100];
 	pid_t cpid;
+	struct timeval tv;
+	fd_set s;
+	char v;
 
 	sprintf(fnam, "/proc/%d/ns/pid", tpid);
 	newnsfd = open(fnam, O_RDONLY);
@@ -849,15 +852,46 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 		exit(1);
 	close(newnsfd);
 
-	cpid = fork();
+	if (pipe(cpipe) < 0)
+		exit(1);
 
+loop:
+	cpid = fork();
 	if (cpid < 0)
 		exit(1);
-	if (!cpid)
+
+	if (!cpid) {
+		char b = '1';
+		close(cpipe[0]);
+		if (write(cpipe[1], &b, sizeof(char)) < 0) {
+			fprintf(stderr, "%s (child): erorr on write: %s\n",
+				__func__, strerror(errno));
+		}
+		close(cpipe[1]);
 		pid_to_ns(sock, tpid);
+	}
+	// give the child 1 second to be done forking and
+	// write it's ack
+	FD_ZERO(&s);
+	FD_SET(cpipe[0], &s);
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
+	if (ret <= 0)
+		goto again;
+	ret = read(cpipe[0], &v, 1);
+	if (ret != sizeof(char) || v != '1') {
+		goto again;
+	}
+
 	if (!wait_for_pid(cpid))
 		exit(1);
 	exit(0);
+
+again:
+	kill(cpid, SIGKILL);
+	wait_for_pid(cpid);
+	goto loop;
 }
 
 /*
@@ -1038,8 +1072,8 @@ static void pid_from_ns(int sock, pid_t tpid)
 		tv.tv_sec = 2;
 		tv.tv_usec = 0;
 		ret = select(sock+1, &s, NULL, NULL, &tv);
-		if (ret < 0) {
-			fprintf(stderr, "%s: bad jelect before read from parent: %s\n",
+		if (ret <= 0) {
+			fprintf(stderr, "%s: bad select before read from parent: %s\n",
 				__func__, strerror(errno));
 			exit(1);
 		}
@@ -1064,9 +1098,12 @@ static void pid_from_ns(int sock, pid_t tpid)
 
 static void pid_from_ns_wrapper(int sock, pid_t tpid)
 {
-	int newnsfd = -1;
+	int newnsfd = -1, ret, cpipe[2];
 	char fnam[100];
 	pid_t cpid;
+	fd_set s;
+	struct timeval tv;
+	char v;
 
 	sprintf(fnam, "/proc/%d/ns/pid", tpid);
 	newnsfd = open(fnam, O_RDONLY);
@@ -1076,15 +1113,48 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 		exit(1);
 	close(newnsfd);
 
+	if (pipe(cpipe) < 0)
+		exit(1);
+
+loop:
 	cpid = fork();
 
 	if (cpid < 0)
 		exit(1);
-	if (!cpid)
+
+	if (!cpid) {
+		char b = '1';
+		close(cpipe[0]);
+		if (write(cpipe[1], &b, sizeof(char)) < 0) {
+			fprintf(stderr, "%s (child): erorr on write: %s\n",
+				__func__, strerror(errno));
+		}
+		close(cpipe[1]);
 		pid_from_ns(sock, tpid);
+	}
+
+	// give the child 1 second to be done forking and
+	// write it's ack
+	FD_ZERO(&s);
+	FD_SET(cpipe[0], &s);
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
+	if (ret <= 0)
+		goto again;
+	ret = read(cpipe[0], &v, 1);
+	if (ret != sizeof(char) || v != '1') {
+		goto again;
+	}
+
 	if (!wait_for_pid(cpid))
 		exit(1);
 	exit(0);
+
+again:
+	kill(cpid, SIGKILL);
+	wait_for_pid(cpid);
+	goto loop;
 }
 
 static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const char *file, const char *buf)
@@ -1770,10 +1840,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 static long int get_pid1_time(pid_t pid)
 {
 	char fnam[100];
-	int fd;
+	int fd, cpipe[2], ret;
 	struct stat sb;
-	int ret;
-	pid_t npid;
+	pid_t cpid;
+	struct timeval tv;
+	fd_set s;
+	char v;
 
 	if (unshare(CLONE_NEWNS))
 		return 0;
@@ -1795,28 +1867,57 @@ static long int get_pid1_time(pid_t pid)
 		return 0;
 	}
 	close(fd);
-	npid = fork();
-	if (npid < 0)
+
+	if (pipe(cpipe) < 0)
+		exit(1);
+
+loop:
+	cpid = fork();
+	if (cpid < 0)
 		return 0;
 
-	if (npid) {
-		// child will do the writing for us
-		wait_for_pid(npid);
-		exit(0);
+	if (!cpid) {
+		char b = '1';
+		close(cpipe[0]);
+		if (write(cpipe[1], &b, sizeof(char)) < 0) {
+			fprintf(stderr, "%s (child): erorr on write: %s\n",
+				__func__, strerror(errno));
+		}
+		close(cpipe[1]);
+		umount2("/proc", MNT_DETACH);
+		if (mount("proc", "/proc", "proc", 0, NULL)) {
+			perror("get_pid1_time mount");
+			return 0;
+		}
+		ret = lstat("/proc/1", &sb);
+		if (ret) {
+			perror("get_pid1_time lstat");
+			return 0;
+		}
+		return time(NULL) - sb.st_ctime;
 	}
 
-	umount2("/proc", MNT_DETACH);
+	// give the child 1 second to be done forking and
+	// write it's ack
+	FD_ZERO(&s);
+	FD_SET(cpipe[0], &s);
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
+	if (ret <= 0)
+		goto again;
+	ret = read(cpipe[0], &v, 1);
+	if (ret != sizeof(char) || v != '1') {
+		goto again;
+	}
 
-	if (mount("proc", "/proc", "proc", 0, NULL)) {
-		perror("get_pid1_time mount");
-		return 0;
-	}
-	ret = lstat("/proc/1", &sb);
-	if (ret) {
-		perror("get_pid1_time lstat");
-		return 0;
-	}
-	return time(NULL) - sb.st_ctime;
+	wait_for_pid(cpid);
+	exit(0);
+
+again:
+	kill(cpid, SIGKILL);
+	wait_for_pid(cpid);
+	goto loop;
 }
 
 static long int getreaperage(pid_t qpid)
@@ -1845,7 +1946,7 @@ static long int getreaperage(pid_t qpid)
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 	ret = select(mypipe[0]+1, &s, NULL, NULL, &tv);
-	if (ret == -1) {
+	if (ret <= 0) {
 		perror("select");
 		goto out;
 	}
