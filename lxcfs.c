@@ -620,7 +620,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	}
 
 	// now get the list of child cgroups
-	nih_local char **clist;
+	nih_local char **clist = NULL;
 
 	if (!cgm_list_children(controller, cgroup, &clist))
 		return 0;
