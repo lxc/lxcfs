@@ -31,6 +31,7 @@
 
 #include <nih/alloc.h>
 #include <nih/string.h>
+#include <nih/alloc.h>
 
 #include "cgmanager.h"
 
@@ -42,6 +43,21 @@ struct lxcfs_state {
 	char **subsystems;
 };
 #define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
+
+struct file_info {
+	char *controller;
+	char *cgroup;
+	bool isdir;
+	char *buf;  // unused as of yet
+	int buflen;
+};
+
+static char *must_copy_string(const char *str)
+{
+	if (!str)
+		return NULL;
+	return NIH_MUST( nih_strdup(NULL, str) );
+}
 
 /*
  * TODO - return value should denote whether child exited with failure
@@ -530,41 +546,54 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	struct fuse_context *fc = fuse_get_context();
 	nih_local struct cgm_keys **list = NULL;
 	const char *cgroup;
+	struct file_info *dir_info;
 	nih_local char *controller = NULL;
-	nih_local char *nextcg = NULL;
 
 	if (!fc)
 		return -EIO;
 
-	if (strcmp(path, "/cgroup") == 0)
-		return 0;
+	if (strcmp(path, "/cgroup") == 0) {
+		cgroup = NULL;
+		controller = NULL;
+	} else {
+		// return list of keys for the controller, and list of child cgroups
+		controller = pick_controller_from_path(fc, path);
+		if (!controller)
+			return -EIO;
 
-	// return list of keys for the controller, and list of child cgroups
-	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -EIO;
-
-	cgroup = find_cgroup_in_path(path);
-	if (!cgroup) {
-		/* this is just /cgroup/controller, return its contents */
-		cgroup = "/";
+		cgroup = find_cgroup_in_path(path);
+		if (!cgroup) {
+			/* this is just /cgroup/controller, return its contents */
+			cgroup = "/";
+		}
 	}
 
 	if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
 		return -EACCES;
+
+	/* we'll free this at cg_releasedir */
+	dir_info = NIH_MUST( nih_alloc(NULL, sizeof(*dir_info)) );
+	dir_info->controller = must_copy_string(controller);
+	dir_info->cgroup = must_copy_string(cgroup);
+	dir_info->isdir = true;
+	dir_info->buf = NULL;
+	dir_info->buflen = 0;
+
+	fi->fh = (unsigned long)dir_info;
 	return 0;
 }
 
 static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi)
 {
+	struct file_info *d = (struct file_info *)fi->fh;
+	nih_local struct cgm_keys **list = NULL;
+	int i;
+	nih_local char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
-	if (!fc)
-		return -EIO;
-
-	if (strcmp(path, "/cgroup") == 0) {
-		// get list of controllers
+	if (!d->cgroup && !d->controller) {
+		// ls /var/lib/lxcfs/cgroup - just show list of controllers
 		char **list = LXCFS_DATA ? LXCFS_DATA->subsystems : NULL;
 		int i;
 
@@ -579,31 +608,11 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		return 0;
 	}
 
-	// return list of keys for the controller, and list of child cgroups
-	nih_local struct cgm_keys **list = NULL;
-	const char *cgroup;
-	nih_local char *controller = NULL;
-	int i;
-	nih_local char *nextcg = NULL;
-
-	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -EIO;
-
-	cgroup = find_cgroup_in_path(path);
-	if (!cgroup) {
-		/* this is just /cgroup/controller, return its contents */
-		cgroup = "/";
-	}
-
-	if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
-		return -EACCES;
-
-	if (!cgm_list_keys(controller, cgroup, &list))
+	if (!cgm_list_keys(d->controller, d->cgroup, &list))
 		// not a valid cgroup
 		return -EINVAL;
 
-	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, &nextcg)) {
+	if (!caller_is_in_ancestor(fc->pid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
 			int ret;
 			ret = filler(buf, nextcg,  NULL, 0);
@@ -622,7 +631,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	// now get the list of child cgroups
 	nih_local char **clist = NULL;
 
-	if (!cgm_list_children(controller, cgroup, &clist))
+	if (!cgm_list_children(d->controller, d->cgroup, &clist))
 		return 0;
 	for (i = 0; clist[i]; i++) {
 		if (filler(buf, clist[i], NULL, 0) != 0) {
@@ -634,6 +643,14 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 
 static int cg_releasedir(const char *path, struct fuse_file_info *fi)
 {
+	struct file_info *d = (struct file_info *)fi->fh;
+
+	if (d->controller)
+		nih_free(d->controller);
+	if (d->cgroup)
+		nih_free(d->cgroup);
+	free(d->buf);
+	nih_free(d);
 	return 0;
 }
 
