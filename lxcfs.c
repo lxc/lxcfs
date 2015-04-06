@@ -594,6 +594,10 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	nih_local char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
+	if (!d->isdir) {
+		fprintf(stderr, "Internal error: file cache info used in readdir\n");
+		return -EIO;
+	}
 	if (!d->cgroup && !d->controller) {
 		// ls /var/lib/lxcfs/cgroup - just show list of controllers
 		char **list = LXCFS_DATA ? LXCFS_DATA->subsystems : NULL;
@@ -1038,6 +1042,11 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	struct file_info *f = (struct file_info *)fi->fh;
 	nih_local struct cgm_keys *k = NULL;
 
+	if (f->isdir) {
+		fprintf(stderr, "Internal error: directory cache info used in cg_read\n");
+		return -EIO;
+	}
+
 	if (offset)
 		return -EIO;
 
@@ -1254,6 +1263,11 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	nih_local char *localbuf = NULL;
 	nih_local struct cgm_keys *k = NULL;
 	struct file_info *f = (struct file_info *)fi->fh;
+
+	if (f->isdir) {
+		fprintf(stderr, "Internal error: directory cache info used in cg_write\n");
+		return -EIO;
+	}
 
 	if (offset)
 		return -EINVAL;
