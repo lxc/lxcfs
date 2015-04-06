@@ -44,11 +44,21 @@ struct lxcfs_state {
 };
 #define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
 
+enum {
+	LXC_TYPE_CGDIR,
+	LXC_TYPE_CGFILE,
+	LXC_TYPE_PROC_MEMINFO,
+	LXC_TYPE_PROC_CPUINFO,
+	LXC_TYPE_PROC_UPTIME,
+	LXC_TYPE_PROC_STAT,
+	LXC_TYPE_PROC_DISKSTATS,
+};
+
 struct file_info {
 	char *controller;
 	char *cgroup;
 	char *file;
-	bool isdir;
+	int type;
 	char *buf;  // unused as of yet
 	int buflen;
 };
@@ -576,7 +586,7 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	dir_info = NIH_MUST( nih_alloc(NULL, sizeof(*dir_info)) );
 	dir_info->controller = must_copy_string(controller);
 	dir_info->cgroup = must_copy_string(cgroup);
-	dir_info->isdir = true;
+	dir_info->type = LXC_TYPE_CGDIR;
 	dir_info->buf = NULL;
 	dir_info->file = NULL;
 	dir_info->buflen = 0;
@@ -594,7 +604,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	nih_local char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
-	if (!d->isdir) {
+	if (d->type != LXC_TYPE_CGDIR) {
 		fprintf(stderr, "Internal error: file cache info used in readdir\n");
 		return -EIO;
 	}
@@ -709,7 +719,7 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	file_info->controller = must_copy_string(controller);
 	file_info->cgroup = must_copy_string(path1);
 	file_info->file = must_copy_string(path2);
-	file_info->isdir = false;
+	file_info->type = LXC_TYPE_CGFILE;
 	file_info->buf = NULL;
 	file_info->buflen = 0;
 
@@ -1042,7 +1052,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	struct file_info *f = (struct file_info *)fi->fh;
 	nih_local struct cgm_keys *k = NULL;
 
-	if (f->isdir) {
+	if (f->type != LXC_TYPE_CGFILE) {
 		fprintf(stderr, "Internal error: directory cache info used in cg_read\n");
 		return -EIO;
 	}
@@ -1264,7 +1274,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	nih_local struct cgm_keys *k = NULL;
 	struct file_info *f = (struct file_info *)fi->fh;
 
-	if (f->isdir) {
+	if (f->type != LXC_TYPE_CGFILE) {
 		fprintf(stderr, "Internal error: directory cache info used in cg_write\n");
 		return -EIO;
 	}
