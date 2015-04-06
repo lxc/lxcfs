@@ -2183,29 +2183,57 @@ static int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 
 static int proc_open(const char *path, struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/proc/meminfo") == 0 ||
-			strcmp(path, "/proc/cpuinfo") == 0 ||
-			strcmp(path, "/proc/uptime") == 0 ||
-			strcmp(path, "/proc/stat") == 0 || 
-			strcmp(path, "/proc/diskstats") == 0)
-		return 0;
-	return -ENOENT;
+	int type = -1;
+	struct file_info *info;
+
+	if (strcmp(path, "/proc/meminfo") == 0)
+		type = LXC_TYPE_PROC_MEMINFO;
+	else if (strcmp(path, "/proc/cpuinfo") == 0)
+		type = LXC_TYPE_PROC_CPUINFO;
+	else if (strcmp(path, "/proc/uptime") == 0)
+		type = LXC_TYPE_PROC_UPTIME;
+	else if (strcmp(path, "/proc/stat") == 0)
+		type = LXC_TYPE_PROC_STAT;
+	else if (strcmp(path, "/proc/diskstats") == 0)
+		type = LXC_TYPE_PROC_DISKSTATS;
+	if (type == -1)
+		return -ENOENT;
+
+	info = NIH_MUST( nih_alloc(NULL, sizeof(*info)) );
+	memset(info, 0, sizeof(*info));
+	info->type = type;
+
+	fi->fh = (unsigned long)info;
+	return 0;
+}
+
+static int proc_release(const char *path, struct fuse_file_info *fi)
+{
+	struct file_info *f = (struct file_info *)fi->fh;
+
+	do_release_file_info(f);
+	return 0;
 }
 
 static int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/proc/meminfo") == 0)
+	struct file_info *f = (struct file_info *) fi->fh;
+
+	switch (f->type) {
+	case LXC_TYPE_PROC_MEMINFO: 
 		return proc_meminfo_read(buf, size, offset, fi);
-	if (strcmp(path, "/proc/cpuinfo") == 0)
+	case LXC_TYPE_PROC_CPUINFO:
 		return proc_cpuinfo_read(buf, size, offset, fi);
-	if (strcmp(path, "/proc/uptime") == 0)
+	case LXC_TYPE_PROC_UPTIME:
 		return proc_uptime_read(buf, size, offset, fi);
-	if (strcmp(path, "/proc/stat") == 0)
+	case LXC_TYPE_PROC_STAT:
 		return proc_stat_read(buf, size, offset, fi);
-	if (strcmp(path, "/proc/diskstats") == 0)
+	case LXC_TYPE_PROC_DISKSTATS:
 		return proc_diskstats_read(buf, size, offset, fi);
-	return -EINVAL;
+	default:
+		return -EINVAL;
+	}
 }
 
 /*
@@ -2311,10 +2339,8 @@ static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 {
 	if (strncmp(path, "/cgroup", 7) == 0)
 		return cg_release(path, fi);
-#if 0
 	if (strncmp(path, "/proc", 5) == 0)
-		return proc_close(path, fi);
-#endif
+		return proc_release(path, fi);
 
 	return -EINVAL;
 }
