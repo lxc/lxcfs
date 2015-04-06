@@ -47,6 +47,7 @@ struct lxcfs_state {
 struct file_info {
 	char *controller;
 	char *cgroup;
+	char *file;
 	bool isdir;
 	char *buf;  // unused as of yet
 	int buflen;
@@ -577,6 +578,7 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	dir_info->cgroup = must_copy_string(cgroup);
 	dir_info->isdir = true;
 	dir_info->buf = NULL;
+	dir_info->file = NULL;
 	dir_info->buflen = 0;
 
 	fi->fh = (unsigned long)dir_info;
@@ -641,22 +643,26 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	return 0;
 }
 
+static void do_release_file_info(struct file_info *f)
+{
+	if (f->controller)
+		nih_free(f->controller);
+	if (f->cgroup)
+		nih_free(f->cgroup);
+	if (f->file)
+		nih_free(f->file);
+	free(f->buf);
+	nih_free(f);
+}
+
 static int cg_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	struct file_info *d = (struct file_info *)fi->fh;
 
-	if (d->controller)
-		nih_free(d->controller);
-	if (d->cgroup)
-		nih_free(d->cgroup);
-	free(d->buf);
-	nih_free(d);
+	do_release_file_info(d);
 	return 0;
 }
 
-/*
- * TODO - cache info here for read/write, release in cg_release.
- */
 static int cg_open(const char *path, struct fuse_file_info *fi)
 {
 	nih_local char *controller = NULL;
@@ -664,6 +670,7 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	char *fpath = NULL, *path1, *path2;
 	nih_local char * cgdir = NULL;
 	nih_local struct cgm_keys *k = NULL;
+	struct file_info *file_info;
 	struct fuse_context *fc = fuse_get_context();
 
 	if (!fc)
@@ -685,15 +692,33 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 		path2 = fpath;
 	}
 
-	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
-		if (!fc_may_access(fc, controller, path1, path2, fi->flags))
-			// should never get here
-			return -EACCES;
+	k = get_cgroup_key(controller, path1, path2);
+	if (!k)
+		return -EINVAL;
 
-		return 0;
-	}
+	if (!fc_may_access(fc, controller, path1, path2, fi->flags))
+		// should never get here
+		return -EACCES;
 
-	return -EINVAL;
+	/* we'll free this at cg_release */
+	file_info = NIH_MUST( nih_alloc(NULL, sizeof(*file_info)) );
+	file_info->controller = must_copy_string(controller);
+	file_info->cgroup = must_copy_string(path1);
+	file_info->file = must_copy_string(path2);
+	file_info->isdir = false;
+	file_info->buf = NULL;
+	file_info->buflen = 0;
+
+	fi->fh = (unsigned long)file_info;
+	return 0;
+}
+
+static int cg_release(const char *path, struct fuse_file_info *fi)
+{
+	struct file_info *f = (struct file_info *)fi->fh;
+
+	do_release_file_info(f);
+	return 0;
 }
 
 static int msgrecv(int sockfd, void *buf, size_t len)
@@ -1009,11 +1034,8 @@ out:
 static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	nih_local char *controller = NULL;
-	const char *cgroup;
-	char *fpath = NULL, *path1, *path2;
 	struct fuse_context *fc = fuse_get_context();
-	nih_local char * cgdir = NULL;
+	struct file_info *f = (struct file_info *)fi->fh;
 	nih_local struct cgm_keys *k = NULL;
 
 	if (offset)
@@ -1022,39 +1044,26 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	if (!fc)
 		return -EIO;
 
-	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -EINVAL;
-	cgroup = find_cgroup_in_path(path);
-	if (!cgroup)
+	if (!f->controller)
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
-	if (!fpath) {
-		path1 = "/";
-		path2 = cgdir;
-	} else {
-		path1 = cgdir;
-		path2 = fpath;
-	}
-
-	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+	if ((k = get_cgroup_key(f->controller, f->cgroup, f->file)) != NULL) {
 		nih_local char *data = NULL;
 		int s;
 		bool r;
 
-		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
+		if (!fc_may_access(fc, f->controller, f->cgroup, f->file, O_RDONLY))
 			// should never get here
 			return -EACCES;
 
-		if (strcmp(path2, "tasks") == 0 ||
-				strcmp(path2, "/tasks") == 0 ||
-				strcmp(path2, "/cgroup.procs") == 0 ||
-				strcmp(path2, "cgroup.procs") == 0)
+		if (strcmp(f->file, "tasks") == 0 ||
+				strcmp(f->file, "/tasks") == 0 ||
+				strcmp(f->file, "/cgroup.procs") == 0 ||
+				strcmp(f->file, "cgroup.procs") == 0)
 			// special case - we have to translate the pids
-			r = do_read_pids(fc->pid, controller, path1, path2, &data);
+			r = do_read_pids(fc->pid, f->controller, f->cgroup, f->file, &data);
 		else
-			r = cgm_get_value(controller, path1, path2, &data);
+			r = cgm_get_value(f->controller, f->cgroup, f->file, &data);
 
 		if (!r)
 			return -EINVAL;
@@ -1241,13 +1250,10 @@ out:
 int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi)
 {
-	nih_local char *controller = NULL;
-	const char *cgroup;
-	char *fpath = NULL, *path1, *path2;
 	struct fuse_context *fc = fuse_get_context();
-	nih_local char * cgdir = NULL;
-	nih_local struct cgm_keys *k = NULL;
 	nih_local char *localbuf = NULL;
+	nih_local struct cgm_keys *k = NULL;
+	struct file_info *f = (struct file_info *)fi->fh;
 
 	if (offset)
 		return -EINVAL;
@@ -1258,36 +1264,21 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	localbuf = NIH_MUST( nih_alloc(NULL, size+1) );
 	localbuf[size] = '\0';
 	memcpy(localbuf, buf, size);
-	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -EINVAL;
-	cgroup = find_cgroup_in_path(path);
-	if (!cgroup)
-		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
-	if (!fpath) {
-		path1 = "/";
-		path2 = cgdir;
-	} else {
-		path1 = cgdir;
-		path2 = fpath;
-	}
-
-	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+	if ((k = get_cgroup_key(f->controller, f->cgroup, f->file)) != NULL) {
 		bool r;
 
-		if (!fc_may_access(fc, controller, path1, path2, O_WRONLY))
+		if (!fc_may_access(fc, f->controller, f->cgroup, f->file, O_WRONLY))
 			return -EACCES;
 
-		if (strcmp(path2, "tasks") == 0 ||
-				strcmp(path2, "/tasks") == 0 ||
-				strcmp(path2, "/cgroup.procs") == 0 ||
-				strcmp(path2, "cgroup.procs") == 0)
+		if (strcmp(f->file, "tasks") == 0 ||
+				strcmp(f->file, "/tasks") == 0 ||
+				strcmp(f->file, "/cgroup.procs") == 0 ||
+				strcmp(f->file, "cgroup.procs") == 0)
 			// special case - we have to translate the pids
-			r = do_write_pids(fc->pid, controller, path1, path2, localbuf);
+			r = do_write_pids(fc->pid, f->controller, f->cgroup, f->file, localbuf);
 		else
-			r = cgm_set_value(controller, path1, path2, localbuf);
+			r = cgm_set_value(f->controller, f->cgroup, f->file, localbuf);
 
 		if (!r)
 			return -EINVAL;
@@ -2294,7 +2285,14 @@ static int lxcfs_flush(const char *path, struct fuse_file_info *fi)
 
 static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 {
-	return 0;
+	if (strncmp(path, "/cgroup", 7) == 0)
+		return cg_release(path, fi);
+#if 0
+	if (strncmp(path, "/proc", 5) == 0)
+		return proc_close(path, fi);
+#endif
+
+	return -EINVAL;
 }
 
 static int lxcfs_fsync(const char *path, int datasync, struct fuse_file_info *fi)
