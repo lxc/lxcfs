@@ -579,7 +579,7 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 		}
 	}
 
-	if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
+	if (cgroup && !fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
 		return -EACCES;
 
 	/* we'll free this at cg_releasedir */
