@@ -1,5 +1,14 @@
 #!/bin/sh -eu
 
+# Don't mess with containers that don't have /sys/fs/cgroup configured
+# (lxc.mount.auto = cgroup:mixed)
+
+if touch ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs; then
+    rm ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs
+else
+    exit 0
+fi
+
 # /proc files
 if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     for entry in @LXCFSTARGETDIR@/proc/*; do
@@ -10,17 +19,6 @@ fi
 
 # /sys/fs/cgroup files
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
-    mount -n -t tmpfs none ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/ -o size=4k,mode=755
-    if [ -d /sys/fs/cgroup/cgmanager.lower ]; then
-        mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-        mount -n --bind /sys/fs/cgroup/cgmanager.lower \
-            ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-    elif [ -d /sys/fs/cgroup/cgmanager ]; then
-        mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-        mount -n --bind /sys/fs/cgroup/cgmanager \
-            ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/cgmanager
-    fi
-
     if [ -d @LXCFSTARGETDIR@/cgroup ]; then
         for entry in @LXCFSTARGETDIR@/cgroup/*; do
             DEST=$(basename $entry)
