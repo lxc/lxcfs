@@ -31,7 +31,6 @@
 
 #include <nih/alloc.h>
 #include <nih/string.h>
-#include <nih/alloc.h>
 
 #include "cgmanager.h"
 
@@ -63,11 +62,11 @@ struct file_info {
 	int buflen;
 };
 
-static char *must_copy_string(const char *str)
+static char *must_copy_string(void *parent, const char *str)
 {
 	if (!str)
 		return NULL;
-	return NIH_MUST( nih_strdup(NULL, str) );
+	return NIH_MUST( nih_strdup(parent, str) );
 }
 
 /*
@@ -584,8 +583,8 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 
 	/* we'll free this at cg_releasedir */
 	dir_info = NIH_MUST( nih_alloc(NULL, sizeof(*dir_info)) );
-	dir_info->controller = must_copy_string(controller);
-	dir_info->cgroup = must_copy_string(cgroup);
+	dir_info->controller = must_copy_string(dir_info, controller);
+	dir_info->cgroup = must_copy_string(dir_info, cgroup);
 	dir_info->type = LXC_TYPE_CGDIR;
 	dir_info->buf = NULL;
 	dir_info->file = NULL;
@@ -659,13 +658,10 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 
 static void do_release_file_info(struct file_info *f)
 {
-	if (f->controller)
-		nih_free(f->controller);
-	if (f->cgroup)
-		nih_free(f->cgroup);
-	if (f->file)
-		nih_free(f->file);
-	free(f->buf);
+	/*
+	 * all file_info fields which are nih_alloc()d with f as parent
+	 * will be automatically freed
+	 */
 	nih_free(f);
 }
 
@@ -716,9 +712,9 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 
 	/* we'll free this at cg_release */
 	file_info = NIH_MUST( nih_alloc(NULL, sizeof(*file_info)) );
-	file_info->controller = must_copy_string(controller);
-	file_info->cgroup = must_copy_string(path1);
-	file_info->file = must_copy_string(path2);
+	file_info->controller = must_copy_string(file_info, controller);
+	file_info->cgroup = must_copy_string(file_info, path1);
+	file_info->file = must_copy_string(file_info, path2);
 	file_info->type = LXC_TYPE_CGFILE;
 	file_info->buf = NULL;
 	file_info->buflen = 0;
