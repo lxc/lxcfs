@@ -514,7 +514,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
-		sb->st_size = get_file_size(controller, path1, path2);
+		sb->st_size = 0;
 		return 0;
 	}
 
@@ -1000,7 +1000,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	nih_local struct cgm_keys *k = NULL;
 
 	if (offset)
-		return -EIO;
+		return 0;
 
 	if (!fc)
 		return -EIO;
@@ -1233,7 +1233,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	nih_local char *localbuf = NULL;
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!fc)
 		return -EIO;
@@ -1571,7 +1571,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	FILE *f;
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!cg)
 		return 0;
@@ -1720,7 +1720,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	FILE *f;
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!cg)
 		return 0;
@@ -1771,7 +1771,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	FILE *f;
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!cg)
 		return 0;
@@ -1993,7 +1993,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	long int idletime = getprocidle();
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 	return snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
 }
 
@@ -2018,7 +2018,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	FILE *f;
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!cg)
 		return 0;
@@ -2128,7 +2128,7 @@ static int proc_getattr(const char *path, struct stat *sb)
 			strcmp(path, "/proc/uptime") == 0 ||
 			strcmp(path, "/proc/stat") == 0 ||
 			strcmp(path, "/proc/diskstats") == 0) {
-		sb->st_size = get_procfile_size(path);
+		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -2374,7 +2374,7 @@ static void usage(const char *me)
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "%s [FUSE and mount options] mountpoint\n", me);
+	fprintf(stderr, "%s mountpoint\n", me);
 	exit(1);
 }
 
@@ -2392,10 +2392,14 @@ int main(int argc, char *argv[])
 {
 	int ret;
 	struct lxcfs_state *d;
+        char *argv_new[5] = {"-s", "-f", "-o", "allow_other,direct_io", NULL};
+        int argc_new = 5;
 
-	if (argc < 2 || is_help(argv[1]))
+	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
+        argv_new[4] = argv[1];
+ 
 	d = malloc(sizeof(*d));
 	if (!d)
 		return -1;
@@ -2406,7 +2410,7 @@ int main(int argc, char *argv[])
 	if (!cgm_get_controllers(&d->subsystems))
 		return -1;
 
-	ret = fuse_main(argc, argv, &lxcfs_ops, d);
+	ret = fuse_main(argc_new, argv_new, &lxcfs_ops, d);
 
 	return ret;
 }
