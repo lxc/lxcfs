@@ -1527,24 +1527,24 @@ static void get_mem_cached(char *memstat, unsigned long *v)
 }
 
 static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *iotype, unsigned long *v)
-{   
+{
 	char *eol;
 	char key[32];
-	
+
 	memset(key, 0, 32);
 	snprintf(key, 32, "%u:%u %s", major, minor, iotype);
-	
+
 	size_t len = strlen(key);
 	*v = 0;
 
 	while (*str) {
 		if (startswith(str, key)) {
- 			sscanf(str + len, "%lu", v);
- 			return;
- 		}
- 		eol = strchr(str, '\n');
+			sscanf(str + len, "%lu", v);
+			return;
+		}
+		eol = strchr(str, '\n');
 		if (!eol)
- 			return;
+			return;
 		str = eol+1;
 	}
 }
@@ -1665,7 +1665,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", printme);
 		cache += l;
 		cache_size -= l;
-		total_len += l;	
+		total_len += l;
 	}
 
 	d->size = total_len;
@@ -1774,7 +1774,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
-		return total_len;	
+		return total_len;
 	}
 
 	if (!cg)
@@ -1860,7 +1860,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, d->buf + offset, total_len);
-		return total_len;	
+		return total_len;
 	}
 
 	if (!cg)
@@ -1916,7 +1916,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		cache += l;
 		cache_size -= l;
 		total_len += l;
-		
+
 		if (sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu", &user, &nice, &system, &idle, &iowait, &irq,
 			&softirq, &steal, &guest) != 9)
 			continue;
@@ -1928,16 +1928,16 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		irq_sum += irq;
 		softirq_sum += softirq;
 		steal_sum += steal;
-		guest_sum += guest;	
+		guest_sum += guest;
 	}
 
 	cache = d->buf;
 
-	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", 
+	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
 		"cpu ", user_sum, nice_sum, system_sum, idle_sum, iowait_sum, irq_sum, softirq_sum, steal_sum, guest_sum);
 	if (cpuall_len > 0 && cpuall_len < CPUALL_MAX_SIZE){
 		memcpy(cache, cpuall, cpuall_len);
-		cache += cpuall_len;	
+		cache += cpuall_len;
 	}else{
 		/* shouldn't happen */
 		fprintf(stderr, "proc_stat_read copy cpuall failed, cpuall_len=%d\n", cpuall_len);
@@ -1950,9 +1950,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 
 	memcpy(buf, d->buf, total_len);
-#if 0
-	fprintf(stderr, "total_len = %d, buflen = %d\n", d->size, d->buflen);
-#endif
 out:
 	fclose(f);
 	free(line);
@@ -2205,7 +2202,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 			read_sectors = read_sectors/512;
 			get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
 			write_sectors = write_sectors/512;
-			
+
 			get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
 			rd_svctm = rd_svctm/1000000;
 			get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
@@ -2226,7 +2223,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 		memset(lbuf, 0, 256);
 		if (read || write || read_merged || write_merged || read_sectors || write_sectors || read_ticks || write_ticks) {
-			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", 
+			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
 				major, minor, dev_name, read, read_merged, read_sectors, read_ticks,
 				write, write_merged, write_sectors, write_ticks, ios_pgr, tot_ticks, rq_ticks);
 			printme = lbuf;
@@ -2329,7 +2326,7 @@ static int proc_open(const char *path, struct fuse_file_info *fi)
 	info->buf = NIH_MUST( nih_alloc(info, info->buflen) );
 	memset(info->buf, 0, info->buflen);
 	/* set actual size to buffer size */
-	info->size = info->buflen; 
+	info->size = info->buflen;
 
 	fi->fh = (unsigned long)info;
 	return 0;
@@ -2349,7 +2346,7 @@ static int proc_read(const char *path, char *buf, size_t size, off_t offset,
 	struct file_info *f = (struct file_info *) fi->fh;
 
 	switch (f->type) {
-	case LXC_TYPE_PROC_MEMINFO: 
+	case LXC_TYPE_PROC_MEMINFO:
 		return proc_meminfo_read(buf, size, offset, fi);
 	case LXC_TYPE_PROC_CPUINFO:
 		return proc_cpuinfo_read(buf, size, offset, fi);
