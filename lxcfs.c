@@ -60,7 +60,11 @@ struct file_info {
 	int type;
 	char *buf;  // unused as of yet
 	int buflen;
+	int size; //actual data size
 };
+
+/* reserve buffer size, for cpuall in /proc/stat */
+#define BUF_RESERVE_SIZE 256
 
 static char *must_copy_string(void *parent, const char *str)
 {
@@ -1591,15 +1595,24 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
 	nih_local char *cg = get_pid_cgroup(fc->pid, "memory");
 	nih_local char *memlimit_str = NULL, *memusage_str = NULL, *memstat_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, cached = 0, hosttotal = 0;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
 	FILE *f;
 
-	if (offset)
-		return -EINVAL;
+	if (offset){
+		if (offset > d->size)
+			return -EINVAL;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;
+	}
 
 	if (!cg)
 		return 0;
@@ -1648,11 +1661,16 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else
 			printme = line;
-		l = snprintf(buf, size, "%s", printme);
-		buf += l;
-		size -= l;
-		total_len += l;
+
+		l = snprintf(cache, cache_size, "%s", printme);
+		cache += l;
+		cache_size -= l;
+		total_len += l;	
 	}
+
+	d->size = total_len;
+	if (total_len > size ) total_len = size;
+	memcpy(buf, d->buf, total_len);
 
 	fclose(f);
 	free(line);
@@ -1739,16 +1757,25 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
 	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
 	nih_local char *cpuset = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0;
 	bool am_printing = false;
 	int curcpu = -1;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
 	FILE *f;
 
-	if (offset)
-		return -EINVAL;
+	if (offset){
+		if (offset > d->size)
+			return -EINVAL;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;	
+	}
 
 	if (!cg)
 		return 0;
@@ -1767,20 +1794,40 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
 				curcpu ++;
-				l = snprintf(buf, size, "processor	: %d\n", curcpu);
-				buf += l;
-				size -= l;
-				total_len += l;
+				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
+				if (l < cache_size){
+					cache += l;
+					cache_size -= l;
+					total_len += l;
+				}else{
+					cache += cache_size;
+					total_len += cache_size;
+					cache_size = 0;
+					break;
+				}
 			}
 			continue;
 		}
 		if (am_printing) {
-			l = snprintf(buf, size, "%s", line);
-			buf += l;
-			size -= l;
-			total_len += l;
+			l = snprintf(cache, cache_size, "%s", line);
+			if (l < cache_size) {
+				cache += l;
+				cache_size -= l;
+				total_len += l;
+			} else {
+				cache += cache_size;
+				total_len += cache_size;
+				cache_size = 0;
+				break;
+			}
 		}
 	}
+
+	d->size = total_len;
+	if (total_len > size ) total_len = size;
+
+	/* read from off 0 */
+	memcpy(buf, d->buf, total_len);
 
 	fclose(f);
 	free(line);
@@ -1791,15 +1838,30 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
 	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
 	nih_local char *cpuset = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
+	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0;
+	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
+					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0;
+#define CPUALL_MAX_SIZE BUF_RESERVE_SIZE
+	char cpuall[CPUALL_MAX_SIZE];
+	/* reserve for cpu all */
+	char *cache = d->buf + CPUALL_MAX_SIZE;
+	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	FILE *f;
 
-	if (offset)
-		return -EINVAL;
+	if (offset){
+		if (offset > d->size)
+			return -EINVAL;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, d->buf + offset, total_len);
+		return total_len;	
+	}
 
 	if (!cg)
 		return 0;
@@ -1812,6 +1874,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (!f)
 		return 0;
 
+	//skip first line
+	if (getline(&line, &linelen, f) < 0) {
+		fprintf(stderr, "proc_stat_read read first line failed\n");
+		goto out;
+	}
+
 	while (getline(&line, &linelen, f) != -1) {
 		size_t l;
 		int cpu;
@@ -1820,11 +1888,19 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
-			l = snprintf(buf, size, "%s", line);
-			buf += l;
-			size -= l;
-			total_len += l;
-			continue;
+			l = snprintf(cache, cache_size, "%s", line);
+			if (l < cache_size){
+				cache += l;
+				cache_size -= l;
+				total_len += l;
+				continue;
+			}else{
+				//no more space, break it
+				cache += cache_size;
+				total_len += cache_size;
+				cache_size = 0;
+				break;
+			}
 		}
 
 		if (sscanf(cpu_char, "%d", &cpu) != 1)
@@ -1836,12 +1912,48 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		c = strchr(line, ' ');
 		if (!c)
 			continue;
-		l = snprintf(buf, size, "cpu%d %s", curcpu, c);
-		buf += l;
-		size -= l;
+		l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
+		cache += l;
+		cache_size -= l;
 		total_len += l;
+		
+		if (sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu", &user, &nice, &system, &idle, &iowait, &irq,
+			&softirq, &steal, &guest) != 9)
+			continue;
+		user_sum += user;
+		nice_sum += nice;
+		system_sum += system;
+		idle_sum += idle;
+		iowait_sum += iowait;
+		irq_sum += irq;
+		softirq_sum += softirq;
+		steal_sum += steal;
+		guest_sum += guest;	
 	}
 
+	cache = d->buf;
+
+	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", 
+		"cpu ", user_sum, nice_sum, system_sum, idle_sum, iowait_sum, irq_sum, softirq_sum, steal_sum, guest_sum);
+	if (cpuall_len > 0 && cpuall_len < CPUALL_MAX_SIZE){
+		memcpy(cache, cpuall, cpuall_len);
+		cache += cpuall_len;	
+	}else{
+		/* shouldn't happen */
+		fprintf(stderr, "proc_stat_read copy cpuall failed, cpuall_len=%d\n", cpuall_len);
+		cpuall_len = 0;
+	}
+
+	memmove(cache, d->buf + CPUALL_MAX_SIZE, total_len);
+	total_len += cpuall_len;
+	d->size = total_len;
+	if (total_len > size ) total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+#if 0
+	fprintf(stderr, "total_len = %d, buflen = %d\n", d->size, d->buflen);
+#endif
+out:
 	fclose(f);
 	free(line);
 	return total_len;
@@ -2017,12 +2129,20 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
 	long int reaperage = getreaperage(fc->pid);;
 	long int idletime = getprocidle();
+	size_t total_len = 0;
 
-	if (offset)
-		return -EINVAL;
-	return snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
+	if (offset){
+		if (offset > d->size)
+			return -EINVAL;
+		return 0;
+	}
+
+	total_len = snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
+	d->size = total_len;
+	return total_len;
 }
 
 static int proc_diskstats_read(char *buf, size_t size, off_t offset,
@@ -2030,6 +2150,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 {
 	char dev_name[72];
 	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
 	nih_local char *cg = get_pid_cgroup(fc->pid, "blkio");
 	nih_local char *io_serviced_str = NULL, *io_merged_str = NULL, *io_service_bytes_str = NULL,
 			*io_wait_time_str = NULL, *io_service_time_str = NULL;
@@ -2045,8 +2166,11 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	int i = 0;
 	FILE *f;
 
-	if (offset)
-		return -EINVAL;
+	if (offset){
+		if (offset > d->size)
+			return -EINVAL;
+		return 0;
+	}
 
 	if (!cg)
 		return 0;
@@ -2114,6 +2238,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		size -= l;
 		total_len += l;
 	}
+
+	d->size = total_len;
 
 	fclose(f);
 	free(line);
@@ -2198,6 +2324,12 @@ static int proc_open(const char *path, struct fuse_file_info *fi)
 	info = NIH_MUST( nih_alloc(NULL, sizeof(*info)) );
 	memset(info, 0, sizeof(*info));
 	info->type = type;
+
+	info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
+	info->buf = NIH_MUST( nih_alloc(info, info->buflen) );
+	memset(info->buf, 0, info->buflen);
+	/* set actual size to buffer size */
+	info->size = info->buflen; 
 
 	fi->fh = (unsigned long)info;
 	return 0;
