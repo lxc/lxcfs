@@ -666,10 +666,6 @@ static void do_release_file_info(struct file_info *f)
 	 * all file_info fields which are nih_alloc()d with f as parent
 	 * will be automatically freed
 	 */
-	if (!f->buf) {
-		nih_free(f->buf);
-		f->buf = NULL;
-	}
 	nih_free(f);
 }
 
@@ -1916,7 +1912,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		c = strchr(line, ' ');
 		if (!c)
 			continue;
-		l = snprintf(cache, cache_size, "cpu%d %s", curcpu, c);
+		l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
 		cache += l;
 		cache_size -= l;
 		total_len += l;
@@ -1954,7 +1950,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 
 	memcpy(buf, d->buf, total_len);
+#if 0
 	fprintf(stderr, "total_len = %d, buflen = %d\n", d->size, d->buflen);
+#endif
 out:
 	fclose(f);
 	free(line);
@@ -2328,7 +2326,7 @@ static int proc_open(const char *path, struct fuse_file_info *fi)
 	info->type = type;
 
 	info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
-	info->buf = NIH_MUST( nih_alloc(NULL, info->buflen) );
+	info->buf = NIH_MUST( nih_alloc(info, info->buflen) );
 	memset(info->buf, 0, info->buflen);
 	/* set actual size to buffer size */
 	info->size = info->buflen; 
