@@ -2392,13 +2392,14 @@ int main(int argc, char *argv[])
 {
 	int ret;
 	struct lxcfs_state *d;
-        char *argv_new[5] = {"-s", "-f", "-o", "allow_other,direct_io", NULL};
-        int argc_new = 5;
+        char *argv_new[6] = {NULL, "-s", "-f", "-o", "allow_other,direct_io", NULL};
+        int argc_new = 6;
 
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
-        argv_new[4] = argv[1];
+        argv_new[0] = argv[0];
+        argv_new[5] = argv[1];
  
 	d = malloc(sizeof(*d));
 	if (!d)
