@@ -6,10 +6,6 @@
  * See COPYING file for details.
  */
 
-/*
- * NOTES - make sure to run this as -s to avoid threading.
- * TODO - can we enforce that here from the code?
- */
 #define FUSE_USE_VERSION 26
 
 #include <stdio.h>
@@ -2564,7 +2560,8 @@ static void usage(const char *me)
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "%s [FUSE and mount options] mountpoint\n", me);
+	fprintf(stderr, "%s mountpoint\n", me);
+	fprintf(stderr, "%s -h\n", me);
 	exit(1);
 }
 
@@ -2578,17 +2575,70 @@ static bool is_help(char *w)
 	return false;
 }
 
+void swallow_arg(int *argcp, char *argv[], char *which)
+{
+	int i;
+
+	for (i = 1; argv[i]; i++) {
+		if (strcmp(argv[i], which) != 0)
+			continue;
+		for (; argv[i]; i++) {
+			argv[i] = argv[i+1];
+		}
+		(*argcp)--;
+		return;
+	}
+}
+
+void swallow_option(int *argcp, char *argv[], char *opt, char *v)
+{
+	int i;
+
+	for (i = 1; argv[i]; i++) {
+		if (!argv[i+1])
+			continue;
+		if (strcmp(argv[i], opt) != 0)
+			continue;
+		if (strcmp(argv[i+1], v) != 0) {
+			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
+			exit(1);
+		}
+		for (; argv[i+1]; i++) {
+			argv[i] = argv[i+2];
+		}
+		(*argcp) -= 2;
+		return;
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
 	struct lxcfs_state *d;
+	/*
+	 * what we pass to fuse_main is:
+	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
+	 */
+#define NARGS 7
+	char *newargv[7];
 
-	if (argc < 2 || is_help(argv[1]))
+	/* accomodate older init scripts */
+	swallow_arg(&argc, argv, "-s");
+	swallow_arg(&argc, argv, "-f");
+	swallow_option(&argc, argv, "-o", "allow_other");
+
+	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
-	d = malloc(sizeof(*d));
-	if (!d)
-		return -1;
+	d = NIH_MUST( malloc(sizeof(*d)) );
+
+	newargv[0] = argv[0];
+	newargv[1] = "-s";
+	newargv[2] = "-f";
+	newargv[3] = "-o";
+	newargv[4] = "allow_other";
+	newargv[5] = argv[1];
+	newargv[6] = NULL;
 
 	if (!cgm_escape_cgroup())
 		fprintf(stderr, "WARNING: failed to escape to root cgroup\n");
@@ -2596,7 +2646,7 @@ int main(int argc, char *argv[])
 	if (!cgm_get_controllers(&d->subsystems))
 		return -1;
 
-	ret = fuse_main(argc, argv, &lxcfs_ops, d);
+	ret = fuse_main(NARGS - 1, newargv, &lxcfs_ops, d);
 
 	return ret;
 }
