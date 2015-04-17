@@ -438,16 +438,6 @@ static void get_cgdir_and_path(const char *cg, char **dir, char **file)
 	*p = '\0';
 }
 
-static size_t get_file_size(const char *contrl, const char *cg, const char *f)
-{
-	nih_local char *data = NULL;
-	size_t s;
-	if (!cgm_get_value(contrl, cg, f, &data))
-		return -EINVAL;
-	s = strlen(data);
-	return s;
-}
-
 /*
  * FUSE ops for /cgroup
  */
@@ -540,7 +530,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
-		sb->st_size = get_file_size(controller, path1, path2);
+		sb->st_size = 0;
 		return 0;
 	}
 
@@ -1054,7 +1044,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 
 	if (offset)
-		return -EIO;
+		return 0;
 
 	if (!fc)
 		return -EIO;
@@ -1276,7 +1266,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	}
 
 	if (offset)
-		return -EINVAL;
+		return 0;
 
 	if (!fc)
 		return -EIO;
@@ -2275,7 +2265,7 @@ static int proc_getattr(const char *path, struct stat *sb)
 			strcmp(path, "/proc/uptime") == 0 ||
 			strcmp(path, "/proc/stat") == 0 ||
 			strcmp(path, "/proc/diskstats") == 0) {
-		sb->st_size = get_procfile_size(path);
+		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -2636,7 +2626,7 @@ int main(int argc, char *argv[])
 	newargv[1] = "-s";
 	newargv[2] = "-f";
 	newargv[3] = "-o";
-	newargv[4] = "allow_other";
+	newargv[4] = "allow_other,direct_io";
 	newargv[5] = argv[1];
 	newargv[6] = NULL;
 
