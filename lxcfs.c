@@ -1079,6 +1079,8 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		if (s > size)
 			s = size;
 		memcpy(buf, data, s);
+		if (s > 0 && s < size && data[s-1] != '\n')
+			buf[s++] = '\n';
 
 		return s;
 	}
