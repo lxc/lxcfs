@@ -339,6 +339,8 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 
 	if (strlen(path) < 9)
 		return NULL;
+	if (*(path+7) != '/')
+		return NULL;
 	p1 = path+8;
 	ret = nih_strdup(NULL, p1);
 	if (!ret)
