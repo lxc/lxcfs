@@ -2608,7 +2608,7 @@ void swallow_option(int *argcp, char *argv[], char *opt, char *v)
 int main(int argc, char *argv[])
 {
 	int ret;
-	struct lxcfs_state *d;
+	struct lxcfs_state *d = NULL;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
@@ -2642,5 +2642,6 @@ int main(int argc, char *argv[])
 
 	ret = fuse_main(NARGS - 1, newargv, &lxcfs_ops, d);
 
+	free(d);
 	return ret;
 }
