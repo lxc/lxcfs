@@ -13,7 +13,7 @@ AM_LDFLAGS = $(DBUS_LIBS) $(NIH_LIBS) $(NIH_DBUS_LIBS) $(CGMANAGER_LIBS) $(FUSE_
 
 bin_PROGRAMS = lxcfs
 
-lxcfs_SOURCES = lxcfs.c cgmanager.c cgmanager.h
+lxcfs_SOURCES = lxcfs.c cgmanager.c cgmanager.h cpuset.c
 
 EXTRA_DIST = \
 	lxcfs.man.add
@@ -28,7 +28,10 @@ endif
 TEST_READ: tests/test-read.c
 	$(CC) -o tests/test-read tests/test-read.c
 
-tests: TEST_READ
+TEST_CPUSET: tests/cpusetrange.c cpuset.c
+	$(CC) -o tests/cpusetrange tests/cpusetrange.c cpuset.c
+
+tests: TEST_READ TEST_CPUSET
 
 distclean:
 	rm -rf .deps/ \
