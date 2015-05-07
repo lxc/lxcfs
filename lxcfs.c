@@ -29,6 +29,7 @@
 #include <nih/string.h>
 
 #include "cgmanager.h"
+#include "config.h" // for VERSION
 
 struct lxcfs_state {
 	/*
@@ -2588,6 +2589,10 @@ int main(int argc, char *argv[])
 	swallow_arg(&argc, argv, "-f");
 	swallow_option(&argc, argv, "-o", "allow_other");
 
+	if (argc == 2  && strcmp(argv[1], "--version") == 0) {
+		fprintf(stderr, "%s\n", VERSION);
+		exit(0);
+	}
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
