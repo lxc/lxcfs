@@ -2096,6 +2096,12 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	}
 
 	total_len = snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
+
+	if (total_len >= size){
+		d->size = size;
+		return size;
+	}
+
 	d->size = total_len;
 	return total_len;
 }
