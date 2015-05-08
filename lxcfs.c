@@ -1595,7 +1595,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	nih_local char *memlimit_str = NULL, *memusage_str = NULL, *memstat_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, cached = 0, hosttotal = 0;
 	char *line = NULL;
-	size_t linelen = 0, total_len = 0;
+	size_t linelen = 0, total_len = 0, rv = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 	FILE *f;
@@ -1658,6 +1658,18 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = line;
 
 		l = snprintf(cache, cache_size, "%s", printme);
+		if (l < 0) {
+			perror("Error writing to cache");
+			rv = 0;
+			goto err;
+
+		}
+		if (l >= cache_size) {
+			fprintf(stderr, "Internal error: truncated write to cache\n");
+			rv = 0;
+			goto err;
+		}
+
 		cache += l;
 		cache_size -= l;
 		total_len += l;
@@ -1667,9 +1679,11 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 	memcpy(buf, d->buf, total_len);
 
+	rv = total_len;
+  err:
 	fclose(f);
 	free(line);
-	return total_len;
+	return rv;
 }
 
 /*
@@ -1716,7 +1730,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
 	nih_local char *cpuset = NULL;
 	char *line = NULL;
-	size_t linelen = 0, total_len = 0;
+	size_t linelen = 0, total_len = 0, rv = 0;
 	bool am_printing = false;
 	int curcpu = -1;
 	char *cache = d->buf;
@@ -1750,6 +1764,16 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			if (am_printing) {
 				curcpu ++;
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
+				if (l < 0) {
+					perror("Error writing to cache");
+					rv = 0;
+					goto err;
+				}
+				if (l >= cache_size) {
+					fprintf(stderr, "Internal error: truncated write to cache\n");
+					rv = 0;
+					goto err;
+				}
 				if (l < cache_size){
 					cache += l;
 					cache_size -= l;
@@ -1765,6 +1789,16 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		}
 		if (am_printing) {
 			l = snprintf(cache, cache_size, "%s", line);
+			if (l < 0) {
+				perror("Error writing to cache");
+				rv = 0;
+				goto err;
+			}
+			if (l >= cache_size) {
+				fprintf(stderr, "Internal error: truncated write to cache\n");
+				rv = 0;
+				goto err;
+			}
 			if (l < cache_size) {
 				cache += l;
 				cache_size -= l;
@@ -1783,10 +1817,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
-
+	rv = total_len;
+  err:
 	fclose(f);
 	free(line);
-	return total_len;
+	return rv;
 }
 
 static int proc_stat_read(char *buf, size_t size, off_t offset,
@@ -1797,7 +1832,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	nih_local char *cg = get_pid_cgroup(fc->pid, "cpuset");
 	nih_local char *cpuset = NULL;
 	char *line = NULL;
-	size_t linelen = 0, total_len = 0;
+	size_t linelen = 0, total_len = 0, rv = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0;
 	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
@@ -1844,12 +1879,22 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
 			l = snprintf(cache, cache_size, "%s", line);
-			if (l < cache_size){
+			if (l < 0) {
+				perror("Error writing to cache");
+				rv = 0;
+				goto err;
+			}
+			if (l >= cache_size) {
+				fprintf(stderr, "Internal error: truncated write to cache\n");
+				rv = 0;
+				goto err;
+			}
+			if (l < cache_size) {
 				cache += l;
 				cache_size -= l;
 				total_len += l;
 				continue;
-			}else{
+			} else {
 				//no more space, break it
 				cache += cache_size;
 				total_len += cache_size;
@@ -1868,6 +1913,18 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		if (!c)
 			continue;
 		l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
+		if (l < 0) {
+			perror("Error writing to cache");
+			rv = 0;
+			goto err;
+
+		}
+		if (l >= cache_size) {
+			fprintf(stderr, "Internal error: truncated write to cache\n");
+			rv = 0;
+			goto err;
+		}
+
 		cache += l;
 		cache_size -= l;
 		total_len += l;
@@ -1905,10 +1962,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 
 	memcpy(buf, d->buf, total_len);
-out:
+  out:
+	rv = total_len;
+  err:
 	fclose(f);
 	free(line);
-	return total_len;
+	return rv;
 }
 
 /*
@@ -2096,6 +2155,15 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	}
 
 	total_len = snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
+	if (total_len < 0){
+		perror("Error writing to cache");
+		return 0;
+	}
+	if (total_len >= size){
+		d->size = size;
+		return size;
+	}
+
 	d->size = total_len;
 	return total_len;
 }
@@ -2116,7 +2184,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	unsigned long ios_pgr = 0, tot_ticks = 0, rq_ticks = 0;
 	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
 	char *line = NULL;
-	size_t linelen = 0, total_len = 0;
+	size_t linelen = 0, total_len = 0, rv = 0;
 	unsigned int major = 0, minor = 0;
 	int i = 0;
 	FILE *f;
@@ -2189,16 +2257,27 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		l = snprintf(buf, size, "%s", printme);
+		if (l < 0) {
+			perror("Error writing to fuse buf");
+			rv = 0;
+			goto err;
+		}
+		if (l >= size) {
+			fprintf(stderr, "Internal error: truncated write to cache\n");
+			rv = 0;
+			goto err;
+		}
 		buf += l;
 		size -= l;
 		total_len += l;
 	}
 
 	d->size = total_len;
-
+	rv = total_len;
+  err:
 	fclose(f);
 	free(line);
-	return total_len;
+	return rv;
 }
 
 static off_t get_procfile_size(const char *which)
