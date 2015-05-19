@@ -27,6 +27,7 @@
 
 #include <nih/alloc.h>
 #include <nih/string.h>
+#include <nih/error.h>
 
 #include "cgmanager.h"
 #include "config.h" // for VERSION
@@ -2652,6 +2653,15 @@ void swallow_option(int *argcp, char *argv[], char *opt, char *v)
 	}
 }
 
+bool detect_libnih_threadsafe(void)
+{
+#ifdef HAVE_NIH_THREADSAFE
+	if (nih_threadsafe())
+		return true;
+#endif
+	return false;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = -1;
@@ -2660,8 +2670,12 @@ int main(int argc, char *argv[])
 	 * what we pass to fuse_main is:
 	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
 	 */
-#define NARGS 7
-	char *newargv[7];
+	int nargs = 6;
+	bool threadsafe = detect_libnih_threadsafe();
+	char *newargv[7]; // one more than if needed if threadsafe
+
+	if (threadsafe)
+		nargs = 5;
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
@@ -2677,13 +2691,15 @@ int main(int argc, char *argv[])
 
 	d = NIH_MUST( malloc(sizeof(*d)) );
 
-	newargv[0] = argv[0];
-	newargv[1] = "-s";
-	newargv[2] = "-f";
-	newargv[3] = "-o";
-	newargv[4] = "allow_other,direct_io";
-	newargv[5] = argv[1];
-	newargv[6] = NULL;
+	int cnt = 0;
+	newargv[cnt++] = argv[0];
+	if (!threadsafe)
+		newargv[cnt++] = "-s";
+	newargv[cnt++] = "-f";
+	newargv[cnt++] = "-o";
+	newargv[cnt++] = "allow_other,direct_io";
+	newargv[cnt++] = argv[1];
+	newargv[cnt++] = NULL;
 
 	if (!cgm_escape_cgroup())
 		fprintf(stderr, "WARNING: failed to escape to root cgroup\n");
@@ -2691,7 +2707,7 @@ int main(int argc, char *argv[])
 	if (!cgm_get_controllers(&d->subsystems))
 		goto out;
 
-	ret = fuse_main(NARGS - 1, newargv, &lxcfs_ops, d);
+	ret = fuse_main(nargs, newargv, &lxcfs_ops, d);
 
 out:
 	free(d);

@@ -52,8 +52,8 @@
 
 #include "cgmanager.h"
 
-static NihDBusProxy *cgroup_manager = NULL;
-static int32_t api_version;
+static __thread NihDBusProxy *cgroup_manager = NULL;
+static __thread int32_t api_version;
 
 static void cgm_dbus_disconnect(void)
 {
