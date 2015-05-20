@@ -25,6 +25,7 @@
 #include <sys/mount.h>
 #include <wait.h>
 
+#include <nih-dbus/dbus_connection.h>
 #include <nih/alloc.h>
 #include <nih/string.h>
 #include <nih/error.h>
@@ -868,11 +869,11 @@ static void pid_to_ns(int sock, pid_t tpid)
 
 	while (recv_creds(sock, &cred, &v)) {
 		if (v == '1')
-			exit(0);
+			_exit(0);
 		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
-			exit(1);
+			_exit(1);
 	}
-	exit(0);
+	_exit(0);
 }
 
 /*
@@ -892,21 +893,21 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
 	if (ret < 0 || ret >= sizeof(fnam))
-		exit(1);
+		_exit(1);
 	newnsfd = open(fnam, O_RDONLY);
 	if (newnsfd < 0)
-		exit(1);
+		_exit(1);
 	if (setns(newnsfd, 0) < 0)
-		exit(1);
+		_exit(1);
 	close(newnsfd);
 
 	if (pipe(cpipe) < 0)
-		exit(1);
+		_exit(1);
 
 loop:
 	cpid = fork();
 	if (cpid < 0)
-		exit(1);
+		_exit(1);
 
 	if (!cpid) {
 		char b = '1';
@@ -933,8 +934,8 @@ loop:
 	}
 
 	if (!wait_for_pid(cpid))
-		exit(1);
-	exit(0);
+		_exit(1);
+	_exit(0);
 
 again:
 	kill(cpid, SIGKILL);
@@ -1114,12 +1115,12 @@ static void pid_from_ns(int sock, pid_t tpid)
 		if (ret <= 0) {
 			fprintf(stderr, "%s: bad select before read from parent: %s\n",
 				__func__, strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		if ((ret = read(sock, &vpid, sizeof(pid_t))) != sizeof(pid_t)) {
 			fprintf(stderr, "%s: bad read from parent: %s\n",
 				__func__, strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		if (vpid == -1) // done
 			break;
@@ -1129,10 +1130,10 @@ static void pid_from_ns(int sock, pid_t tpid)
 			v = '1';
 			cred.pid = getpid();
 			if (send_creds(sock, &cred, v, false) != SEND_CREDS_OK)
-				exit(1);
+				_exit(1);
 		}
 	}
-	exit(0);
+	_exit(0);
 }
 
 static void pid_from_ns_wrapper(int sock, pid_t tpid)
@@ -1146,22 +1147,22 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
 	if (ret < 0 || ret >= sizeof(fnam))
-		exit(1);
+		_exit(1);
 	newnsfd = open(fnam, O_RDONLY);
 	if (newnsfd < 0)
-		exit(1);
+		_exit(1);
 	if (setns(newnsfd, 0) < 0)
-		exit(1);
+		_exit(1);
 	close(newnsfd);
 
 	if (pipe(cpipe) < 0)
-		exit(1);
+		_exit(1);
 
 loop:
 	cpid = fork();
 
 	if (cpid < 0)
-		exit(1);
+		_exit(1);
 
 	if (!cpid) {
 		char b = '1';
@@ -1189,8 +1190,8 @@ loop:
 	}
 
 	if (!wait_for_pid(cpid))
-		exit(1);
-	exit(0);
+		_exit(1);
+	_exit(0);
 
 again:
 	kill(cpid, SIGKILL);
@@ -2067,7 +2068,7 @@ loop:
 	}
 
 	wait_for_pid(cpid);
-	exit(0);
+	_exit(0);
 
 again:
 	kill(cpid, SIGKILL);
@@ -2092,7 +2093,7 @@ static long int getreaperage(pid_t qpid)
 		mtime = get_pid1_time(qpid);
 		if (write(mypipe[1], &mtime, sizeof(mtime)) != sizeof(mtime))
 			fprintf(stderr, "Warning: bad write from getreaperage\n");
-		exit(0);
+		_exit(0);
 	}
 
 	close(mypipe[1]);
@@ -2673,6 +2674,8 @@ int main(int argc, char *argv[])
 	int nargs = 6;
 	bool threadsafe = detect_libnih_threadsafe();
 	char *newargv[7]; // one more than if needed if threadsafe
+
+	dbus_threads_init_default();
 
 	if (threadsafe)
 		nargs = 5;

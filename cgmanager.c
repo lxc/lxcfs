@@ -297,14 +297,14 @@ bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	}
 
 	if (setgroups(0, NULL))
-		exit(1);
+		_exit(1);
 	if (setresgid(gid, gid, gid))
-		exit(1);
+		_exit(1);
 	if (setresuid(uid, uid, uid))
-		exit(1);
+		_exit(1);
 
 	if (!cgm_dbus_connect()) {
-		exit(1);
+		_exit(1);
 	}
 
 	if ( cgmanager_create_sync(NULL, cgroup_manager, controller, cg, &e) != 0) {
@@ -313,11 +313,11 @@ bool cgm_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 		fprintf(stderr, "call to create failed (%s:%s): %s\n", controller, cg, nerr->message);
 		nih_free(nerr);
 		cgm_dbus_disconnect();
-		exit(1);
+		_exit(1);
 	}
 
 	cgm_dbus_disconnect();
-	exit(0);
+	_exit(0);
 }
 
 bool cgm_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid)
