@@ -1584,6 +1584,53 @@ out:
 	return answer;
 }
 
+static int read_file(const char *path, char *buf, size_t size,
+		     struct file_info *d)
+{
+	size_t linelen = 0, total_len = 0, rv = 0;
+	char *line = NULL;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return 0;
+
+	while (getline(&line, &linelen, f) != -1) {
+		size_t l = snprintf(cache, cache_size, "%s", line);
+		if (l < 0) {
+			perror("Error writing to cache");
+			rv = 0;
+			goto err;
+		}
+		if (l >= cache_size) {
+			fprintf(stderr, "Internal error: truncated write to cache\n");
+			rv = 0;
+			goto err;
+		}
+		if (l < cache_size) {
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+		} else {
+			cache += cache_size;
+			total_len += cache_size;
+			cache_size = 0;
+			break;
+		}
+	}
+
+	d->size = total_len;
+	if (total_len > size ) total_len = size;
+
+	/* read from off 0 */
+	memcpy(buf, d->buf, total_len);
+	rv = total_len;
+  err:
+	fclose(f);
+	free(line);
+	return rv;
+}
+
 /*
  * FUSE ops for /proc
  */
@@ -1612,7 +1659,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (!cg)
-		return 0;
+		return read_file("/proc/meminfo", buf, size, d);
 
 	if (!cgm_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
 		return 0;
@@ -1749,7 +1796,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (!cg)
-		return 0;
+		return read_file("proc/cpuinfo", buf, size, d);
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
@@ -1856,7 +1903,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (!cg)
-		return 0;
+		return read_file("/proc/stat", buf, size, d);
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
@@ -2198,7 +2245,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (!cg)
-		return 0;
+		return read_file("/proc/diskstats", buf, size, d);
 
 	if (!cgm_get_value("blkio", cg, "blkio.io_serviced", &io_serviced_str))
 		return 0;
