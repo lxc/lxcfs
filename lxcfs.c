@@ -2722,6 +2722,8 @@ int main(int argc, char *argv[])
 	bool threadsafe = detect_libnih_threadsafe();
 	char *newargv[7]; // one more than if needed if threadsafe
 
+	threadsafe = false; // still not safe with libnih+libdbus
+
 	dbus_threads_init_default();
 
 	if (threadsafe)
