@@ -26,6 +26,9 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 DEST="systemd"
             fi
 
+            if mountpoint -q ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST; then
+                continue
+            fi
             mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
             mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
         done
