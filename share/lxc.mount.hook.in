@@ -38,7 +38,7 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 arr=$(echo $DEST | tr "," "\n")
                 for single in $arr
                 do
-                    ln -s ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+                    ln -s $DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
                 done
             fi
         done
