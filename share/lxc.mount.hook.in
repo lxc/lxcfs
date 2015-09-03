@@ -1,4 +1,4 @@
-#!/bin/sh -eu
+#!/bin/bash -eu
 
 # Don't mess with containers that don't have /sys/fs/cgroup configured
 # (lxc.mount.auto = cgroup:mixed)
@@ -31,6 +31,17 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
             fi
             mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
             mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+
+            # make sure that cpu,cpuacct shows up as cpu and cpuacct
+            # separately, else systemd is unhappy
+            if [[ $DEST == *,* ]]; then
+                arr=$(echo $DEST | tr "," "\n")
+                for single in $arr
+                do
+                    mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+                    mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+                done
+            fi
         done
 
         if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
