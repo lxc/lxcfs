@@ -9,6 +9,8 @@ FUSE filesystem for LXC, offering the following features:
    - stat
    - uptime
 
+In other words, it will provide an emulated `/proc` and `/sys/fs/cgroup` folder for the containers.
+
 ## Usage
 The recommended command to run lxcfs is:
 
