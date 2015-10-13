@@ -29,7 +29,11 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
             if mountpoint -q ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST; then
                 continue
             fi
-            mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+
+	    if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST]; then
+                mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+	    fi
+
             mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
 
             # make sure that cpu,cpuacct shows up as cpu and cpuacct
@@ -38,7 +42,9 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 arr=$(echo $DEST | tr "," "\n")
                 for single in $arr
                 do
-                    ln -s $DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+		    if [ ! -L ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single ]; then
+                        ln -s $DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+		    fi
                 done
             fi
         done
