@@ -277,6 +277,21 @@ static void stripnewline(char *x)
 		x[l-1] = '\0';
 }
 
+#define INITSCOPE "/init.scope"
+static void prune_init_slice(char *cg)
+{
+	char *point;
+	point = cg + strlen(cg) - strlen(INITSCOPE);
+	if (point < cg)
+		 return;
+	if (strcmp(point, INITSCOPE) == 0) {
+		if (point == cg)
+			*(point+1) = '\0';
+		else
+			*point = '\0';
+	}
+}
+
 /*
  * If caller is in /a/b/c/d, he may only act on things under cg=/a/b/c/d.
  * If caller is in /a, he may act on /a/b, but not on /b.
@@ -311,6 +326,7 @@ static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg,
 			continue;
 		c2++;
 		stripnewline(c2);
+		prune_init_slice(c2);
 		/*
 		 * callers pass in '/' for root cgroup, otherwise they pass
 		 * in a cgroup without leading '/'
