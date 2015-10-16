@@ -7,13 +7,14 @@ VERSION_CURRENT  = 0
 VERSION_REVISION = 0
 VERSION_AGE      = 0
 
-AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\"
-AM_CFLAGS += $(DBUS_CFLAGS) $(NIH_CFLAGS) $(NIH_DBUS_CFLAGS) $(CGMANAGER_CFLAGS) $(FUSE_CFLAGS)
-AM_LDFLAGS = $(DBUS_LIBS) $(NIH_LIBS) $(NIH_DBUS_LIBS) $(CGMANAGER_LIBS) $(FUSE_LIBS)
+AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
+AM_CFLAGS += $(DBUS_CFLAGS) $(FUSE_CFLAGS) $(GLIB_CFLAGS) $(GLIBDBUS_CFLAGS) $(GIO_CFLAGS)
+AM_LDFLAGS = $(DBUS_LIBS) $(FUSE_LIBS) $(GLIB_LIBS) -pthread $(GLIBDBUS_LIBS) $(GIO_LIBS)
 
-bin_PROGRAMS = lxcfs
+bin_PROGRAMS = lxcfs lxcfs_mkdir
 
 lxcfs_SOURCES = lxcfs.c cgmanager.c cgmanager.h cpuset.c
+lxcfs_mkdir_SOURCES = lxcfs_mkdir.c cgmanager.c cgmanager.h cpuset.c
 
 EXTRA_DIST = \
 	lxcfs.man.add

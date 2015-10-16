@@ -21,15 +21,13 @@ AC_PROG_CC
 
 AC_PROG_CC_C99
 
-PKG_CHECK_MODULES([NIH], [libnih >= 1.0.2])
-PKG_CHECK_MODULES([NIH_DBUS], [libnih-dbus >= 1.0.0])
-PKG_CHECK_MODULES([DBUS], [dbus-1 >= 1.2.16])
+AC_CHECK_LIB(pthread, main)
+
+PKG_CHECK_MODULES([GLIB], [glib-2.0])
+PKG_CHECK_MODULES([GLIBDBUS], [dbus-glib-1])
+PKG_CHECK_MODULES(GIO, gio-2.0)
 PKG_CHECK_MODULES([CGMANAGER], [libcgmanager >= 0.0.0])
 PKG_CHECK_MODULES(FUSE, fuse)
-AC_CHECK_LIB(cgmanager, cgmanager_list_controllers_sync, [], AC_MSG_ERROR(["cgmanager 0.35 or higher is required"]))
-AC_CHECK_LIB(cgmanager, cgmanager_list_keys_sync, [], AC_MSG_ERROR(["cgmanager 0.35 or higher is required"]))
-AC_CHECK_LIB(nih, nih_alloc)
-AC_CHECK_FUNCS(nih_threadsafe, , , libnih)
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
 AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //" ])
