@@ -30,9 +30,9 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 continue
             fi
 
-	    if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST ]; then
+            if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST ]; then
                 mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
-	    fi
+            fi
 
             mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
 
@@ -42,9 +42,9 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 arr=$(echo $DEST | tr "," "\n")
                 for single in $arr
                 do
-		    if [ ! -L ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single ]; then
+                    if [ ! -L ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single ]; then
                         ln -s $DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
-		    fi
+                    fi
                 done
             fi
         done
