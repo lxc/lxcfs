@@ -30,7 +30,7 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 continue
             fi
 
-	    if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST]; then
+	    if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST ]; then
                 mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
 	    fi
 
