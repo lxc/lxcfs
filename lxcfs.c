@@ -6,9 +6,6 @@
  * See COPYING file for details.
  */
 
-/* XXX TODO - in debian/control, drop libcgmanager-dev,
-  and add libdbus-glib-1-dev, and libglib2.0-dev to build-deps.
-  make sure  lxcfs_mkdir is added to the installed files */
 #define FUSE_USE_VERSION 26
 
 #include <stdio.h>
@@ -107,10 +104,6 @@ static char *must_copy_string(void *parent, const char *str)
 	return dup;
 }
 
-/*
- * TODO - return value should denote whether child exited with failure
- * so callers can return errors.  Esp read/write of tasks and cgroup.procs
- */
 static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
@@ -677,10 +670,6 @@ out:
 	return ret;
 }
 
-/*
- * TODO - cache these results in a table for use in opendir, free
- * in releasedir
- */
 static int cg_opendir(const char *path, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
@@ -1676,7 +1665,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		}
 	} else {
 		/*
-		 * exec a helerp so as to get a clean dbus connection
+		 * exec a helper so as to get a clean dbus connection
 		 * 17 for lxcfs_mkdir, and spaces and newline and \0.  50 for two ints.
 		 * 50 for two ints
 		 */

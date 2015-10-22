@@ -119,7 +119,7 @@ bool cgm_dbus_connect(void)
 retry:
 	if (cgroup_manager) {
 		if (!g_dbus_connection_is_closed(cgroup_manager)) {
-			// someone else reconnect us
+			// someone else reconnected us
 			cgm_unlock();
 			return true;
 		}
