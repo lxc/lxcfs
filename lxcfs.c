@@ -539,7 +539,7 @@ static struct cgm_keys *get_cgroup_key(const char *contr, const char *dir, const
 			k = list[i];
 			for (j = 0; list[j]; j++) {
 				if (i != j)
-					free(list[j]);
+					free_key(list[j]);
 			}
 			free(list);
 			return k;
