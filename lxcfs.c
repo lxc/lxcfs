@@ -657,10 +657,14 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_gid = k->gid;
 		sb->st_size = 0;
 		free_key(k);
-		if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL))
-			return -ENOENT;
-		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY))
-			return -EACCES;
+		if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL)) {
+			ret = -ENOENT;
+			goto out;
+		}
+		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY)) {
+			ret = -EACCES;
+			goto out;
+		}
 
 		ret = 0;
 	}
