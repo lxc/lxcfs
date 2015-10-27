@@ -11,7 +11,11 @@ AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
 AM_CFLAGS += $(DBUS_CFLAGS) $(FUSE_CFLAGS) $(GLIB_CFLAGS) $(GLIBDBUS_CFLAGS) $(GIO_CFLAGS)
 AM_LDFLAGS = $(DBUS_LIBS) $(FUSE_LIBS) $(GLIB_LIBS) -pthread $(GLIBDBUS_LIBS) $(GIO_LIBS)
 
-bin_PROGRAMS = lxcfs lxcfs_mkdir
+AM_CFLAGS += -DLIBEXECDIR=\"$(LIBEXECDIR)\"
+
+bin_PROGRAMS = lxcfs
+
+pkglibexec_PROGRAMS = lxcfs_mkdir
 
 lxcfs_SOURCES = lxcfs.c cgmanager.c cgmanager.h cpuset.c
 lxcfs_mkdir_SOURCES = lxcfs_mkdir.c cgmanager.c cgmanager.h cpuset.c

@@ -1628,6 +1628,8 @@ out:
 	return ret;
 }
 
+#define LXCFS_MKDIR_PATH LIBEXECDIR "/lxcfs/lxcfs_mkdir"
+
 int cg_mkdir(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
@@ -1675,7 +1677,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		 */
 		size_t len = strlen(cgroup) + strlen(controller) + 17 + 50;
 		char *cmd = alloca(len);
-		ret = snprintf(cmd, len, "lxcfs_mkdir %d %d %s %s\n",
+		ret = snprintf(cmd, len, "%s %d %d %s %s\n", LXCFS_MKDIR_PATH,
 				fc->uid, fc->gid, controller, cgroup);
 		if (ret < 0 || ret >= len) {
 			ret = -EINVAL;

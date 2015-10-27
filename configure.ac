@@ -34,5 +34,6 @@ AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //"
 AS_AC_EXPAND(LXCFSSHAREDIR, "$datarootdir/lxcfs")
 AS_AC_EXPAND(LXCCONFDIR, "$datarootdir/lxc/config/common.conf.d")
 AS_AC_EXPAND(LXCFSTARGETDIR, "$localstatedir/lib/lxcfs")
+AS_AC_EXPAND(LIBEXECDIR, "$libexecdir")
 
 AC_OUTPUT
