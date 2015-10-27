@@ -26,7 +26,6 @@ AC_CHECK_LIB(pthread, main)
 PKG_CHECK_MODULES([GLIB], [glib-2.0])
 PKG_CHECK_MODULES([GLIBDBUS], [dbus-glib-1])
 PKG_CHECK_MODULES(GIO, gio-2.0)
-PKG_CHECK_MODULES([CGMANAGER], [libcgmanager >= 0.0.0])
 PKG_CHECK_MODULES(FUSE, fuse)
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
