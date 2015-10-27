@@ -4,7 +4,6 @@ Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache/
-cgmanager.o
 compile
 config.guess
 config.h
@@ -18,7 +17,6 @@ install-sh
 libtool
 ltmain.sh
 lxcfs
-lxcfs.o
 m4/
 missing
 stamp-h1
@@ -27,4 +25,5 @@ share/00-lxcfs.conf
 share/lxc.mount.hook
 tests/cpusetrange
 tests/test-read
-cpuset.o
+lxcfs_mkdir
+*.o
