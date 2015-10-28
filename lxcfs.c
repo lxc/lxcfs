@@ -55,6 +55,7 @@ struct file_info {
 	char *buf;  // unused as of yet
 	int buflen;
 	int size; //actual data size
+	int cached;
 };
 
 /* reserve buffer size, for cpuall in /proc/stat */
@@ -1858,6 +1859,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (offset){
 		if (offset > d->size)
 			return -EINVAL;
+		if (!d->cached)
+			return 0;
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
@@ -1931,6 +1934,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		total_len += l;
 	}
 
+	d->cached = 1;
 	d->size = total_len;
 	if (total_len > size ) total_len = size;
 	memcpy(buf, d->buf, total_len);
@@ -2001,6 +2005,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (offset){
 		if (offset > d->size)
 			return -EINVAL;
+		if (!d->cached)
+			return 0;
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
@@ -2074,6 +2080,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		}
 	}
 
+	d->cached = 1;
 	d->size = total_len;
 	if (total_len > size ) total_len = size;
 
@@ -2112,6 +2119,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (offset){
 		if (offset > d->size)
 			return -EINVAL;
+		if (!d->cached)
+			return 0;
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, d->buf + offset, total_len);
@@ -2224,6 +2233,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	memmove(cache, d->buf + CPUALL_MAX_SIZE, total_len);
 	total_len += cpuall_len;
+	d->cached = 1;
 	d->size = total_len;
 	if (total_len > size ) total_len = size;
 
@@ -2417,25 +2427,32 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = (struct file_info *)fi->fh;
 	long int reaperage = getreaperage(fc->pid);;
 	unsigned long int idletime = getprocidle();
+	char *cache = d->buf;
 	size_t total_len = 0;
 
 	if (offset){
 		if (offset > d->size)
 			return -EINVAL;
-		return 0;
+		if (!d->cached)
+			return 0;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;
 	}
 
-	total_len = snprintf(buf, size, "%ld.0 %lu.0\n", reaperage, idletime);
+	total_len = snprintf(d->buf, d->size, "%ld.0 %lu.0\n", reaperage, idletime);
 	if (total_len < 0){
 		perror("Error writing to cache");
 		return 0;
 	}
-	if (total_len >= size){
-		d->size = size;
-		return size;
-	}
 
-	d->size = total_len;
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if (total_len > size) total_len = size;
+
+	memcpy(buf, d->buf, total_len);
 	return total_len;
 }
 
@@ -2454,6 +2471,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	unsigned long read_ticks = 0, write_ticks = 0;
 	unsigned long ios_pgr = 0, tot_ticks = 0, rq_ticks = 0;
 	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	unsigned int major = 0, minor = 0;
@@ -2463,7 +2482,12 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	if (offset){
 		if (offset > d->size)
 			return -EINVAL;
-		return 0;
+		if (!d->cached)
+			return 0;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;
 	}
 
 	cg = get_pid_cgroup(fc->pid, "blkio");
@@ -2528,23 +2552,27 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		} else
 			continue;
 
-		l = snprintf(buf, size, "%s", printme);
+		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0) {
 			perror("Error writing to fuse buf");
 			rv = 0;
 			goto err;
 		}
-		if (l >= size) {
+		if (l >= cache_size) {
 			fprintf(stderr, "Internal error: truncated write to cache\n");
 			rv = 0;
 			goto err;
 		}
-		buf += l;
-		size -= l;
+		cache += l;
+		cache_size -= l;
 		total_len += l;
 	}
 
+	d->cached = 1;
 	d->size = total_len;
+	if (total_len > size ) total_len = size;
+	memcpy(buf, d->buf, total_len);
+
 	rv = total_len;
 err:
 	free(cg);
