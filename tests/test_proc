@@ -35,7 +35,7 @@ grep -q "^MemTotal.*1024 kB$" /var/lib/lxcfs/proc/meminfo
 
 # Test uptime
 if [ -e /proc/self/ns/user ]; then
-    [ "$(lxc-unshare -s 'USER|PID' cat /var/lib/lxcfs/proc/uptime)" = "0 0" ]
+    [ "$(lxc-unshare -s 'USER|PID' cat /var/lib/lxcfs/proc/uptime)" = "0.0 0.0" ]
 fi
 
 PASS=1

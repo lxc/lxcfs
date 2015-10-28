@@ -2387,16 +2387,18 @@ out:
 	return answer;
 }
 
-static long int getprocidle(void)
+static unsigned long int getprocidle(void)
 {
 	FILE *f = fopen("/proc/uptime", "r");
-	long int age, idle;
+	unsigned long int age, idle;
+	unsigned long int age_nsec, idle_nsec;
+
 	int ret;
 	if (!f)
 		return 0;
-	ret = fscanf(f, "%ld %ld", &age, &idle);
+	ret = fscanf(f, "%lu.%02lu %lu.%02lu", &age, &age_nsec, &idle, &idle_nsec);
 	fclose(f);
-	if (ret != 2)
+	if (ret != 4)
 		return 0;
 	return idle;
 }
@@ -2412,7 +2414,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	long int reaperage = getreaperage(fc->pid);;
-	long int idletime = getprocidle();
+	unsigned long int idletime = getprocidle();
 	size_t total_len = 0;
 
 	if (offset){
@@ -2421,7 +2423,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		return 0;
 	}
 
-	total_len = snprintf(buf, size, "%ld %ld\n", reaperage, idletime);
+	total_len = snprintf(buf, size, "%ld.0 %lu.0\n", reaperage, idletime);
 	if (total_len < 0){
 		perror("Error writing to cache");
 		return 0;
