@@ -1842,13 +1842,43 @@ static int read_file(const char *path, char *buf, size_t size,
  * FUSE ops for /proc
  */
 
+static unsigned long get_memlimit(const char *cgroup)
+{
+	char *memlimit_str = NULL;
+	unsigned long memlimit = -1;
+
+	if (cgm_get_value("memory", cgroup, "memory.limit_in_bytes", &memlimit_str))
+		memlimit = strtoul(memlimit_str, NULL, 10);
+
+	free(memlimit_str);
+
+	return memlimit;
+}
+
+static unsigned long get_min_memlimit(const char *cgroup)
+{
+	char *copy = strdupa(cgroup);
+	unsigned long memlimit = 0, retlimit;
+
+	retlimit = get_memlimit(copy);
+
+	while (strcmp(copy, "/") != 0) {
+		copy = dirname(copy);
+		memlimit = get_memlimit(copy);
+		if (memlimit != -1 && memlimit < retlimit)
+			retlimit = memlimit;
+	};
+
+	return retlimit;
+}
+
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
-	char *memlimit_str = NULL, *memusage_str = NULL, *memstat_str = NULL;
+	char *memusage_str = NULL, *memstat_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, cached = 0, hosttotal = 0;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
@@ -1871,13 +1901,11 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (!cg)
 		return read_file("/proc/meminfo", buf, size, d);
 
-	if (!cgm_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
-		goto err;
+	memlimit = get_min_memlimit(cg);
 	if (!cgm_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
 	if (!cgm_get_value("memory", cg, "memory.stat", &memstat_str))
 		goto err;
-	memlimit = strtoul(memlimit_str, NULL, 10);
 	memusage = strtoul(memusage_str, NULL, 10);
 	memlimit /= 1024;
 	memusage /= 1024;
@@ -1945,7 +1973,6 @@ err:
 		fclose(f);
 	free(line);
 	free(cg);
-	free(memlimit_str);
 	free(memusage_str);
 	free(memstat_str);
 	return rv;

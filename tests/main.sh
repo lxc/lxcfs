@@ -55,5 +55,7 @@ TESTCASE="test_read_proc.sh"
 ${dirname}/test_read_proc.sh
 TESTCASE="cpusetrange"
 ${dirname}/cpusetrange
+TESTCASE="meminfo hierarchy"
+${dirname}/test_meminfo_hierarchy.sh
 
 FAILED=0
