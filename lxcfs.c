@@ -2441,6 +2441,9 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
+	if (idletime > reaperage)
+		idletime = reaperage;
+
 	total_len = snprintf(d->buf, d->size, "%ld.0 %lu.0\n", reaperage, idletime);
 	if (total_len < 0){
 		perror("Error writing to cache");
