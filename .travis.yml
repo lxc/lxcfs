@@ -5,12 +5,10 @@ compiler:
 before_install:
  - sudo add-apt-repository ppa:ubuntu-lxc/daily -y
  - sudo apt-get update -qq
- - sudo DEBIAN_FRONTEND=noninteractive DEBIAN_PRIORITY=critical apt-get -y --force-yes dist-upgrade -qq
  - sudo apt-get -y install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
  - sudo apt-get -y install -qq realpath || true
  - sudo apt-get -y install -qq automake libtool
-#script: ./bootstrap.sh && ./configure && make -j4 && make tests && cd tests && sudo ./main.sh
-script: ./bootstrap.sh && ./configure && make -j4 && make tests
+script: ./bootstrap.sh && ./configure && make -j4 && make tests && cd tests && sudo ./main.sh
 notifications:
   email:
     recipients:

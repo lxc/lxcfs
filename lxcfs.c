@@ -25,6 +25,9 @@
 #include <sys/mount.h>
 #include <wait.h>
 
+#define GLIB_DISABLE_DEPRECATION_WARNINGS
+#include <glib-object.h>
+
 #include "cgmanager.h"
 #include "config.h" // for VERSION
 
@@ -3004,6 +3007,10 @@ int main(int argc, char *argv[])
 	 */
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
+
+	/* for travis which runs on 12.04 */
+	if (glib_check_version (2, 36, 0) != NULL)
+		g_type_init ();
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
