@@ -6,9 +6,9 @@ before_install:
  - sudo add-apt-repository ppa:ubuntu-lxc/daily -y
  - sudo apt-get update -qq
  - sudo apt-get install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
- - sudo apt-get install -qq cgmanager-utils || true
  - sudo apt-get install -qq realpath || true
-script: ./bootstrap.sh && ./configure && make -j4 && make tests && sudo ./tests/main.sh
+ - sudo apt-get install -qq automake libtool
+script: ./bootstrap.sh && ./configure && make -j4 && make tests && cd tests && sudo ./main.sh
 notifications:
   email:
     recipients:
