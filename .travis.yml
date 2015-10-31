@@ -5,6 +5,7 @@ compiler:
 before_install:
  - sudo add-apt-repository ppa:ubuntu-lxc/daily -y
  - sudo apt-get update -qq
+ - sudo apt-get dist-upgrade -qq
  - sudo apt-get install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
  - sudo apt-get install -qq realpath || true
  - sudo apt-get install -qq automake libtool
