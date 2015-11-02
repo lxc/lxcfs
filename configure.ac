@@ -23,17 +23,20 @@ AC_PROG_CC_C99
 
 AC_CHECK_LIB(pthread, main)
 
-PKG_CHECK_MODULES([GLIB], [glib-2.0])
-PKG_CHECK_MODULES([GLIBDBUS], [dbus-glib-1])
-PKG_CHECK_MODULES(GIO, gio-2.0)
 PKG_CHECK_MODULES(FUSE, fuse)
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
 AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //" ])
 
+AC_ARG_WITH([runtime-path],
+	[AC_HELP_STRING(
+		[--with-runtime-path=dir],
+		[runtime directory (default: /run)]
+	)], [], [with_runtime_path=['/run']])
+
+AS_AC_EXPAND(RUNTIME_PATH, "$with_runtime_path")
 AS_AC_EXPAND(LXCFSSHAREDIR, "$datarootdir/lxcfs")
 AS_AC_EXPAND(LXCCONFDIR, "$datarootdir/lxc/config/common.conf.d")
 AS_AC_EXPAND(LXCFSTARGETDIR, "$localstatedir/lib/lxcfs")
-AS_AC_EXPAND(LIBEXECDIR, "$libexecdir")
 
 AC_OUTPUT

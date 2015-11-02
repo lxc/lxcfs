@@ -6,6 +6,14 @@
  * See COPYING file for details.
  */
 
+/*
+ * TODO XXX
+ * sanitize paths for '..', cgmanager's not doing that for us any more
+ *     does fuse help us?
+ * Surely there are more paths we'll need to sanitize - look back through
+ * cgmanager's sources.
+ */
+
 #define FUSE_USE_VERSION 26
 
 #include <stdio.h>
@@ -30,17 +38,8 @@
 #include <glib-object.h>
 #endif
 
-#include "cgmanager.h"
+#include "cgfs.h"
 #include "config.h" // for VERSION
-
-struct lxcfs_state {
-	/*
-	 * a null-terminated list of the mounted subsystems.  We
-	 * detect this at startup.
-	 */
-	char **subsystems;
-};
-#define LXCFS_DATA ((struct lxcfs_state *) fuse_get_context()->private_data)
 
 enum {
 	LXC_TYPE_CGDIR,
@@ -96,18 +95,6 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 	memcpy(d+*sz, tmp, strlen(tmp));
 	*sz += strlen(tmp);
 	d[*sz] = '\0';
-}
-
-static char *must_copy_string(void *parent, const char *str)
-{
-	char *dup = NULL;
-	if (!str)
-		return NULL;
-	do {
-		dup = strdup(str);
-	} while (!dup);
-
-	return dup;
 }
 
 static int wait_for_pid(pid_t pid)
@@ -332,9 +319,8 @@ out:
  */
 static bool fc_may_access(struct fuse_context *fc, const char *contrl, const char *cg, const char *file, mode_t mode)
 {
-	struct cgm_keys **list = NULL;
+	struct cgfs_files *k = NULL;
 	bool ret = false;
-	int i;
 
 	if (!file)
 		file = "tasks";
@@ -342,30 +328,26 @@ static bool fc_may_access(struct fuse_context *fc, const char *contrl, const cha
 	if (*file == '/')
 		file++;
 
-	if (!cgm_list_keys(contrl, cg, &list))
+	k = cgfs_get_key(contrl, cg, file);
+	if (!k)
 		return false;
-	for (i = 0; list[i]; i++) {
-		if (strcmp(list[i]->name, file) == 0) {
-			struct cgm_keys *k = list[i];
-			if (is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_OPT)) {
-				if (perms_include(k->mode >> 6, mode)) {
-					ret = true;
-					goto out;
-				}
-			}
-			if (fc->gid == k->gid) {
-				if (perms_include(k->mode >> 3, mode)) {
-					ret = true;
-					goto out;
-				}
-			}
-			ret = perms_include(k->mode, mode);
+
+	if (is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_OPT)) {
+		if (perms_include(k->mode >> 6, mode)) {
+			ret = true;
 			goto out;
 		}
 	}
+	if (fc->gid == k->gid) {
+		if (perms_include(k->mode >> 3, mode)) {
+			ret = true;
+			goto out;
+		}
+	}
+	ret = perms_include(k->mode, mode);
 
 out:
-	free_keys(list);
+	free_key(k);
 	return ret;
 }
 
@@ -464,14 +446,10 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	if (slash)
 		*slash = '\0';
 
-	/* verify that it is a subsystem */
-	char **list = LXCFS_DATA ? LXCFS_DATA->subsystems : NULL;
 	int i;
-	if (!list)
-		return NULL;
-	for (i = 0;  list[i];  i++) {
-		if (strcmp(list[i], contr) == 0)
-			return list[i];
+	for (i = 0;  i < num_hierarchies;  i++) {
+		if (hierarchies[i] && strcmp(hierarchies[i], contr) == 0)
+			return hierarchies[i];
 	}
 	return NULL;
 }
@@ -490,63 +468,6 @@ static const char *find_cgroup_in_path(const char *path)
 	if (!p1)
 		return NULL;
 	return p1+1;
-}
-
-static bool is_child_cgroup(const char *contr, const char *dir, const char *f)
-{
-	char **list;
-	bool ret = false;
-	int i;
-
-	if (!f)
-		return false;
-	if (*f == '/')
-		f++;
-
-	if (!cgm_list_children(contr, dir, &list))
-		return false;
-	for (i = 0; list[i]; i++) {
-		if (strcmp(list[i], f) == 0) {
-			ret = true;
-			goto out;
-		}
-	}
-
-out:
-	for (i = 0; list[i]; i++)
-		free(list[i]);
-	free(list);
-	return ret;
-}
-
-static struct cgm_keys *get_cgroup_key(const char *contr, const char *dir, const char *f)
-{
-	struct cgm_keys **list = NULL;
-	struct cgm_keys *k = NULL;
-	int i;
-
-	if (!f)
-		return NULL;
-	if (*f == '/')
-		f++;
-	if (!cgm_list_keys(contr, dir, &list))
-		return NULL;
-	for (i = 0; list[i]; i++) {
-		if (strcmp(list[i]->name, f) == 0) {
-			int j;
-			// free all the keys we are not returning
-			k = list[i];
-			for (j = 0; list[j]; j++) {
-				if (i != j)
-					free_key(list[j]);
-			}
-			free(list);
-			return k;
-		}
-	}
-
-	free_keys(list);
-	return NULL;
 }
 
 /*
@@ -578,7 +499,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 	struct fuse_context *fc = fuse_get_context();
 	char * cgdir = NULL;
 	char *fpath = NULL, *path1, *path2;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	const char *controller = NULL;
 	int ret = -ENOENT;
@@ -643,7 +564,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		// get uid, gid, from '/tasks' file and make up a mode
 		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
 		sb->st_mode = S_IFDIR | 00755;
-		k = get_cgroup_key(controller, cgroup, "tasks");
+		k = cgfs_get_key(controller, cgroup, "tasks");
 		if (!k) {
 			sb->st_uid = sb->st_gid = 0;
 		} else {
@@ -656,7 +577,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		goto out;
 	}
 
-	if ((k = get_cgroup_key(controller, path1, path2)) != NULL) {
+	if ((k = cgfs_get_key(controller, path1, path2)) != NULL) {
 		sb->st_mode = S_IFREG | k->mode;
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
@@ -714,8 +635,8 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	dir_info = malloc(sizeof(*dir_info));
 	if (!dir_info)
 		return -ENOMEM;
-	dir_info->controller = must_copy_string(dir_info, controller);
-	dir_info->cgroup = must_copy_string(dir_info, cgroup);
+	dir_info->controller = must_copy_string(controller);
+	dir_info->cgroup = must_copy_string(cgroup);
 	dir_info->type = LXC_TYPE_CGDIR;
 	dir_info->buf = NULL;
 	dir_info->file = NULL;
@@ -729,7 +650,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		struct fuse_file_info *fi)
 {
 	struct file_info *d = (struct file_info *)fi->fh;
-	struct cgm_keys **list = NULL;
+	struct cgfs_files **list = NULL;
 	int i, ret;
 	char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
@@ -741,21 +662,17 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	}
 	if (!d->cgroup && !d->controller) {
 		// ls /var/lib/lxcfs/cgroup - just show list of controllers
-		char **list = LXCFS_DATA ? LXCFS_DATA->subsystems : NULL;
 		int i;
 
-		if (!list)
-			return -EIO;
-
-		for (i = 0;  list[i]; i++) {
-			if (filler(buf, list[i], NULL, 0) != 0) {
+		for (i = 0;  i < num_hierarchies; i++) {
+			if (hierarchies[i] && filler(buf, hierarchies[i], NULL, 0) != 0) {
 				return -EIO;
 			}
 		}
 		return 0;
 	}
 
-	if (!cgm_list_keys(d->controller, d->cgroup, &list)) {
+	if (!cgfs_list_keys(d->controller, d->cgroup, &list)) {
 		// not a valid cgroup
 		ret = -EINVAL;
 		goto out;
@@ -784,7 +701,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 
 	// now get the list of child cgroups
 
-	if (!cgm_list_children(d->controller, d->cgroup, &clist)) {
+	if (!cgfs_list_children(d->controller, d->cgroup, &clist)) {
 		ret = 0;
 		goto out;
 	}
@@ -829,7 +746,7 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 {
 	const char *cgroup;
 	char *fpath = NULL, *path1, *path2, * cgdir = NULL, *controller;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	struct file_info *file_info;
 	struct fuse_context *fc = fuse_get_context();
 	int ret;
@@ -853,7 +770,7 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 		path2 = fpath;
 	}
 
-	k = get_cgroup_key(controller, path1, path2);
+	k = cgfs_get_key(controller, path1, path2);
 	if (!k) {
 		ret = -EINVAL;
 		goto out;
@@ -872,9 +789,9 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 		ret = -ENOMEM;
 		goto out;
 	}
-	file_info->controller = must_copy_string(file_info, controller);
-	file_info->cgroup = must_copy_string(file_info, path1);
-	file_info->file = must_copy_string(file_info, path2);
+	file_info->controller = must_copy_string(controller);
+	file_info->cgroup = must_copy_string(path1);
+	file_info->file = must_copy_string(path2);
 	file_info->type = LXC_TYPE_CGFILE;
 	file_info->buf = NULL;
 	file_info->buflen = 0;
@@ -1115,7 +1032,7 @@ again:
 /*
  * To read cgroup files with a particular pid, we will setns into the child
  * pidns, open a pipe, fork a child - which will be the first to really be in
- * the child ns - which does the cgm_get_value and writes the data to the pipe.
+ * the child ns - which does the cgfs_get_value and writes the data to the pipe.
  */
 static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const char *file, char **d)
 {
@@ -1130,7 +1047,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 	size_t sz = 0, asz = 0;
 	fd_set s;
 
-	if (!cgm_get_value(contrl, cg, file, &tmpdata))
+	if (!cgfs_get_value(contrl, cg, file, &tmpdata))
 		return false;
 
 	/*
@@ -1215,7 +1132,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *f = (struct file_info *)fi->fh;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	char *data = NULL;
 	int ret, s;
 	bool r;
@@ -1234,7 +1151,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	if (!f->controller)
 		return -EINVAL;
 
-	if ((k = get_cgroup_key(f->controller, f->cgroup, f->file)) == NULL) {
+	if ((k = cgfs_get_key(f->controller, f->cgroup, f->file)) == NULL) {
 		return -EINVAL;
 	}
 	free_key(k);
@@ -1252,7 +1169,7 @@ static int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		// special case - we have to translate the pids
 		r = do_read_pids(fc->pid, f->controller, f->cgroup, f->file, &data);
 	else
-		r = cgm_get_value(f->controller, f->cgroup, f->file, &data);
+		r = cgfs_get_value(f->controller, f->cgroup, f->file, &data);
 
 	if (!r) {
 		ret = -EINVAL;
@@ -1385,7 +1302,12 @@ static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const 
 {
 	int sock[2] = {-1, -1};
 	pid_t qpid, cpid = -1;
+	FILE *pids_file = NULL;
 	bool answer = false, fail = false;
+
+	pids_file = open_pids_file(contrl, cg);
+	if (!pids_file)
+		return false;
 
 	/*
 	 * write the pids to a socket, have helper in writer's pidns
@@ -1393,15 +1315,17 @@ static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const 
 	 */
 	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
 		perror("socketpair");
-		exit(1);
+		goto out;
 	}
 
 	cpid = fork();
 	if (cpid == -1)
 		goto out;
 
-	if (!cpid) // child
+	if (!cpid) { // child
+		fclose(pids_file);
 		pid_from_ns_wrapper(sock[1], tpid);
+	}
 
 	const char *ptr = buf;
 	while (sscanf(ptr, "%d", &qpid) == 1) {
@@ -1416,7 +1340,7 @@ static bool do_write_pids(pid_t tpid, const char *contrl, const char *cg, const 
 
 		if (recv_creds(sock[0], &cred, &v)) {
 			if (v == '0') {
-				if (!cgm_move_pid(contrl, cg, cred.pid))
+				if (fprintf(pids_file, "%d", (int) cred.pid) < 0)
 					fail = true;
 			}
 		}
@@ -1442,6 +1366,10 @@ out:
 		close(sock[0]);
 		close(sock[1]);
 	}
+	if (pids_file) {
+		if (fclose(pids_file) != 0)
+			answer = false;
+	}
 	return answer;
 }
 
@@ -1450,7 +1378,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *localbuf = NULL;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	struct file_info *f = (struct file_info *)fi->fh;
 	bool r;
 
@@ -1469,7 +1397,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	localbuf[size] = '\0';
 	memcpy(localbuf, buf, size);
 
-	if ((k = get_cgroup_key(f->controller, f->cgroup, f->file)) == NULL) {
+	if ((k = cgfs_get_key(f->controller, f->cgroup, f->file)) == NULL) {
 		size = -EINVAL;
 		goto out;
 	}
@@ -1486,7 +1414,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 		// special case - we have to translate the pids
 		r = do_write_pids(fc->pid, f->controller, f->cgroup, f->file, localbuf);
 	else
-		r = cgm_set_value(f->controller, f->cgroup, f->file, localbuf);
+		r = cgfs_set_value(f->controller, f->cgroup, f->file, localbuf);
 
 	if (!r)
 		size = -EINVAL;
@@ -1500,7 +1428,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *cgdir = NULL, *fpath = NULL, *path1, *path2, *controller;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1531,10 +1459,10 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 	if (is_child_cgroup(controller, path1, path2)) {
 		// get uid, gid, from '/tasks' file and make up a mode
 		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
-		k = get_cgroup_key(controller, cgroup, "tasks");
+		k = cgfs_get_key(controller, cgroup, "tasks");
 
 	} else
-		k = get_cgroup_key(controller, path1, path2);
+		k = cgfs_get_key(controller, path1, path2);
 
 	if (!k) {
 		ret = -EINVAL;
@@ -1552,7 +1480,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 		goto out;
 	}
 
-	if (!cgm_chown_file(controller, cgroup, uid, gid)) {
+	if (!cgfs_chown_file(controller, cgroup, uid, gid)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1570,7 +1498,7 @@ int cg_chmod(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char * cgdir = NULL, *fpath = NULL, *path1, *path2, *controller;
-	struct cgm_keys *k = NULL;
+	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1601,10 +1529,10 @@ int cg_chmod(const char *path, mode_t mode)
 	if (is_child_cgroup(controller, path1, path2)) {
 		// get uid, gid, from '/tasks' file and make up a mode
 		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
-		k = get_cgroup_key(controller, cgroup, "tasks");
+		k = cgfs_get_key(controller, cgroup, "tasks");
 
 	} else
-		k = get_cgroup_key(controller, path1, path2);
+		k = cgfs_get_key(controller, path1, path2);
 
 	if (!k) {
 		ret = -EINVAL;
@@ -1622,7 +1550,7 @@ int cg_chmod(const char *path, mode_t mode)
 		goto out;
 	}
 
-	if (!cgm_chmod_file(controller, cgroup, mode)) {
+	if (!cgfs_chmod_file(controller, cgroup, mode)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1633,8 +1561,6 @@ out:
 	free(cgdir);
 	return ret;
 }
-
-#define LXCFS_MKDIR_PATH LIBEXECDIR "/lxcfs/lxcfs_mkdir"
 
 int cg_mkdir(const char *path, mode_t mode)
 {
@@ -1671,27 +1597,26 @@ int cg_mkdir(const char *path, mode_t mode)
 	}
 
 	if (fc->uid == 0 && fc->gid == 0) {
-		if (!cgm_create(controller, cgroup)) {
+		if (!cgfs_create(controller, cgroup)) {
 			ret = -EINVAL;
 			goto out;
 		}
 	} else {
-		/*
-		 * exec a helper so as to get a clean dbus connection
-		 * 17 for lxcfs_mkdir, and spaces and newline and \0.  50 for two ints.
-		 * 50 for two ints
-		 */
-		size_t len = strlen(cgroup) + strlen(controller) + 17 + 50;
-		char *cmd = alloca(len);
-		ret = snprintf(cmd, len, "%s %d %d %s %s\n", LXCFS_MKDIR_PATH,
-				fc->uid, fc->gid, controller, cgroup);
-		if (ret < 0 || ret >= len) {
+		if (setresuid(fc->uid, fc->gid, 0) < 0) { // bail
+			fprintf(stderr, "ERROR - DANGER - setresuid failed!\n");
+			exit(1);
+		}
+
+		bool bret = cgfs_create(controller, cgroup);
+
+		if (setresuid(0, 0, 0) < 0) {
+			fprintf(stderr, "ERROR - failed to restore uids!\n");
+			exit(1);
+		}
+		if (!bret) {
 			ret = -EINVAL;
 			goto out;
 		}
-		ret = system(cmd);
-		if (ret != 0)
-			goto out;
 	}
 
 	ret = 0;
@@ -1736,7 +1661,7 @@ static int cg_rmdir(const char *path)
 		goto out;
 	}
 
-	if (!cgm_remove(controller, cgroup)) {
+	if (!cgfs_remove(controller, cgroup)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1852,7 +1777,7 @@ static unsigned long get_memlimit(const char *cgroup)
 	char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
 
-	if (cgm_get_value("memory", cgroup, "memory.limit_in_bytes", &memlimit_str))
+	if (cgfs_get_value("memory", cgroup, "memory.limit_in_bytes", &memlimit_str))
 		memlimit = strtoul(memlimit_str, NULL, 10);
 
 	free(memlimit_str);
@@ -1907,9 +1832,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/meminfo", buf, size, d);
 
 	memlimit = get_min_memlimit(cg);
-	if (!cgm_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
+	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
-	if (!cgm_get_value("memory", cg, "memory.stat", &memstat_str))
+	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
 		goto err;
 	memusage = strtoul(memusage_str, NULL, 10);
 	memlimit /= 1024;
@@ -1991,7 +1916,7 @@ static char *get_cpuset(const char *cg)
 {
 	char *answer;
 
-	if (!cgm_get_value("cpuset", cg, "cpuset.cpus", &answer))
+	if (!cgfs_get_value("cpuset", cg, "cpuset.cpus", &answer))
 		return NULL;
 	return answer;
 }
@@ -2529,15 +2454,15 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	if (!cg)
 		return read_file("/proc/diskstats", buf, size, d);
 
-	if (!cgm_get_value("blkio", cg, "blkio.io_serviced", &io_serviced_str))
+	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced", &io_serviced_str))
 		goto err;
-	if (!cgm_get_value("blkio", cg, "blkio.io_merged", &io_merged_str))
+	if (!cgfs_get_value("blkio", cg, "blkio.io_merged", &io_merged_str))
 		goto err;
-	if (!cgm_get_value("blkio", cg, "blkio.io_service_bytes", &io_service_bytes_str))
+	if (!cgfs_get_value("blkio", cg, "blkio.io_service_bytes", &io_service_bytes_str))
 		goto err;
-	if (!cgm_get_value("blkio", cg, "blkio.io_wait_time", &io_wait_time_str))
+	if (!cgfs_get_value("blkio", cg, "blkio.io_wait_time", &io_wait_time_str))
 		goto err;
-	if (!cgm_get_value("blkio", cg, "blkio.io_service_time", &io_service_time_str))
+	if (!cgfs_get_value("blkio", cg, "blkio.io_service_time", &io_service_time_str))
 		goto err;
 
 
@@ -3002,7 +2927,6 @@ void swallow_option(int *argcp, char *argv[], char *opt, char *v)
 int main(int argc, char *argv[])
 {
 	int ret = -1;
-	struct lxcfs_state *d = NULL;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
@@ -3028,10 +2952,6 @@ int main(int argc, char *argv[])
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
-	do {
-		d = malloc(sizeof(*d));
-	} while (!d);
-
 	newargv[cnt++] = argv[0];
 	newargv[cnt++] = "-f";
 	newargv[cnt++] = "-o";
@@ -3039,16 +2959,11 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
-	if (!cgm_escape_cgroup())
-		fprintf(stderr, "WARNING: failed to escape to root cgroup\n");
-
-	if (!cgm_get_controllers(&d->subsystems))
+	if (!cgfs_setup_controllers())
 		goto out;
 
-	ret = fuse_main(nargs, newargv, &lxcfs_ops, d);
-	cgm_dbus_disconnect();
+	ret = fuse_main(nargs, newargv, &lxcfs_ops, NULL);
 
 out:
-	free(d);
 	return ret;
 }
