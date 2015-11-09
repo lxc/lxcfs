@@ -2359,20 +2359,102 @@ out:
 	return answer;
 }
 
-static unsigned long int getprocidle(void)
+/*
+ * fork a task which switches to @task's namespace and writes '1'.
+ * over a unix sock so we can read the task's reaper's pid in our
+ * namespace
+ */
+void write_task_init_pid_exit(int sock, pid_t target)
 {
-	FILE *f = fopen("/proc/uptime", "r");
-	unsigned long int age, idle;
-	unsigned long int age_nsec, idle_nsec;
+	struct ucred cred;
+	char fnam[100];
+	pid_t pid;
+	char v;
+	int fd, ret;
 
-	int ret;
-	if (!f)
+	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
+	if (ret < 0 || ret >= sizeof(fnam))
+		exit(1);
+
+	fd = open(fnam, O_RDONLY);
+	if (fd < 0) {
+		perror("get_pid1_time open of ns/pid");
+		exit(1);
+	}
+	if (setns(fd, 0)) {
+		perror("get_pid1_time setns 1");
+		close(fd);
+		exit(1);
+	}
+	pid = fork();
+	if (pid < 0)
+		exit(1);
+	if (pid != 0) {
+		wait_for_pid(pid);
+		exit(0);
+	}
+
+	/* we are the child */
+	cred.uid = 0;
+	cred.gid = 0;
+	cred.pid = 1;
+	v = '1';
+	send_creds(sock, &cred, v, true);
+	exit(0);
+}
+
+static pid_t get_task_reaper_pid(pid_t task)
+{
+	int sock[2];
+	pid_t pid;
+	pid_t ret = -1;
+	char v = '0';
+	struct ucred cred;
+
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
+		perror("socketpair");
+		return -1;
+	}
+
+	pid = fork();
+	if (pid < 0)
+		goto out;
+	if (!pid) {
+		close(sock[1]);
+		write_task_init_pid_exit(sock[0], task);
+	}
+
+	if (!recv_creds(sock[1], &cred, &v))
+		goto out;
+	ret = cred.pid;
+
+out:
+	close(sock[0]);
+	close(sock[1]);
+	return ret;
+}
+
+static unsigned long get_reaper_busy(pid_t task)
+{
+	pid_t init = get_task_reaper_pid(task);
+	char *cgroup = NULL, *usage_str = NULL;
+	unsigned long usage = 0;
+
+	if (init == -1)
 		return 0;
-	ret = fscanf(f, "%lu.%02lu %lu.%02lu", &age, &age_nsec, &idle, &idle_nsec);
-	fclose(f);
-	if (ret != 4)
-		return 0;
-	return idle;
+
+	cgroup = get_pid_cgroup(task, "cpuacct");
+	if (!cgroup)
+		goto out;
+	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
+		goto out;
+	usage = strtoul(usage_str, NULL, 10);
+	usage /= 100000000;
+
+out:
+	free(cgroup);
+	free(usage_str);
+	return usage;
 }
 
 /*
@@ -2386,7 +2468,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	long int reaperage = getreaperage(fc->pid);;
-	unsigned long int idletime = getprocidle();
+	unsigned long int busytime = get_reaper_busy(fc->pid), idletime;
 	char *cache = d->buf;
 	size_t total_len = 0;
 
@@ -2401,6 +2483,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
+	idletime = reaperage - busytime;
 	if (idletime > reaperage)
 		idletime = reaperage;
 
