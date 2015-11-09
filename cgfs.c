@@ -299,12 +299,36 @@ bool cgfs_setup_controllers(void)
 	return true;
 }
 
+static bool in_comma_list(const char *needle, const char *haystack)
+{
+	const char *s = haystack, *e;
+	size_t nlen = strlen(needle);
+
+	while (*s && (e = index(s, ','))) {
+		if (nlen != e - s) {
+			s = e + 1;
+			continue;
+		}
+		if (strncmp(needle, s, nlen) == 0)
+			return true;
+		s = e + 1;
+	}
+	if (strcmp(needle, s) == 0)
+		return true;
+	return false;
+}
+
 /* do we need to do any massaging here?  I'm not sure... */
 char *find_mounted_controller(const char *controller)
 {
-	int i = 0;
+	int i;
+
 	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i] && strcmp(hierarchies[i], controller) == 0)
+		if (!hierarchies[i])
+			continue;
+		if (strcmp(hierarchies[i], controller) == 0)
+			return hierarchies[i];
+		if (in_comma_list(controller, hierarchies[i]))
 			return hierarchies[i];
 	}
 
