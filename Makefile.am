@@ -15,7 +15,7 @@ AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 bin_PROGRAMS = lxcfs
 
-lxcfs_SOURCES = lxcfs.c cgfs.c cpuset.c
+lxcfs_SOURCES = lxcfs.c cgfs.c cgfs.h cpuset.c
 
 EXTRA_DIST = \
 	lxcfs.man.add
