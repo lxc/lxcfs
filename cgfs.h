@@ -1,6 +1,7 @@
 #include <stdbool.h>
 
 bool cgfs_setup_controllers(void);
+char *find_mounted_controller(const char *controller);
 char *must_copy_string(const char *str);
 
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,

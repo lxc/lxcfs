@@ -271,6 +271,9 @@ static char *get_pid_cgroup(pid_t pid, const char *contrl)
 	char *line = NULL;
 	size_t len = 0;
 	int ret;
+	const char *h = find_mounted_controller(contrl);
+	if (!h)
+		return NULL;
 
 	ret = snprintf(fnam, PROCLEN, "/proc/%d/cgroup", pid);
 	if (ret < 0 || ret >= PROCLEN)
@@ -290,7 +293,7 @@ static char *get_pid_cgroup(pid_t pid, const char *contrl)
 		if (!c2)
 			goto out;
 		*c2 = '\0';
-		if (strcmp(c1, contrl) != 0)
+		if (strcmp(c1, h) != 0)
 			continue;
 		c2++;
 		stripnewline(c2);
