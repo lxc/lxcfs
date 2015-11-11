@@ -1483,12 +1483,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 		goto out;
 	}
 
-	if (!cgfs_chown_file(controller, cgroup, uid, gid)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	ret = 0;
+	ret = cgfs_chown_file(controller, cgroup, uid, gid);
 
 out:
 	free_key(k);
@@ -1599,30 +1594,12 @@ int cg_mkdir(const char *path, mode_t mode)
 		goto out;
 	}
 
-	if (fc->uid == 0 && fc->gid == 0) {
-		if (!cgfs_create(controller, cgroup)) {
-			ret = -EINVAL;
-			goto out;
-		}
-	} else {
-		if (setresuid(fc->uid, fc->gid, 0) < 0) { // bail
-			fprintf(stderr, "ERROR - DANGER - setresuid failed!\n");
-			exit(1);
-		}
+	ret = cgfs_create(controller, cgroup);
+	if (ret)
+		goto out;
 
-		bool bret = cgfs_create(controller, cgroup);
-
-		if (setresuid(0, 0, 0) < 0) {
-			fprintf(stderr, "ERROR - failed to restore uids!\n");
-			exit(1);
-		}
-		if (!bret) {
-			ret = -EINVAL;
-			goto out;
-		}
-	}
-
-	ret = 0;
+	if (fc->uid != 0 || fc->gid != 0)
+		ret = cgfs_chown_file(controller, cgroup, fc->uid, fc->gid);
 
 out:
 	free(cgdir);

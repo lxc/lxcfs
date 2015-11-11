@@ -6,10 +6,10 @@ char *must_copy_string(const char *str);
 
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value);
-bool cgfs_create(const char *controller, const char *cg);
+int cgfs_create(const char *controller, const char *cg);
 bool cgfs_remove(const char *controller, const char *cg);
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode);
-bool cgfs_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid);
+int cgfs_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid);
 FILE *open_pids_file(const char *controller, const char *cgroup);
 bool cgfs_list_children(const char *controller, const char *cgroup, char ***list);
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file,

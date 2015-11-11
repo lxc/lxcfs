@@ -351,20 +351,20 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 	return write_string(fnam, value);
 }
 
-bool cgfs_create(const char *controller, const char *cg)
+int cgfs_create(const char *controller, const char *cg)
 {
 	size_t len;
 	char *dirnam, *tmpc = find_mounted_controller(controller);
 
 	if (!tmpc)
-		return false;
+		return -EINVAL;
 	/* basedir / tmpc / cg \0 */
 	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
 	dirnam = alloca(len);
 	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
-	if (mkdir(dirnam, 0755) < 0 && errno != EEXIST)
-		return false;
-	return true;
+	if (mkdir(dirnam, 0755) < 0)
+		return -errno;
+	return 0;
 }
 
 static bool recursive_rmdir(const char *dirname)
@@ -452,20 +452,20 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 	return true;
 }
 
-bool cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
+int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
 	size_t len;
 	char *pathname, *tmpc = find_mounted_controller(controller);
 
 	if (!tmpc)
-		return false;
+		return -EINVAL;
 	/* basedir / tmpc / file \0 */
 	len = strlen(basedir) + strlen(tmpc) + strlen(file) + 3;
 	pathname = alloca(len);
 	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
 	if (chown(pathname, uid, gid) < 0)
-		return false;
-	return true;
+		return -errno;
+	return 0;
 }
 
 FILE *open_pids_file(const char *controller, const char *cgroup)
