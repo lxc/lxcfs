@@ -42,6 +42,15 @@
 char *basedir;
 #define basedir RUNTIME_PATH "/lxcfs/controllers"
 
+int is_dir(const char *path)
+{
+	struct stat statbuf;
+	int ret = stat(path, &statbuf);
+	if (ret == 0 && S_ISDIR(statbuf.st_mode))
+		return 1;
+	return 0;
+}
+
 char *must_copy_string(const char *str)
 {
 	char *dup = NULL;
@@ -351,7 +360,43 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 	return write_string(fnam, value);
 }
 
-int cgfs_create(const char *controller, const char *cg)
+// Chown all the files in the cgroup directory.  We do this when we create
+// a cgroup on behalf of a user.
+static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
+{
+	struct dirent dirent, *direntp;
+	char path[MAXPATHLEN];
+	size_t len;
+	DIR *d;
+	int ret;
+
+	len = strlen(dirname);
+	if (len >= MAXPATHLEN) {
+		fprintf(stderr, "chown_all_cgroup_files: pathname too long: %s\n", dirname);
+		return;
+	}
+
+	d = opendir(dirname);
+	if (!d) {
+		fprintf(stderr, "chown_all_cgroup_files: failed to open %s\n", dirname);
+		return;
+	}
+
+	while (readdir_r(d, &dirent, &direntp) == 0 && direntp) {
+		if (!strcmp(direntp->d_name, ".") || !strcmp(direntp->d_name, ".."))
+			continue;
+		ret = snprintf(path, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
+		if (ret < 0 || ret >= MAXPATHLEN) {
+			fprintf(stderr, "chown_all_cgroup_files: pathname too long under %s\n", dirname);
+			continue;
+		}
+		if (chown(path, uid, gid) < 0)
+			fprintf(stderr, "Failed to chown file %s to %u:%u", path, uid, gid);
+	}
+	closedir(d);
+}
+
+int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
 	size_t len;
 	char *dirnam, *tmpc = find_mounted_controller(controller);
@@ -362,8 +407,18 @@ int cgfs_create(const char *controller, const char *cg)
 	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
 	dirnam = alloca(len);
 	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
+
 	if (mkdir(dirnam, 0755) < 0)
 		return -errno;
+
+	if (uid == 0 && gid == 0)
+		return 0;
+
+	if (chown(dirnam, uid, gid) < 0)
+		return -errno;
+
+	chown_all_cgroup_files(dirnam, uid, gid);
+
 	return 0;
 }
 
@@ -452,6 +507,22 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 	return true;
 }
 
+static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
+{
+	size_t len;
+	char *fname;
+
+	len = strlen(dirname) + strlen("/cgroup.procs") + 1;
+	fname = alloca(len);
+	snprintf(fname, len, "%s/tasks", dirname);
+	if (chown(fname, uid, gid) != 0)
+		return -errno;
+	snprintf(fname, len, "%s/cgroup.procs", dirname);
+	if (chown(fname, uid, gid) != 0)
+		return -errno;
+	return 0;
+}
+
 int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
 	size_t len;
@@ -465,6 +536,11 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
 	if (chown(pathname, uid, gid) < 0)
 		return -errno;
+
+	if (is_dir(pathname))
+		// like cgmanager did, we want to chown the tasks file as well
+		return chown_tasks_files(pathname, uid, gid);
+
 	return 0;
 }
 

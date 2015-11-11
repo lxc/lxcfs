@@ -6,7 +6,7 @@ char *must_copy_string(const char *str);
 
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value);
-int cgfs_create(const char *controller, const char *cg);
+int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid);
 bool cgfs_remove(const char *controller, const char *cg);
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode);
 int cgfs_chown_file(const char *controller, const char *cg, uid_t uid, gid_t gid);

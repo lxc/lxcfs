@@ -1594,12 +1594,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		goto out;
 	}
 
-	ret = cgfs_create(controller, cgroup);
-	if (ret)
-		goto out;
-
-	if (fc->uid != 0 || fc->gid != 0)
-		ret = cgfs_chown_file(controller, cgroup, fc->uid, fc->gid);
+	ret = cgfs_create(controller, cgroup, fc->uid, fc->gid);
 
 out:
 	free(cgdir);
