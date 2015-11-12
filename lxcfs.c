@@ -1595,6 +1595,7 @@ int cg_mkdir(const char *path, mode_t mode)
 	}
 
 	ret = cgfs_create(controller, cgroup, fc->uid, fc->gid);
+	printf("cgfs_create returned %d for %s %s\n", ret, controller, cgroup);
 
 out:
 	free(cgdir);
@@ -3036,7 +3037,7 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = argv[0];
 	newargv[cnt++] = "-f";
 	newargv[cnt++] = "-o";
-	newargv[cnt++] = "allow_other,direct_io";
+	newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
