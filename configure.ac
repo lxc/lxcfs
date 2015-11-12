@@ -12,6 +12,7 @@ AC_CONFIG_FILES([
 	share/Makefile
 	share/00-lxcfs.conf
 	share/lxc.mount.hook
+	share/lxc.reboot.hook
 	tests/Makefile ])
 
 AM_INIT_AUTOMAKE
