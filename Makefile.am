@@ -29,11 +29,12 @@ endif
 
 TEST_READ: tests/test-read.c
 	$(CC) -o tests/test-read tests/test-read.c
-
 TEST_CPUSET: tests/cpusetrange.c cpuset.c
 	$(CC) -o tests/cpusetrange tests/cpusetrange.c cpuset.c
+TEST_SYSCALLS: tests/test_syscalls.c
+	$(CC) -o tests/test_syscalls tests/test_syscalls.c
 
-tests: TEST_READ TEST_CPUSET
+tests: TEST_READ TEST_CPUSET TEST_SYSCALLS
 
 distclean:
 	rm -rf .deps/ \
@@ -60,4 +61,5 @@ distclean:
 		lxcfs.o \
 		m4/ \
 		missing \
-		stamp-h1
+		stamp-h1 \
+		tests/test_syscalls

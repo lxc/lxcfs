@@ -235,6 +235,12 @@ static bool perms_include(int fmode, mode_t req_mode)
 	return ((fmode & r) == r);
 }
 
+
+/*
+ * taskcg is  a/b/c
+ * querycg is /a/b/c/d/e
+ * we return 'd'
+ */
 static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 {
 	char *start, *end;
@@ -378,53 +384,71 @@ static void prune_init_slice(char *cg)
  */
 static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg, char **nextcg)
 {
-	char fnam[PROCLEN];
-	FILE *f;
 	bool answer = false;
-	char *line = NULL;
-	size_t len = 0;
-	int ret;
+	char *c2 = get_pid_cgroup(pid, contrl);
+	char *linecmp;
 
-	ret = snprintf(fnam, PROCLEN, "/proc/%d/cgroup", pid);
-	if (ret < 0 || ret >= PROCLEN)
+	if (!c2)
 		return false;
-	if (!(f = fopen(fnam, "r")))
-		return false;
+	prune_init_slice(c2);
 
-	while (getline(&line, &len, f) != -1) {
-		char *c1, *c2, *linecmp;
-		if (!line[0])
-			continue;
-		c1 = strchr(line, ':');
-		if (!c1)
-			goto out;
-		c1++;
-		c2 = strchr(c1, ':');
-		if (!c2)
-			goto out;
-		*c2 = '\0';
-		if (strcmp(c1, contrl) != 0)
-			continue;
-		c2++;
-		stripnewline(c2);
-		prune_init_slice(c2);
-		/*
-		 * callers pass in '/' for root cgroup, otherwise they pass
-		 * in a cgroup without leading '/'
-		 */
-		linecmp = *cg == '/' ? c2 : c2+1;
-		if (strncmp(linecmp, cg, strlen(linecmp)) != 0) {
-			if (nextcg)
-				*nextcg = get_next_cgroup_dir(linecmp, cg);
-			goto out;
+	/*
+	 * callers pass in '/' for root cgroup, otherwise they pass
+	 * in a cgroup without leading '/'
+	 */
+	linecmp = *cg == '/' ? c2 : c2+1;
+	if (strncmp(linecmp, cg, strlen(linecmp)) != 0) {
+		if (nextcg) {
+			*nextcg = get_next_cgroup_dir(linecmp, cg);
 		}
+		goto out;
+	}
+	answer = true;
+
+out:
+	free(c2);
+	return answer;
+}
+
+/*
+ * If caller is in /a/b/c, he may see that /a exists, but not /b or /a/c.
+ */
+static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
+{
+	bool answer = false;
+	char *c2, *task_cg;
+	size_t target_len, task_len;
+
+	if (strcmp(cg, "/") == 0)
+		return true;
+
+	c2 = get_pid_cgroup(pid, contrl);
+
+	if (!c2)
+		return false;
+
+	task_cg = c2 + 1;
+	target_len = strlen(cg);
+	task_len = strlen(task_cg);
+	if (strcmp(cg, task_cg) == 0) {
 		answer = true;
+		goto out;
+	}
+	if (target_len < task_len) {
+		/* looking up a parent dir */
+		if (strncmp(task_cg, cg, target_len) == 0 && task_cg[target_len] == '/')
+			answer = true;
+		goto out;
+	}
+	if (target_len > task_len) {
+		/* looking up a child dir */
+		if (strncmp(task_cg, cg, task_len) == 0 && cg[task_len] == '/')
+			answer = true;
 		goto out;
 	}
 
 out:
-	fclose(f);
-	free(line);
+	free(c2);
 	return answer;
 }
 
@@ -552,6 +576,10 @@ static int cg_getattr(const char *path, struct stat *sb)
 	 * cgroup, or cgdir if fpath is a file */
 
 	if (is_child_cgroup(controller, path1, path2)) {
+		if (!caller_may_see_dir(fc->pid, controller, cgroup)) {
+			ret = -ENOENT;
+			goto out;
+		}
 		if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL)) {
 			/* this is just /cgroup/controller, return it as a dir */
 			sb->st_mode = S_IFDIR | 00555;
@@ -630,8 +658,11 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 		}
 	}
 
-	if (cgroup && !fc_may_access(fc, controller, cgroup, NULL, O_RDONLY)) {
-		return -EACCES;
+	if (cgroup) {
+		if (!caller_may_see_dir(fc->pid, controller, cgroup))
+			return -ENOENT;
+		if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
+			return -EACCES;
 	}
 
 	/* we'll free this at cg_releasedir */
@@ -780,6 +811,10 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	}
 	free_key(k);
 
+	if (!caller_may_see_dir(fc->pid, controller, path1)) {
+		ret = -ENOENT;
+		goto out;
+	}
 	if (!fc_may_access(fc, controller, path1, path2, fi->flags)) {
 		// should never get here
 		ret = -EACCES;
@@ -1563,7 +1598,7 @@ out:
 int cg_mkdir(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char *fpath = NULL, *path1, *cgdir = NULL, *controller;
+	char *fpath = NULL, *path1, *cgdir = NULL, *controller, *next = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1585,6 +1620,14 @@ int cg_mkdir(const char *path, mode_t mode)
 	else
 		path1 = cgdir;
 
+	if (!caller_is_in_ancestor(fc->pid, controller, path1, &next)) {
+		if (fpath && strcmp(next, fpath) == 0)
+			ret = -EEXIST;
+		else
+			ret = -ENOENT;
+		goto out;
+	}
+
 	if (!fc_may_access(fc, controller, path1, NULL, O_RDWR)) {
 		ret = -EACCES;
 		goto out;
@@ -1599,13 +1642,14 @@ int cg_mkdir(const char *path, mode_t mode)
 
 out:
 	free(cgdir);
+	free(next);
 	return ret;
 }
 
 static int cg_rmdir(const char *path)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char *fpath = NULL, *cgdir = NULL, *controller;
+	char *fpath = NULL, *cgdir = NULL, *controller, *next = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1626,8 +1670,14 @@ static int cg_rmdir(const char *path)
 		goto out;
 	}
 
-	fprintf(stderr, "rmdir: verifying access to %s:%s (req path %s)\n",
-			controller, cgdir, path);
+	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, &next)) {
+		if (!fpath || strcmp(next, fpath) == 0)
+			ret = -EBUSY;
+		else
+			ret = -ENOENT;
+		goto out;
+	}
+
 	if (!fc_may_access(fc, controller, cgdir, NULL, O_WRONLY)) {
 		ret = -EACCES;
 		goto out;
@@ -1646,6 +1696,7 @@ static int cg_rmdir(const char *path)
 
 out:
 	free(cgdir);
+	free(next);
 	return ret;
 }
 
