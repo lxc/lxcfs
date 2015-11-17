@@ -1730,7 +1730,6 @@ int cg_mkdir(const char *path, mode_t mode)
 	}
 
 	ret = cgfs_create(controller, cgroup, fc->uid, fc->gid);
-	printf("cgfs_create returned %d for %s %s\n", ret, controller, cgroup);
 
 out:
 	free(cgdir);
