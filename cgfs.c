@@ -173,10 +173,10 @@ void print_subsystems(void)
 {
 	int i;
 
-	printf("hierarchies:");
+	fprintf(stderr, "hierarchies:");
 	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
-			printf(" %d: %s\n", i, hierarchies[i]);
+			fprintf(stderr, " %d: %s\n", i, hierarchies[i]);
 	}
 }
 
