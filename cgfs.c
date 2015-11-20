@@ -71,23 +71,29 @@ static inline void drop_trailing_newlines(char *s)
 		s[l-1] = '\0';
 }
 
-static void append_line(char **contents, char *line, size_t *len)
+#define BATCH_SIZE 50
+static void dorealloc(char **mem, size_t oldlen, size_t newlen)
 {
-	size_t newlen = *len + strlen(line);
-
-	if (!*contents) {
+	int batches;
+	if (newlen % BATCH_SIZE <= oldlen % BATCH_SIZE)
+		return;
+	batches = (newlen % BATCH_SIZE) + 1;
+	if (!*mem) {
 		do {
-			*contents = malloc(*len + 1);
-		} while (!*contents);
+			*mem = malloc(batches * BATCH_SIZE);
+		} while (!*mem);
 	} else {
 		char *tmp;
 		do {
-			tmp = realloc(*contents, newlen + 1);
+			tmp = realloc(*mem, batches * BATCH_SIZE);
 		} while (!tmp);
-
-		*contents = tmp;
+		*mem = tmp;
 	}
-
+}
+static void append_line(char **contents, char *line, size_t *len)
+{
+	size_t newlen = *len + strlen(line);
+	dorealloc(contents, *len, newlen + 1);
 	strcpy(*contents + *len, line);
 	*len = newlen;
 }
@@ -558,7 +564,6 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 	return fopen(pathname, "w");
 }
 
-#define BATCH_SIZE 50
 bool cgfs_list_children(const char *controller, const char *cgroup, char ***list)
 {
 	size_t len;
