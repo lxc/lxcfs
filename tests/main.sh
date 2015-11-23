@@ -58,4 +58,8 @@ ${dirname}/cpusetrange
 TESTCASE="meminfo hierarchy"
 ${dirname}/test_meminfo_hierarchy.sh
 
+# Check for any defunct processes - children we didn't reap
+n=`ps -ef | grep lxcfs | grep defunct | wc -l`
+[ $n = 0 ]
+
 FAILED=0
