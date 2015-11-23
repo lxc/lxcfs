@@ -2569,6 +2569,7 @@ static pid_t get_task_reaper_pid(pid_t task)
 out:
 	close(sock[0]);
 	close(sock[1]);
+	wait_for_pid(pid);
 	return ret;
 }
 
