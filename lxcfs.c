@@ -1028,7 +1028,6 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 	if (pipe(cpipe) < 0)
 		_exit(1);
 
-loop:
 	cpid = fork();
 	if (cpid < 0)
 		_exit(1);
@@ -1042,29 +1041,24 @@ loop:
 		}
 		close(cpipe[1]);
 		pid_to_ns(sock, tpid);
+		_exit(1); // not reached
 	}
 	// give the child 1 second to be done forking and
-	// write it's ack
+	// write its ack
 	FD_ZERO(&s);
 	FD_SET(cpipe[0], &s);
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
 	if (ret <= 0)
-		goto again;
+		_exit(1);
 	ret = read(cpipe[0], &v, 1);
-	if (ret != sizeof(char) || v != '1') {
-		goto again;
-	}
+	if (ret != sizeof(char) || v != '1')
+		_exit(1);
 
 	if (!wait_for_pid(cpid))
 		_exit(1);
 	_exit(0);
-
-again:
-	kill(cpid, SIGKILL);
-	wait_for_pid(cpid);
-	goto loop;
 }
 
 /*
@@ -1104,7 +1098,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 	if (cpid == -1)
 		goto out;
 
-	if (!cpid) // child
+	if (!cpid) // child - exits when done
 		pid_to_ns_wrapper(sock[1], tpid);
 
 	char *ptr = tmpdata;
@@ -2373,7 +2367,7 @@ static long int get_pid1_time(pid_t pid)
 	pid_t cpid;
 	struct timeval tv;
 	fd_set s;
-	char v;
+	long int v;
 
 	if (unshare(CLONE_NEWNS))
 		return 0;
@@ -2400,55 +2394,61 @@ static long int get_pid1_time(pid_t pid)
 	close(fd);
 
 	if (pipe(cpipe) < 0)
-		exit(1);
+		return(0);
 
-loop:
 	cpid = fork();
-	if (cpid < 0)
+	if (cpid < 0) {
+		close(cpipe[0]);
+		close(cpipe[1]);
 		return 0;
+	}
 
 	if (!cpid) {
-		char b = '1';
 		close(cpipe[0]);
-		if (write(cpipe[1], &b, sizeof(char)) < 0) {
-			fprintf(stderr, "%s (child): erorr on write: %s\n",
-				__func__, strerror(errno));
-		}
-		close(cpipe[1]);
 		umount2("/proc", MNT_DETACH);
 		if (mount("proc", "/proc", "proc", 0, NULL)) {
 			perror("get_pid1_time mount");
-			return 0;
+			_exit(1);
 		}
 		ret = lstat("/proc/1", &sb);
 		if (ret) {
 			perror("get_pid1_time lstat");
-			return 0;
+			_exit(1);
 		}
-		return time(NULL) - sb.st_ctime;
+		long int retval = time(NULL) - sb.st_ctime;
+		if (write(cpipe[1], &retval, sizeof(retval)) < 0) {
+			fprintf(stderr, "%s (child): erorr on write: %s\n",
+					__func__, strerror(errno));
+		}
+		close(cpipe[1]);
+		_exit(0);
 	}
+	close(cpipe[1]);
 
 	// give the child 1 second to be done forking and
-	// write it's ack
+	// write its ack
 	FD_ZERO(&s);
 	FD_SET(cpipe[0], &s);
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
 	if (ret <= 0)
-		goto again;
+		goto fail;
 	ret = read(cpipe[0], &v, 1);
 	if (ret != sizeof(char) || v != '1') {
-		goto again;
+		goto fail;
 	}
 
 	wait_for_pid(cpid);
-	_exit(0);
 
-again:
+	close(cpipe[0]);
+	return v;
+
+fail:
 	kill(cpid, SIGKILL);
 	wait_for_pid(cpid);
-	goto loop;
+	close(cpipe[0]);
+	return 0;
 }
 
 static long int getreaperage(pid_t qpid)
@@ -2472,6 +2472,10 @@ static long int getreaperage(pid_t qpid)
 	}
 
 	close(mypipe[1]);
+
+	if (pid < 0)
+		goto out;
+
 	FD_ZERO(&s);
 	FD_SET(mypipe[0], &s);
 	tv.tv_sec = 1;
@@ -2512,24 +2516,24 @@ void write_task_init_pid_exit(int sock, pid_t target)
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
 	if (ret < 0 || ret >= sizeof(fnam))
-		exit(1);
+		_exit(1);
 
 	fd = open(fnam, O_RDONLY);
 	if (fd < 0) {
-		perror("get_pid1_time open of ns/pid");
-		exit(1);
+		perror("write_task_init_pid_exit open of ns/pid");
+		_exit(1);
 	}
 	if (setns(fd, 0)) {
-		perror("get_pid1_time setns 1");
+		perror("write_task_init_pid_exit setns 1");
 		close(fd);
-		exit(1);
+		_exit(1);
 	}
 	pid = fork();
 	if (pid < 0)
-		exit(1);
+		_exit(1);
 	if (pid != 0) {
 		wait_for_pid(pid);
-		exit(0);
+		_exit(0);
 	}
 
 	/* we are the child */
@@ -2538,7 +2542,7 @@ void write_task_init_pid_exit(int sock, pid_t target)
 	cred.pid = 1;
 	v = '1';
 	send_creds(sock, &cred, v, true);
-	exit(0);
+	_exit(0);
 }
 
 static pid_t get_task_reaper_pid(pid_t task)
@@ -2606,7 +2610,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	long int reaperage = getreaperage(fc->pid);;
+	long int reaperage = getreaperage(fc->pid);
 	unsigned long int busytime = get_reaper_busy(fc->pid), idletime;
 	char *cache = d->buf;
 	size_t total_len = 0;
