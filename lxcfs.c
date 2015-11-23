@@ -423,9 +423,9 @@ static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 		return true;
 
 	c2 = get_pid_cgroup(pid, contrl);
-
 	if (!c2)
 		return false;
+	prune_init_slice(c2);
 
 	task_cg = c2 + 1;
 	target_len = strlen(cg);
