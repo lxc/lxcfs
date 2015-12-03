@@ -18,8 +18,10 @@ cleanup() {
 	if [ $p -ne -1 ]; then
 		kill -9 $p
 	fi
-	umount -l ${LXCFSDIR}
-	rmdir ${LXCFSDIR}
+	if [ ${LXCFSDIR} != "/var/lib/lxcfs" ]; then
+		umount -l ${LXCFSDIR}
+		rmdir ${LXCFSDIR}
+	fi
 	if [ ${FAILED} -eq 1 ]; then
 		echo "FAILED at $TESTCASE"
 		exit 1
@@ -31,9 +33,16 @@ cleanup() {
 TESTCASE="setup"
 lxcfs=${topdir}/lxcfs
 
-echo "Running ${lxcfs} ${LXCFSDIR}"
-${lxcfs} ${LXCFSDIR} &
-p=$!
+if [ -x ${lxcfs} ]; then
+	echo "Running ${lxcfs} ${LXCFSDIR}"
+	${lxcfs} ${LXCFSDIR} &
+	p=$!
+else
+	pidof lxcfs
+	echo "Using host lxcfs"
+	rmdir $LXCFSDIR
+	export LXCFSDIR=/var/lib/lxcfs
+fi
 
 trap cleanup EXIT SIGHUP SIGINT SIGTERM
 
