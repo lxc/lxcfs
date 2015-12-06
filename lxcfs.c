@@ -1951,6 +1951,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
 		goto err;
 
+	memusage = strtoul(memusage_str, NULL, 10);
+	memlimit /= 1024;
+	memusage /= 1024;
+
 	// Following values are allowed to fail, because swapaccount might be turned
 	// off for current kernel
 	if(cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
@@ -1960,11 +1964,13 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		memswusage = strtoul(memswusage_str, NULL, 10);
 		memswlimit /= 1024;
 		memswusage /= 1024;
+		if (memswlimit >= memlimit)
+			memswlimit = 0;
+		if (memswusage_str >= memlimit)
+			memswusage = 0;
+
 	}
 	
-	memusage = strtoul(memusage_str, NULL, 10);
-	memlimit /= 1024;
-	memusage /= 1024;
 	get_mem_cached(memstat_str, &cached);
 
 	f = fopen("/proc/meminfo", "r");
