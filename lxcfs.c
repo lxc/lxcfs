@@ -430,6 +430,15 @@ static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 	task_cg = c2 + 1;
 	target_len = strlen(cg);
 	task_len = strlen(task_cg);
+	if (task_len == 0) {
+		/* Task is in the root cg, it can see everything. This case is
+		 * not handled by the strmcps below, since they test for the
+		 * last /, but that is the first / that we've chopped off
+		 * above.
+		 */
+		answer = true;
+		goto out;
+	}
 	if (strcmp(cg, task_cg) == 0) {
 		answer = true;
 		goto out;
