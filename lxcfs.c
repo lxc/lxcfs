@@ -2449,10 +2449,9 @@ static long int get_pid1_time(pid_t pid)
 	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
 	if (ret <= 0)
 		goto fail;
-	ret = read(cpipe[0], &v, 1);
-	if (ret != sizeof(char) || v != '1') {
+	ret = read(cpipe[0], &v, sizeof(v));
+	if (ret != sizeof(v))
 		goto fail;
-	}
 
 	wait_for_pid(cpid);
 
@@ -2607,7 +2606,7 @@ static unsigned long get_reaper_busy(pid_t task)
 	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		goto out;
 	usage = strtoul(usage_str, NULL, 10);
-	usage /= 100000000;
+	usage /= 1000000000;
 
 out:
 	free(cgroup);
