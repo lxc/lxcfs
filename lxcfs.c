@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <sys/mount.h>
 #include <wait.h>
+#include <limits.h>
 
 #ifdef FORTRAVIS
 #define GLIB_DISABLE_DEPRECATION_WARNINGS
@@ -1960,10 +1961,6 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
 		goto err;
 
-	memusage = strtoul(memusage_str, NULL, 10);
-	memlimit /= 1024;
-	memusage /= 1024;
-
 	// Following values are allowed to fail, because swapaccount might be turned
 	// off for current kernel
 	if(cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
@@ -1971,15 +1968,17 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	{
 		memswlimit = strtoul(memswlimit_str, NULL, 10);
 		memswusage = strtoul(memswusage_str, NULL, 10);
-		memswlimit /= 1024;
-		memswusage /= 1024;
-		if (memswlimit >= memlimit)
-			memswlimit = 0;
-		if (memswusage >= memlimit)
-			memswusage = 0;
-
+		/* In case memswlimit is unlimited; i.e. not set explicitely,
+		 * the default value: RES_LIMIT is set, which is equal to
+		 * PAGE_COUNTER_MAX * PAGE_SIZE, which, in most cases, is
+		 * equal to LONG_MAX */
+		memswlimit = memswlimit == LONG_MAX ? 0 : memswlimit / 1024;
 	}
-	
+
+	memusage = strtoul(memusage_str, NULL, 10);
+	memlimit /= 1024;
+	memusage /= 1024;
+
 	get_mem_cached(memstat_str, &cached);
 
 	f = fopen("/proc/meminfo", "r");
