@@ -25,11 +25,12 @@ The recommended command to run lxcfs is:
 
 In order to use lxcfs with systemd-based containers, you can either use
 LXC 1.1 in which case it should work automatically, or otherwise, copy
-the lxc.mount.hook file (once built) from this tree to
-/usr/share/lxc/hooks/lxcfs, make sure it is executable, then add the
-following two lines to your container configuration:
+the `lxc.mount.hook` and `lxc.reboot.hook` files (once built) from this tree to
+`/usr/share/lxcfs`, make sure it is executable, then add the
+following lines to your container configuration:
 ```
+lxc.mount.auto = cgroup:mixed
 lxc.autodev = 1
 lxc.kmsg = 0
-lxc.include = /usr/share/lxcfs/00-lxc.conf
+lxc.include = /usr/share/lxc/config/common.conf.d/00-lxcfs.conf
 ```
