@@ -23,6 +23,7 @@ stamp-h1
 lxcfs.1
 share/00-lxcfs.conf
 share/lxc.mount.hook
+share/lxc.reboot.hook
 tests/cpusetrange
 tests/test-read
 lxcfs_mkdir
