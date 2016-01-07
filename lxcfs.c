@@ -87,7 +87,7 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 		*asz = BUF_RESERVE_SIZE;
 	} else if (tmplen + *sz + 1 >= *asz) {
 		do {
-			d = realloc(d, *asz + BUF_RESERVE_SIZE);
+			d = realloc(*src, *asz + BUF_RESERVE_SIZE);
 		} while (!d);
 		*src = d;
 		*asz += BUF_RESERVE_SIZE;
