@@ -1,4 +1,4 @@
-#!/bin/sh -eu
+#!/bin/sh -e
 
 # Don't mess with containers that don't have /sys/fs/cgroup configured
 # (lxc.mount.auto = cgroup:mixed)
