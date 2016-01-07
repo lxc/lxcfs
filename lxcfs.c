@@ -1975,7 +1975,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		memswusage /= 1024;
 		if (memswlimit >= memlimit)
 			memswlimit = 0;
-		if (memswusage_str >= memlimit)
+		if (memswusage >= memlimit)
 			memswusage = 0;
 
 	}
