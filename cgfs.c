@@ -74,18 +74,20 @@ static inline void drop_trailing_newlines(char *s)
 #define BATCH_SIZE 50
 static void dorealloc(char **mem, size_t oldlen, size_t newlen)
 {
-	int batches;
-	if (newlen <= oldlen)
+	int newbatches = (newlen / BATCH_SIZE) + 1;
+	int oldbatches = (oldlen / BATCH_SIZE) + 1;
+
+	if (newbatches <= oldbatches)
 		return;
-	batches = (newlen / BATCH_SIZE) + 1;
+
 	if (!*mem) {
 		do {
-			*mem = malloc(batches * BATCH_SIZE);
+			*mem = malloc(newbatches * BATCH_SIZE);
 		} while (!*mem);
 	} else {
 		char *tmp;
 		do {
-			tmp = realloc(*mem, batches * BATCH_SIZE);
+			tmp = realloc(*mem, newbatches * BATCH_SIZE);
 		} while (!tmp);
 		*mem = tmp;
 	}
