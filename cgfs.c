@@ -90,11 +90,11 @@ static void dorealloc(char **mem, size_t oldlen, size_t newlen)
 		*mem = tmp;
 	}
 }
-static void append_line(char **contents, char *line, size_t *len)
+static void append_line(char **contents, size_t *len, char *line, ssize_t linelen)
 {
-	size_t newlen = *len + strlen(line);
+	size_t newlen = *len + linelen;
 	dorealloc(contents, *len, newlen + 1);
-	strcpy(*contents + *len, line);
+	memcpy(*contents + *len, line, linelen+1);
 	*len = newlen;
 }
 
@@ -104,12 +104,13 @@ static char *read_file(const char *from)
 	char *contents = NULL;
 	FILE *f = fopen(from, "r");
 	size_t len = 0, fulllen = 0;
+	ssize_t linelen;
 
 	if (!f)
 		return NULL;
 
-	while (getline(&line, &len, f) != -1) {
-		append_line(&contents, line, &fulllen);
+	while ((linelen = getline(&line, &len, f)) != -1) {
+		append_line(&contents, &fulllen, line, linelen);
 	}
 	fclose(f);
 
