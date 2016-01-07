@@ -75,9 +75,9 @@ static inline void drop_trailing_newlines(char *s)
 static void dorealloc(char **mem, size_t oldlen, size_t newlen)
 {
 	int batches;
-	if (newlen % BATCH_SIZE <= oldlen % BATCH_SIZE)
+	if (newlen <= oldlen)
 		return;
-	batches = (newlen % BATCH_SIZE) + 1;
+	batches = (newlen / BATCH_SIZE) + 1;
 	if (!*mem) {
 		do {
 			*mem = malloc(batches * BATCH_SIZE);
