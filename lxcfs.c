@@ -77,7 +77,7 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 	char *d = *src;
 	char tmp[30];
 
-	sprintf(tmp, "%d\n", (int)pid);
+	int tmplen = sprintf(tmp, "%d\n", (int)pid);
 
 	if (!d) {
 		do {
@@ -85,15 +85,15 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 		} while (!d);
 		*src = d;
 		*asz = BUF_RESERVE_SIZE;
-	} else if (strlen(tmp) + sz + 1 >= asz) {
+	} else if (tmplen + *sz + 1 >= *asz) {
 		do {
-			d = realloc(d, *asz + BUF_RESERVE_SIZE);
+			d = realloc(src, *asz + BUF_RESERVE_SIZE);
 		} while (!d);
 		*src = d;
 		*asz += BUF_RESERVE_SIZE;
 	}
-	memcpy(d+*sz, tmp, strlen(tmp));
-	*sz += strlen(tmp);
+	memcpy(d+*sz, tmp, tmplen);
+	*sz += tmplen;
 	d[*sz] = '\0';
 }
 
@@ -1975,7 +1975,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		memswusage /= 1024;
 		if (memswlimit >= memlimit)
 			memswlimit = 0;
-		if (memswusage_str >= memlimit)
+		if (memswusage >= memlimit)
 			memswusage = 0;
 
 	}
