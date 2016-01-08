@@ -74,27 +74,21 @@ struct file_info {
  */
 static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 {
-	char *d = *src;
 	char tmp[30];
 
 	int tmplen = sprintf(tmp, "%d\n", (int)pid);
 
-	if (!d) {
+	if (!*src || tmplen + *sz + 1 >= *asz) {
+		char *tmp;
 		do {
-			d = malloc(BUF_RESERVE_SIZE);
-		} while (!d);
-		*src = d;
-		*asz = BUF_RESERVE_SIZE;
-	} else if (tmplen + *sz + 1 >= *asz) {
-		do {
-			d = realloc(src, *asz + BUF_RESERVE_SIZE);
-		} while (!d);
-		*src = d;
+			tmp = realloc(*src, *asz + BUF_RESERVE_SIZE);
+		} while (!tmp);
+		*src = tmp;
 		*asz += BUF_RESERVE_SIZE;
 	}
-	memcpy(d+*sz, tmp, tmplen);
+	memcpy((*src) +*sz , tmp, tmplen);
 	*sz += tmplen;
-	d[*sz] = '\0';
+	(*src)[*sz] = '\0';
 }
 
 static int wait_for_pid(pid_t pid)
