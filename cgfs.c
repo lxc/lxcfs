@@ -77,14 +77,7 @@ static void dorealloc(char **mem, size_t oldlen, size_t newlen)
 	int newbatches = (newlen / BATCH_SIZE) + 1;
 	int oldbatches = (oldlen / BATCH_SIZE) + 1;
 
-	if (newbatches <= oldbatches)
-		return;
-
-	if (!*mem) {
-		do {
-			*mem = malloc(newbatches * BATCH_SIZE);
-		} while (!*mem);
-	} else {
+	if (!*mem || newbatches > oldbatches) {
 		char *tmp;
 		do {
 			tmp = realloc(*mem, newbatches * BATCH_SIZE);
