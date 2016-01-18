@@ -20,7 +20,6 @@ The recommended command to run lxcfs is:
  - -s is required to turn off multi-threading as libnih-dbus isn't thread safe.
  - -f is to keep lxcfs running in the foreground
  - -o allow\_other is required to have non-root user be able to access the filesystem
- - -d can also be passed in order to debug lxcfs
 
 
 In order to use lxcfs with systemd-based containers, you can either use
