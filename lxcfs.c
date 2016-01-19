@@ -1924,7 +1924,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
 	char *memusage_str = NULL, *memstat_str = NULL,
-		*memswlimit_str = NULL, *memswusage_str = NULL;
+		*memswlimit_str = NULL, *memswusage_str = NULL,
+		*memswlimit_default_str = NULL, *memswusage_default_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		cached = 0, hosttotal = 0;
 	char *line = NULL;
@@ -1954,26 +1955,33 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
 		goto err;
 
-	memusage = strtoul(memusage_str, NULL, 10);
-	memlimit /= 1024;
-	memusage /= 1024;
-
 	// Following values are allowed to fail, because swapaccount might be turned
 	// off for current kernel
 	if(cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
 		cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str))
 	{
+		/* If swapaccounting is turned on, then default value is assumed to be that of cgroup / */
+		if (!cgfs_get_value("memory", "/", "memory.memsw.limit_in_bytes", &memswlimit_default_str))
+			goto err;
+		if (!cgfs_get_value("memory", "/", "memory.memsw.usage_in_bytes", &memswusage_default_str))
+			goto err;
+
 		memswlimit = strtoul(memswlimit_str, NULL, 10);
 		memswusage = strtoul(memswusage_str, NULL, 10);
-		memswlimit /= 1024;
-		memswusage /= 1024;
-		if (memswlimit >= memlimit)
+
+		if (!strcmp(memswlimit_str, memswlimit_default_str))
 			memswlimit = 0;
-		if (memswusage >= memlimit)
+		if (!strcmp(memswusage_str, memswusage_default_str))
 			memswusage = 0;
 
+		memswlimit = memswlimit / 1024;
+		memswusage = memswusage / 1024;
 	}
-	
+
+	memusage = strtoul(memusage_str, NULL, 10);
+	memlimit /= 1024;
+	memusage /= 1024;
+
 	get_mem_cached(memstat_str, &cached);
 
 	f = fopen("/proc/meminfo", "r");
@@ -2049,6 +2057,8 @@ err:
 	free(memswlimit_str);
 	free(memswusage_str);
 	free(memstat_str);
+	free(memswlimit_default_str);
+	free(memswusage_default_str);
 	return rv;
 }
 
