@@ -28,3 +28,9 @@ tests/cpusetrange
 tests/test-read
 lxcfs_mkdir
 *.o
+pam/.dirstamp
+pam/pam_cgfs_la-pam_cgfs.lo
+pam_cgfs.la
+tags
+lxcfs-*.tar.gz
+.libs
