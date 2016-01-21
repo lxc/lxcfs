@@ -6,14 +6,6 @@
  * See COPYING file for details.
  */
 
-/*
- * TODO XXX
- * sanitize paths for '..', cgmanager's not doing that for us any more
- *     does fuse help us?
- * Surely there are more paths we'll need to sanitize - look back through
- * cgmanager's sources.
- */
-
 #define FUSE_USE_VERSION 26
 
 #include <stdio.h>
