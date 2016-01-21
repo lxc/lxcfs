@@ -15,12 +15,7 @@ In other words, it will provide an emulated `/proc` and `/sys/fs/cgroup` folder 
 The recommended command to run lxcfs is:
 
     sudo mkdir -p /var/lib/lxcfs
-    sudo lxcfs -s -f -o allow_other /var/lib/lxcfs
-
- - -s is required to turn off multi-threading as libnih-dbus isn't thread safe.
- - -f is to keep lxcfs running in the foreground
- - -o allow\_other is required to have non-root user be able to access the filesystem
-
+    sudo lxcfs /var/lib/lxcfs
 
 In order to use lxcfs with systemd-based containers, you can either use
 LXC 1.1 in which case it should work automatically, or otherwise, copy
