@@ -2555,7 +2555,7 @@ void write_task_init_pid_exit(int sock, pid_t target)
 	_exit(0);
 }
 
-static pid_t get_task_reaper_pid(pid_t task)
+static pid_t get_init_pid_for_task(pid_t task)
 {
 	int sock[2];
 	pid_t pid;
@@ -2589,14 +2589,14 @@ out:
 
 static unsigned long get_reaper_busy(pid_t task)
 {
-	pid_t init = get_task_reaper_pid(task);
+	pid_t init = get_init_pid_for_task(task);
 	char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
 
 	if (init == -1)
 		return 0;
 
-	cgroup = get_pid_cgroup(task, "cpuacct");
+	cgroup = get_pid_cgroup(init, "cpuacct");
 	if (!cgroup)
 		goto out;
 	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
