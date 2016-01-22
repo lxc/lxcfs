@@ -680,16 +680,19 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (!tmpc)
 		return false;
 
-	if (*file == '/')
+	if (file && *file == '/')
 		file++;
 
-	if (index(file, '/'))
+	if (file && index(file, '/'))
 		return NULL;
 
 	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
+	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
+	if (file)
+		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
+	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup,
+		file ? "/" : "", file ? file : "");
 
 	ret = stat(fnam, &sb);
 	if (ret < 0)

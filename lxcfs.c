@@ -320,12 +320,6 @@ static bool fc_may_access(struct fuse_context *fc, const char *contrl, const cha
 	struct cgfs_files *k = NULL;
 	bool ret = false;
 
-	if (!file)
-		file = "tasks";
-
-	if (*file == '/')
-		file++;
-
 	k = cgfs_get_key(contrl, cg, file);
 	if (!k)
 		return false;
@@ -496,18 +490,19 @@ static const char *find_cgroup_in_path(const char *path)
 }
 
 /*
- * dir should be freed, file not
- */
-static void get_cgdir_and_path(const char *cg, char **dir, char **file)
+ * split the last path element from the path in @cg.
+ * @dir is newly allocated and should be freed, @last not
+*/
+static void get_cgdir_and_path(const char *cg, char **dir, char **last)
 {
 	char *p;
 
 	do {
 		*dir = strdup(cg);
 	} while (!*dir);
-	*file = strrchr(cg, '/');
-	if (!*file) {
-		*file = NULL;
+	*last = strrchr(cg, '/');
+	if (!*last) {
+		*last = NULL;
 		return;
 	}
 	p = strrchr(*dir, '/');
@@ -523,7 +518,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 	struct timespec now;
 	struct fuse_context *fc = fuse_get_context();
 	char * cgdir = NULL;
-	char *fpath = NULL, *path1, *path2;
+	char *last = NULL, *path1, *path2;
 	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	const char *controller = NULL;
@@ -559,19 +554,19 @@ static int cg_getattr(const char *path, struct stat *sb)
 		return 0;
 	}
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	get_cgdir_and_path(cgroup, &cgdir, &last);
 
-	if (!fpath) {
+	if (!last) {
 		path1 = "/";
 		path2 = cgdir;
 	} else {
 		path1 = cgdir;
-		path2 = fpath;
+		path2 = last;
 	}
 
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
-	 * Then check that caller's cgroup is under path if fpath is a child
-	 * cgroup, or cgdir if fpath is a file */
+	 * Then check that caller's cgroup is under path if last is a child
+	 * cgroup, or cgdir if last is a file */
 
 	if (is_child_cgroup(controller, path1, path2)) {
 		if (!caller_may_see_dir(fc->pid, controller, cgroup)) {
@@ -593,7 +588,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		// get uid, gid, from '/tasks' file and make up a mode
 		// That is a hack, until cgmanager gains a GetCgroupPerms fn.
 		sb->st_mode = S_IFDIR | 00755;
-		k = cgfs_get_key(controller, cgroup, "tasks");
+		k = cgfs_get_key(controller, cgroup, NULL);
 		if (!k) {
 			sb->st_uid = sb->st_gid = 0;
 		} else {
@@ -777,7 +772,7 @@ static int cg_releasedir(const char *path, struct fuse_file_info *fi)
 static int cg_open(const char *path, struct fuse_file_info *fi)
 {
 	const char *cgroup;
-	char *fpath = NULL, *path1, *path2, * cgdir = NULL, *controller;
+	char *last = NULL, *path1, *path2, * cgdir = NULL, *controller;
 	struct cgfs_files *k = NULL;
 	struct file_info *file_info;
 	struct fuse_context *fc = fuse_get_context();
@@ -793,13 +788,13 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	if (!cgroup)
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
-	if (!fpath) {
+	get_cgdir_and_path(cgroup, &cgdir, &last);
+	if (!last) {
 		path1 = "/";
 		path2 = cgdir;
 	} else {
 		path1 = cgdir;
-		path2 = fpath;
+		path2 = last;
 	}
 
 	k = cgfs_get_key(controller, path1, path2);
@@ -1539,7 +1534,7 @@ out:
 int cg_chown(const char *path, uid_t uid, gid_t gid)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char *cgdir = NULL, *fpath = NULL, *path1, *path2, *controller;
+	char *cgdir = NULL, *last = NULL, *path1, *path2, *controller;
 	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	int ret;
@@ -1558,14 +1553,14 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 		/* this is just /cgroup/controller */
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	get_cgdir_and_path(cgroup, &cgdir, &last);
 
-	if (!fpath) {
+	if (!last) {
 		path1 = "/";
 		path2 = cgdir;
 	} else {
 		path1 = cgdir;
-		path2 = fpath;
+		path2 = last;
 	}
 
 	if (is_child_cgroup(controller, path1, path2)) {
@@ -1604,7 +1599,7 @@ out:
 int cg_chmod(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char * cgdir = NULL, *fpath = NULL, *path1, *path2, *controller;
+	char * cgdir = NULL, *last = NULL, *path1, *path2, *controller;
 	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	int ret;
@@ -1623,14 +1618,14 @@ int cg_chmod(const char *path, mode_t mode)
 		/* this is just /cgroup/controller */
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
+	get_cgdir_and_path(cgroup, &cgdir, &last);
 
-	if (!fpath) {
+	if (!last) {
 		path1 = "/";
 		path2 = cgdir;
 	} else {
 		path1 = cgdir;
-		path2 = fpath;
+		path2 = last;
 	}
 
 	if (is_child_cgroup(controller, path1, path2)) {
@@ -1672,7 +1667,7 @@ out:
 int cg_mkdir(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char *fpath = NULL, *path1, *cgdir = NULL, *controller, *next = NULL;
+	char *last = NULL, *path1, *cgdir = NULL, *controller, *next = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1688,14 +1683,14 @@ int cg_mkdir(const char *path, mode_t mode)
 	if (!cgroup)
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
-	if (!fpath)
+	get_cgdir_and_path(cgroup, &cgdir, &last);
+	if (!last)
 		path1 = "/";
 	else
 		path1 = cgdir;
 
 	if (!caller_is_in_ancestor(fc->pid, controller, path1, &next)) {
-		if (fpath && strcmp(next, fpath) == 0)
+		if (last && strcmp(next, last) == 0)
 			ret = -EEXIST;
 		else
 			ret = -ENOENT;
@@ -1722,7 +1717,7 @@ out:
 static int cg_rmdir(const char *path)
 {
 	struct fuse_context *fc = fuse_get_context();
-	char *fpath = NULL, *cgdir = NULL, *controller, *next = NULL;
+	char *last = NULL, *cgdir = NULL, *controller, *next = NULL;
 	const char *cgroup;
 	int ret;
 
@@ -1737,14 +1732,14 @@ static int cg_rmdir(const char *path)
 	if (!cgroup)
 		return -EINVAL;
 
-	get_cgdir_and_path(cgroup, &cgdir, &fpath);
-	if (!fpath) {
+	get_cgdir_and_path(cgroup, &cgdir, &last);
+	if (!last) {
 		ret = -EINVAL;
 		goto out;
 	}
 
 	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, &next)) {
-		if (!fpath || strcmp(next, fpath) == 0)
+		if (!last || strcmp(next, last) == 0)
 			ret = -EBUSY;
 		else
 			ret = -ENOENT;
