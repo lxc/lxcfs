@@ -23,6 +23,7 @@
 #include <linux/sched.h>
 #include <sys/socket.h>
 #include <sys/mount.h>
+#include <sys/epoll.h>
 #include <wait.h>
 
 #ifdef FORTRAVIS
@@ -847,17 +848,42 @@ static int cg_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+#define POLLIN_SET ( EPOLLIN | EPOLLHUP | EPOLLRDHUP )
+
+static bool wait_for_sock(int sock, int timeout)
+{
+	struct epoll_event ev;
+	int epfd, ret;
+
+	epfd = epoll_create(1);
+	if (epfd < 0) {
+		fprintf(stderr, "Failed to create epoll socket: %m\n");
+		return false;
+	}
+
+	ev.events = POLLIN_SET;
+	ev.data.fd = sock;
+	if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) < 0) {
+		fprintf(stderr, "Failed adding socket to epoll: %m\n");
+		close(epfd);
+		return false;
+	}
+
+	ret = epoll_wait(epfd, &ev, 1, timeout);
+	close(epfd);
+
+	if (ret == 0)
+		return false;
+	if (ret < 0) {
+		fprintf(stderr, "Failure during epoll_wait: %m\n");
+		return false;
+	}
+	return true;
+}
+
 static int msgrecv(int sockfd, void *buf, size_t len)
 {
-	struct timeval tv;
-	fd_set rfds;
-
-	FD_ZERO(&rfds);
-	FD_SET(sockfd, &rfds);
-	tv.tv_sec = 2;
-	tv.tv_usec = 0;
-
-	if (select(sockfd+1, &rfds, NULL, NULL, &tv) <= 0)
+	if (!wait_for_sock(sockfd, 2))
 		return -1;
 	return recv(sockfd, buf, len, MSG_DONTWAIT);
 }
@@ -920,8 +946,6 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	char buf[1];
 	int ret;
 	int optval = 1;
-	struct timeval tv;
-	fd_set rfds;
 
 	*v = '1';
 
@@ -949,12 +973,8 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
 
-	FD_ZERO(&rfds);
-	FD_SET(sock, &rfds);
-	tv.tv_sec = 2;
-	tv.tv_usec = 0;
-	if (select(sock+1, &rfds, NULL, NULL, &tv) <= 0) {
-		fprintf(stderr, "Failed to select for scm_cred: %s\n",
+	if (!wait_for_sock(sock, 2)) {
+		fprintf(stderr, "Timed out waiting for scm_cred: %s\n",
 			  strerror(errno));
 		return false;
 	}
@@ -1008,8 +1028,6 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 	int newnsfd = -1, ret, cpipe[2];
 	char fnam[100];
 	pid_t cpid;
-	struct timeval tv;
-	fd_set s;
 	char v;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
@@ -1042,12 +1060,7 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 	}
 	// give the child 1 second to be done forking and
 	// write its ack
-	FD_ZERO(&s);
-	FD_SET(cpipe[0], &s);
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
-	if (ret <= 0)
+	if (!wait_for_sock(cpipe[0], 1))
 		_exit(1);
 	ret = read(cpipe[0], &v, 1);
 	if (ret != sizeof(char) || v != '1')
@@ -1072,9 +1085,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 	bool answer = false;
 	char v = '0';
 	struct ucred cred;
-	struct timeval tv;
 	size_t sz = 0, asz = 0;
-	fd_set s;
 
 	if (!cgfs_get_value(contrl, cg, file, &tmpdata))
 		return false;
@@ -1111,13 +1122,8 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const c
 			goto out;
 
 		// read converted results
-		FD_ZERO(&s);
-		FD_SET(sock[0], &s);
-		tv.tv_sec = 2;
-		tv.tv_usec = 0;
-		ret = select(sock[0]+1, &s, NULL, NULL, &tv);
-		if (ret <= 0) {
-			fprintf(stderr, "%s: select error waiting for pid from child: %s\n",
+		if (!wait_for_sock(sock[0], 2)) {
+			fprintf(stderr, "%s: timed out waiting for pid from child: %s\n",
 				__func__, strerror(errno));
 			goto out;
 		}
@@ -1228,21 +1234,13 @@ static void pid_from_ns(int sock, pid_t tpid)
 	pid_t vpid;
 	struct ucred cred;
 	char v;
-	struct timeval tv;
-	fd_set s;
 	int ret;
 
 	cred.uid = 0;
 	cred.gid = 0;
 	while (1) {
-		FD_ZERO(&s);
-		FD_SET(sock, &s);
-		tv.tv_sec = 2;
-		tv.tv_usec = 0;
-		ret = select(sock+1, &s, NULL, NULL, &tv);
-		if (ret <= 0) {
-			fprintf(stderr, "%s: bad select before read from parent: %s\n",
-				__func__, strerror(errno));
+		if (!wait_for_sock(sock, 2)) {
+			fprintf(stderr, "%s: timeout reading from parent\n", __func__);
 			_exit(1);
 		}
 		if ((ret = read(sock, &vpid, sizeof(pid_t))) != sizeof(pid_t)) {
@@ -1269,8 +1267,6 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 	int newnsfd = -1, ret, cpipe[2];
 	char fnam[100];
 	pid_t cpid;
-	fd_set s;
-	struct timeval tv;
 	char v;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
@@ -1305,12 +1301,7 @@ loop:
 
 	// give the child 1 second to be done forking and
 	// write it's ack
-	FD_ZERO(&s);
-	FD_SET(cpipe[0], &s);
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
-	if (ret <= 0)
+	if (!wait_for_sock(cpipe[0], 1))
 		goto again;
 	ret = read(cpipe[0], &v, 1);
 	if (ret != sizeof(char) || v != '1') {
