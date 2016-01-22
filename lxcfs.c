@@ -863,10 +863,12 @@ static int cg_release(const char *path, struct fuse_file_info *fi)
 static bool wait_for_sock(int sock, int timeout)
 {
 	struct epoll_event ev;
-	int epfd, ret;
+	int epfd, ret, now, starttime, deltatime, saved_errno;
 
-	epfd = epoll_create(1);
-	if (epfd < 0) {
+	if ((starttime = time(NULL)) < 0)
+		return false;
+
+	if ((epfd = epoll_create(1)) < 0) {
 		fprintf(stderr, "Failed to create epoll socket: %m\n");
 		return false;
 	}
@@ -879,13 +881,25 @@ static bool wait_for_sock(int sock, int timeout)
 		return false;
 	}
 
-	ret = epoll_wait(epfd, &ev, 1, timeout);
+again:
+	if ((now = time(NULL)) < 0) {
+		close(epfd);
+		return false;
+	}
+
+	deltatime = (starttime + timeout) - now;
+	if (deltatime < 0) { // timeout
+		errno = 0;
+		return false;
+	}
+	ret = epoll_wait(epfd, &ev, 1, 1000*deltatime + 1);
+	if (ret < 0 && errno == EINTR)
+		goto again;
+	saved_errno = errno;
 	close(epfd);
 
-	if (ret == 0)
-		return false;
-	if (ret < 0) {
-		fprintf(stderr, "Failure during epoll_wait: %m\n");
+	if (ret <= 0) {
+		errno = saved_errno;
 		return false;
 	}
 	return true;
@@ -1310,7 +1324,7 @@ loop:
 	}
 
 	// give the child 1 second to be done forking and
-	// write it's ack
+	// write its ack
 	if (!wait_for_sock(cpipe[0], 1))
 		goto again;
 	ret = read(cpipe[0], &v, 1);
