@@ -80,6 +80,7 @@ struct pidns_init_store {
 	pid_t initpid;      // the pid of nit in that ns
 	long int ctime;     // the time at which /proc/$initpid was created
 	struct pidns_init_store *next;
+	long int lastcheck;
 };
 
 struct pidns_init_store *pidns_inits;
@@ -157,6 +158,46 @@ static void remove_initpid(struct pidns_init_store *e)
 	}
 }
 
+#define PURGE_SECS 5
+/* Must be called under store_lock */
+static void prune_initpid_store(void)
+{
+	static long int last_prune = 0;
+	struct pidns_init_store *e, *prev, *delme;
+	long int now, threshold;
+
+	if (!last_prune) {
+		last_prune = time(NULL);
+		return;
+	}
+	now = time(NULL);
+	if (now < last_prune + PURGE_SECS)
+		return;
+#if DEBUG
+	fprintf(stderr, "pruning\n");
+#endif
+	last_prune = now;
+	threshold = now - 2 * PURGE_SECS;
+
+	for (prev = NULL, e = pidns_inits; e; ) {
+		if (e->lastcheck < threshold) {
+#if DEBUG
+			fprintf(stderr, "Removing cached entry for %d\n", e->initpid);
+#endif
+			delme = e;
+			if (prev)
+				prev->next = e->next;
+			else
+				pidns_inits = e->next;
+			e = e->next;
+			free(delme);
+		} else {
+			prev = e;
+			e = e->next;
+		}
+	}
+}
+
 /* Must be called under store_lock */
 static void save_initpid(struct stat *sb, pid_t pid)
 {
@@ -177,6 +218,7 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	e->initpid = pid;
 	e->ctime = procsb.st_ctime;
 	e->next = pidns_inits;
+	e->lastcheck = time(NULL);
 	pidns_inits = e;
 }
 
@@ -192,8 +234,10 @@ static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 	struct pidns_init_store *e = pidns_inits;
 	while (e) {
 		if (e->ino == sb->st_ino) {
-			if (initpid_still_valid(e, sb))
+			if (initpid_still_valid(e, sb)) {
+				e->lastcheck = time(NULL);
 				return e;
+			}
 			remove_initpid(e);
 			return NULL;
 		}
@@ -311,6 +355,9 @@ static pid_t lookup_initpid_in_store(pid_t qpid)
 		save_initpid(&sb, answer);
 
 out:
+	/* we prune at end in case we are returning
+	 * the value we were about to return */
+	prune_initpid_store();
 	store_unlock();
 	return answer;
 }
