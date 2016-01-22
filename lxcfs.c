@@ -90,6 +90,9 @@ static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
 
+	if (pid <= 0)
+		return -1;
+
 again:
 	ret = waitpid(pid, &status, 0);
 	if (ret == -1) {
@@ -565,6 +568,8 @@ static int cg_getattr(const char *path, struct stat *sb)
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
 	 * Then check that caller's cgroup is under path if last is a child
 	 * cgroup, or cgdir if last is a file */
@@ -653,6 +658,8 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	if (cgroup) {
 		if (!caller_may_see_dir(initpid, controller, cgroup))
 			return -ENOENT;
@@ -708,6 +715,8 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
 			int ret;
@@ -808,6 +817,8 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	free_key(k);
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
 		goto out;
@@ -1694,8 +1705,12 @@ int cg_mkdir(const char *path, mode_t mode)
 		path1 = cgdir;
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, path1, &next)) {
-		if (last && strcmp(next, last) == 0)
+		if (!next)
+			ret = -EINVAL;
+		else if (last && strcmp(next, last) == 0)
 			ret = -EEXIST;
 		else
 			ret = -ENOENT;
@@ -1744,6 +1759,8 @@ static int cg_rmdir(const char *path)
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
 		if (!last || strcmp(next, last) == 0)
 			ret = -EBUSY;
@@ -1932,6 +1949,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file("/proc/meminfo", buf, size, d);
@@ -2112,6 +2131,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("proc/cpuinfo", buf, size, d);
@@ -2227,6 +2248,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("/proc/stat", buf, size, d);
@@ -2357,7 +2380,7 @@ static long int getreaperage(pid_t pid)
 	pid_t qpid;
 
 	qpid = get_init_pid_for_task(pid);
-	if (qpid < 0)
+	if (qpid <= 0)
 		return 0;
 
 	ret = snprintf(fnam, 100, "/proc/%d", qpid);
@@ -2401,7 +2424,8 @@ void write_task_init_pid_exit(int sock, pid_t target)
 	if (pid < 0)
 		_exit(1);
 	if (pid != 0) {
-		wait_for_pid(pid);
+		if (!wait_for_pid(pid))
+			_exit(1);
 		_exit(0);
 	}
 
@@ -2410,7 +2434,8 @@ void write_task_init_pid_exit(int sock, pid_t target)
 	cred.gid = 0;
 	cred.pid = 1;
 	v = '1';
-	send_creds(sock, &cred, v, true);
+	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
+		_exit(1);
 	_exit(0);
 }
 
@@ -2433,6 +2458,7 @@ static pid_t get_init_pid_for_task(pid_t task)
 	if (!pid) {
 		close(sock[1]);
 		write_task_init_pid_exit(sock[0], task);
+		_exit(0);
 	}
 
 	if (!recv_creds(sock[1], &cred, &v))
@@ -2442,7 +2468,8 @@ static pid_t get_init_pid_for_task(pid_t task)
 out:
 	close(sock[0]);
 	close(sock[1]);
-	wait_for_pid(pid);
+	if (pid > 0)
+		wait_for_pid(pid);
 	return ret;
 }
 
@@ -2452,7 +2479,7 @@ static unsigned long get_reaper_busy(pid_t task)
 	char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
 
-	if (initpid == -1)
+	if (initpid <= 0)
 		return 0;
 
 	cgroup = get_pid_cgroup(initpid, "cpuacct");
@@ -2549,6 +2576,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
 		return read_file("/proc/diskstats", buf, size, d);

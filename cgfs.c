@@ -698,12 +698,15 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (ret < 0)
 		return NULL;
 
-	if (!S_ISREG(sb.st_mode))
-		return NULL;
 	do {
 		newkey = malloc(sizeof(struct cgfs_files));
 	} while (!newkey);
-	newkey->name = must_copy_string(file);
+	if (file)
+		newkey->name = must_copy_string(file);
+	else if (rindex(cgroup, '/'))
+		newkey->name = must_copy_string(rindex(cgroup, '/'));
+	else
+		newkey->name = must_copy_string(cgroup);
 	newkey->uid = sb.st_uid;
 	newkey->gid = sb.st_gid;
 	newkey->mode = sb.st_mode;
