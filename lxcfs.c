@@ -83,6 +83,8 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 	(*src)[*sz] = '\0';
 }
 
+static pid_t get_init_pid_for_task(pid_t task);
+
 static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
@@ -2352,163 +2354,25 @@ err:
 	return rv;
 }
 
-/*
- * How to guess what to present for uptime?
- * One thing we could do would be to take the date on the caller's
- * memory.usage_in_bytes file, which should equal the time of creation
- * of his cgroup.  However, a task could be in a sub-cgroup of the
- * container.  The same problem exists if we try to look at the ages
- * of processes in the caller's cgroup.
- *
- * So we'll fork a task that will enter the caller's pidns, mount a
- * fresh procfs, get the age of /proc/1, and pass that back over a pipe.
- *
- * For the second uptime #, we'll do as Stéphane had done, just copy
- * the number from /proc/uptime.  Not sure how to best emulate 'idle'
- * time.  Maybe someone can come up with a good algorithm and submit a
- * patch.  Maybe something based on cpushare info?
- */
-
-/* return age of the reaper for $pid, taken from ctime of its procdir */
-static long int get_pid1_time(pid_t pid)
+static long int getreaperage(pid_t pid)
 {
 	char fnam[100];
-	int fd, cpipe[2], ret;
 	struct stat sb;
-	pid_t cpid;
-	struct timeval tv;
-	fd_set s;
-	long int v;
+	int ret;
+	pid_t qpid;
 
-	if (unshare(CLONE_NEWNS))
+	qpid = get_init_pid_for_task(pid);
+	if (qpid < 0)
 		return 0;
 
-	if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL)) {
-		perror("rslave mount failed");
-		return 0;
-	}
-
-	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", pid);
-	if (ret < 0 || ret >= sizeof(fnam))
+	ret = snprintf(fnam, 100, "/proc/%d", qpid);
+	if (ret < 0 || ret >= 100)
 		return 0;
 
-	fd = open(fnam, O_RDONLY);
-	if (fd < 0) {
-		perror("get_pid1_time open of ns/pid");
+	if (lstat(fnam, &sb) < 0)
 		return 0;
-	}
-	if (setns(fd, 0)) {
-		perror("get_pid1_time setns 1");
-		close(fd);
-		return 0;
-	}
-	close(fd);
 
-	if (pipe(cpipe) < 0)
-		return(0);
-
-	cpid = fork();
-	if (cpid < 0) {
-		close(cpipe[0]);
-		close(cpipe[1]);
-		return 0;
-	}
-
-	if (!cpid) {
-		close(cpipe[0]);
-		umount2("/proc", MNT_DETACH);
-		if (mount("proc", "/proc", "proc", 0, NULL)) {
-			perror("get_pid1_time mount");
-			_exit(1);
-		}
-		ret = lstat("/proc/1", &sb);
-		if (ret) {
-			perror("get_pid1_time lstat");
-			_exit(1);
-		}
-		long int retval = time(NULL) - sb.st_ctime;
-		if (write(cpipe[1], &retval, sizeof(retval)) < 0) {
-			fprintf(stderr, "%s (child): erorr on write: %s\n",
-					__func__, strerror(errno));
-		}
-		close(cpipe[1]);
-		_exit(0);
-	}
-	close(cpipe[1]);
-
-	// give the child 1 second to be done forking and
-	// write its ack
-	FD_ZERO(&s);
-	FD_SET(cpipe[0], &s);
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-	ret = select(cpipe[0]+1, &s, NULL, NULL, &tv);
-	if (ret <= 0)
-		goto fail;
-	ret = read(cpipe[0], &v, sizeof(v));
-	if (ret != sizeof(v))
-		goto fail;
-
-	wait_for_pid(cpid);
-
-	close(cpipe[0]);
-	return v;
-
-fail:
-	kill(cpid, SIGKILL);
-	wait_for_pid(cpid);
-	close(cpipe[0]);
-	return 0;
-}
-
-static long int getreaperage(pid_t qpid)
-{
-	int pid, mypipe[2], ret;
-	struct timeval tv;
-	fd_set s;
-	long int mtime, answer = 0;
-
-	if (pipe(mypipe)) {
-		return 0;
-	}
-
-	pid = fork();
-
-	if (!pid) { // child
-		mtime = get_pid1_time(qpid);
-		if (write(mypipe[1], &mtime, sizeof(mtime)) != sizeof(mtime))
-			fprintf(stderr, "Warning: bad write from getreaperage\n");
-		_exit(0);
-	}
-
-	close(mypipe[1]);
-
-	if (pid < 0)
-		goto out;
-
-	FD_ZERO(&s);
-	FD_SET(mypipe[0], &s);
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-	ret = select(mypipe[0]+1, &s, NULL, NULL, &tv);
-	if (ret <= 0) {
-		perror("select");
-		goto out;
-	}
-	if (!ret) {
-		fprintf(stderr, "timed out\n");
-		goto out;
-	}
-	if (read(mypipe[0], &mtime, sizeof(mtime)) != sizeof(mtime)) {
-		perror("read");
-		goto out;
-	}
-	answer = mtime;
-
-out:
-	wait_for_pid(pid);
-	close(mypipe[0]);
-	return answer;
+	return time(NULL) - sb.st_ctime;
 }
 
 /*
