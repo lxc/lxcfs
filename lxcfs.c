@@ -359,8 +359,8 @@ static void prune_init_slice(char *cg)
 }
 
 /*
- * If caller is in /a/b/c/d, he may only act on things under cg=/a/b/c/d.
- * If caller is in /a, he may act on /a/b, but not on /b.
+ * If pid is in /a/b/c/d, he may only act on things under cg=/a/b/c/d.
+ * If pid is in /a, he may act on /a/b, but not on /b.
  * if the answer is false and nextcg is not NULL, then *nextcg will point
  * to a string containing the next cgroup directory under cg, which must be
  * freed by the caller.
@@ -394,7 +394,7 @@ out:
 }
 
 /*
- * If caller is in /a/b/c, he may see that /a exists, but not /b or /a/c.
+ * If pid is in /a/b/c, he may see that /a exists, but not /b or /a/c.
  */
 static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 {
@@ -564,16 +564,17 @@ static int cg_getattr(const char *path, struct stat *sb)
 		path2 = last;
 	}
 
+	pid_t initpid = get_init_pid_for_task(fc->pid);
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
 	 * Then check that caller's cgroup is under path if last is a child
 	 * cgroup, or cgdir if last is a file */
 
 	if (is_child_cgroup(controller, path1, path2)) {
-		if (!caller_may_see_dir(fc->pid, controller, cgroup)) {
+		if (!caller_may_see_dir(initpid, controller, cgroup)) {
 			ret = -ENOENT;
 			goto out;
 		}
-		if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL)) {
+		if (!caller_is_in_ancestor(initpid, controller, cgroup, NULL)) {
 			/* this is just /cgroup/controller, return it as a dir */
 			sb->st_mode = S_IFDIR | 00555;
 			sb->st_nlink = 2;
@@ -608,7 +609,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		sb->st_gid = k->gid;
 		sb->st_size = 0;
 		free_key(k);
-		if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL)) {
+		if (!caller_is_in_ancestor(initpid, controller, path1, NULL)) {
 			ret = -ENOENT;
 			goto out;
 		}
@@ -651,8 +652,9 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 		}
 	}
 
+	pid_t initpid = get_init_pid_for_task(fc->pid);
 	if (cgroup) {
-		if (!caller_may_see_dir(fc->pid, controller, cgroup))
+		if (!caller_may_see_dir(initpid, controller, cgroup))
 			return -ENOENT;
 		if (!fc_may_access(fc, controller, cgroup, NULL, O_RDONLY))
 			return -EACCES;
@@ -705,7 +707,8 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		goto out;
 	}
 
-	if (!caller_is_in_ancestor(fc->pid, d->controller, d->cgroup, &nextcg)) {
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
 			int ret;
 			ret = filler(buf, nextcg,  NULL, 0);
@@ -804,7 +807,8 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	}
 	free_key(k);
 
-	if (!caller_may_see_dir(fc->pid, controller, path1)) {
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
 		goto out;
 	}
@@ -1689,7 +1693,8 @@ int cg_mkdir(const char *path, mode_t mode)
 	else
 		path1 = cgdir;
 
-	if (!caller_is_in_ancestor(fc->pid, controller, path1, &next)) {
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (!caller_is_in_ancestor(initpid, controller, path1, &next)) {
 		if (last && strcmp(next, last) == 0)
 			ret = -EEXIST;
 		else
@@ -1701,7 +1706,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		ret = -EACCES;
 		goto out;
 	}
-	if (!caller_is_in_ancestor(fc->pid, controller, path1, NULL)) {
+	if (!caller_is_in_ancestor(initpid, controller, path1, NULL)) {
 		ret = -EACCES;
 		goto out;
 	}
@@ -1738,7 +1743,8 @@ static int cg_rmdir(const char *path)
 		goto out;
 	}
 
-	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, &next)) {
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
 		if (!last || strcmp(next, last) == 0)
 			ret = -EBUSY;
 		else
@@ -1750,7 +1756,7 @@ static int cg_rmdir(const char *path)
 		ret = -EACCES;
 		goto out;
 	}
-	if (!caller_is_in_ancestor(fc->pid, controller, cgroup, NULL)) {
+	if (!caller_is_in_ancestor(initpid, controller, cgroup, NULL)) {
 		ret = -EACCES;
 		goto out;
 	}
@@ -1925,7 +1931,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	cg = get_pid_cgroup(fc->pid, "memory");
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file("/proc/meminfo", buf, size, d);
 
@@ -2104,7 +2111,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	cg = get_pid_cgroup(fc->pid, "cpuset");
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("proc/cpuinfo", buf, size, d);
 
@@ -2218,7 +2226,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	cg = get_pid_cgroup(fc->pid, "cpuset");
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("/proc/stat", buf, size, d);
 
@@ -2439,14 +2448,14 @@ out:
 
 static unsigned long get_reaper_busy(pid_t task)
 {
-	pid_t init = get_init_pid_for_task(task);
+	pid_t initpid = get_init_pid_for_task(task);
 	char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
 
-	if (init == -1)
+	if (initpid == -1)
 		return 0;
 
-	cgroup = get_pid_cgroup(init, "cpuacct");
+	cgroup = get_pid_cgroup(initpid, "cpuacct");
 	if (!cgroup)
 		goto out;
 	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
@@ -2539,7 +2548,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	cg = get_pid_cgroup(fc->pid, "blkio");
+	pid_t initpid = get_init_pid_for_task(fc->pid);
+	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
 		return read_file("/proc/diskstats", buf, size, d);
 

@@ -691,7 +691,7 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file)
 		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup,
+	snprintf(fnam, len, "%s/%s/%s%s%s", basedir, tmpc, cgroup,
 		file ? "/" : "", file ? file : "");
 
 	ret = stat(fnam, &sb);
