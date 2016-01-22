@@ -433,7 +433,9 @@ static bool recursive_rmdir(const char *dirname)
 
 	dir = opendir(dirname);
 	if (!dir) {
+#if DEBUG
 		fprintf(stderr, "%s: failed to open %s: %s\n", __func__, dirname, strerror(errno));
+#endif
 		return false;
 	}
 
@@ -456,12 +458,17 @@ static bool recursive_rmdir(const char *dirname)
 
 		ret = lstat(pathname, &mystat);
 		if (ret) {
+#if DEBUG
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
+#endif
 			continue;
 		}
 		if (S_ISDIR(mystat.st_mode)) {
-			if (!recursive_rmdir(pathname))
+			if (!recursive_rmdir(pathname)) {
+#if DEBUG
 				fprintf(stderr, "Error removing %s\n", pathname);
+#endif
+			}
 		}
 	}
 
@@ -472,7 +479,9 @@ static bool recursive_rmdir(const char *dirname)
 	}
 
 	if (rmdir(dirname) < 0) {
+#if DEBUG
 		fprintf(stderr, "%s: failed to delete %s: %s\n", __func__, dirname, strerror(errno));
+#endif
 		ret = false;
 	}
 
