@@ -372,7 +372,7 @@ next:
 	return true;
 }
 
-static bool cgfs_create_forone(const struct controller *c, const char *cg, bool *existed)
+static bool cgfs_create_forone(const struct controller *c, uid_t uid, gid_t gid, const char *cg, bool *existed)
 {
 	while (c) {
 		if (!c->mount_path || !c->init_path)
@@ -393,6 +393,11 @@ static bool cgfs_create_forone(const struct controller *c, const char *cg, bool 
 #if DEBUG
 		fprintf(stderr, "Creating %s %s\n", path, pass ? "succeeded" : "failed");
 #endif
+		if (pass) {
+			if (chown(path, uid, gid) < 0)
+				mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m\n",
+					path, (int)uid, (int)gid);
+		}
 		free(path);
 		if (pass)
 			return true;
@@ -454,7 +459,7 @@ static void cgfs_remove_forone(int idx, const char *cg)
 	}
 }
 
-static bool cgfs_create(const char *cg, bool *existed)
+static bool cgfs_create(const char *cg, uid_t uid, gid_t gid, bool *existed)
 {
 	*existed = false;
 	int i, j;
@@ -468,19 +473,13 @@ static bool cgfs_create(const char *cg, bool *existed)
 		if (!c)
 			continue;
 
-		if (!cgfs_create_forone(c, cg, existed)) {
+		if (!cgfs_create_forone(c, uid, gid, cg, existed)) {
 			for (j = 0; j < i; j++)
 				cgfs_remove_forone(j, cg);
 			return false;
 		}
 	}
 
-	return true;
-}
-
-static bool cgfs_chown(const char *cg, uid_t uid, gid_t gid)
-{
-	/* TODO */
 	return true;
 }
 
@@ -584,7 +583,7 @@ static int handle_login(const char *user)
 			return PAM_SESSION_ERR;
 		}
 
-		if (!cgfs_create(cg, &existed)) {
+		if (!cgfs_create(cg, uid, gid, &existed)) {
 			mysyslog(LOG_ERR, "Failed to create a cgroup for user %s\n", user);
 			return PAM_SESSION_ERR;
 		}
@@ -592,10 +591,6 @@ static int handle_login(const char *user)
 		if (existed == 1) {
 			idx++;
 			continue;
-		}
-
-		if (!cgfs_chown(cg, uid, gid)) {
-			mysyslog(LOG_ERR, "Warning: failed to chown %s for user %s\n", cg, user);
 		}
 
 		if (!cgfs_enter(cg)) {
