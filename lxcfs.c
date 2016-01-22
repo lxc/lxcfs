@@ -1,6 +1,6 @@
 /* lxcfs
  *
- * Copyright © 2014,2015 Canonical, Inc
+ * Copyright © 2014-2016 Canonical, Inc
  * Author: Serge Hallyn <serge.hallyn@ubuntu.com>
  *
  * See COPYING file for details.
@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <libgen.h>
 #include <sched.h>
+#include <pthread.h>
 #include <linux/sched.h>
 #include <sys/socket.h>
 #include <sys/mount.h>
@@ -59,6 +60,284 @@ struct file_info {
 #define BUF_RESERVE_SIZE 256
 
 /*
+ * A table caching which pid is init for a pid namespace.
+ * When looking up which pid is init for $qpid, we first
+ * 1. Stat /proc/$qpid/ns/pid.
+ * 2. Check whether the ino_t is in our store.
+ *   a. if not, fork a child in qpid's ns to send us
+ *	 ucred.pid = 1, and read the initpid.  Cache
+ *	 initpid and creation time for /proc/initpid
+ *	 in a new store entry.
+ *   b. if so, verify that /proc/initpid still matches
+ *	 what we have saved.  If not, clear the store
+ *	 entry and go back to a.  If so, return the
+ *	 cached initpid.
+ */
+/* TODO - turn this into a hashtable */
+/* TODO - periodically purge the hashtable? */
+struct pidns_init_store {
+	ino_t ino;          // inode number for /proc/$pid/ns/pid
+	pid_t initpid;      // the pid of nit in that ns
+	long int ctime;     // the time at which /proc/$initpid was created
+	struct pidns_init_store *next;
+};
+
+struct pidns_init_store *pidns_inits;
+static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void lock_mutex(pthread_mutex_t *l)
+{
+	int ret;
+
+	if ((ret = pthread_mutex_lock(l)) != 0) {
+		fprintf(stderr, "pthread_mutex_lock returned:%d %s\n", ret, strerror(ret));
+		exit(1);
+	}
+}
+
+static void unlock_mutex(pthread_mutex_t *l)
+{
+	int ret;
+
+	if ((ret = pthread_mutex_unlock(l)) != 0) {
+		fprintf(stderr, "pthread_mutex_unlock returned:%d %s\n", ret, strerror(ret));
+		exit(1);
+	}
+}
+
+static void store_lock(void)
+{
+	lock_mutex(&pidns_store_mutex);
+}
+
+static void store_unlock(void)
+{
+	unlock_mutex(&pidns_store_mutex);
+}
+
+/* Must be called under store_lock */
+static bool initpid_still_valid(struct pidns_init_store *e, struct stat *nsfdsb)
+{
+	struct stat initsb;
+	char fnam[100];
+
+	snprintf(fnam, 100, "/proc/%d", e->initpid);
+	if (stat(fnam, &initsb) < 0)
+		return false;
+#if DEBUG
+	fprintf(stderr, "comparing ctime %ld %ld for pid %d\n",
+		e->ctime, initsb.st_ctime, e->initpid);
+#endif
+	if (e->ctime != initsb.st_ctime)
+		return false;
+	return true;
+}
+
+/* Must be called under store_lock */
+static void remove_initpid(struct pidns_init_store *e)
+{
+	struct pidns_init_store *tmp;
+
+#if DEBUG
+	fprintf(stderr, "remove_initpid: removing entry for %d\n", e->initpid);
+#endif
+	if (pidns_inits == e) {
+		pidns_inits = e->next;
+		free(e);
+		return;
+	}
+
+	tmp = pidns_inits;
+	while (tmp) {
+		if (tmp->next == e) {
+			tmp->next = e->next;
+			free(e);
+			return;
+		}
+		tmp = tmp->next;
+	}
+}
+
+/* Must be called under store_lock */
+static void save_initpid(struct stat *sb, pid_t pid)
+{
+	struct pidns_init_store *e;
+	char fpath[100];
+	struct stat procsb;
+
+#if DEBUG
+	fprintf(stderr, "save_initpid: adding entry for %d\n", pid);
+#endif
+	snprintf(fpath, 100, "/proc/%d", pid);
+	if (stat(fpath, &procsb) < 0)
+		return;
+	do {
+		e = malloc(sizeof(*e));
+	} while (!e);
+	e->ino = sb->st_ino;
+	e->initpid = pid;
+	e->ctime = procsb.st_ctime;
+	e->next = pidns_inits;
+	pidns_inits = e;
+}
+
+/*
+ * Given the stat(2) info for a nsfd pid inode, lookup the init_pid_store
+ * entry for the inode number and creation time.  Verify that the init pid
+ * is still valid.  If not, remove it.  Return the entry if valid, NULL
+ * otherwise.
+ * Must be called under store_lock
+ */
+static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
+{
+	struct pidns_init_store *e = pidns_inits;
+	while (e) {
+		if (e->ino == sb->st_ino) {
+			if (initpid_still_valid(e, sb))
+				return e;
+			remove_initpid(e);
+			return NULL;
+		}
+		e = e->next;
+	}
+
+	return NULL;
+}
+
+#define SEND_CREDS_OK 0
+#define SEND_CREDS_NOTSK 1
+#define SEND_CREDS_FAIL 2
+static bool recv_creds(int sock, struct ucred *cred, char *v);
+static int wait_for_pid(pid_t pid);
+static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst);
+
+/*
+ * fork a task which switches to @task's namespace and writes '1'.
+ * over a unix sock so we can read the task's reaper's pid in our
+ * namespace
+ */
+static void write_task_init_pid_exit(int sock, pid_t target)
+{
+	struct ucred cred;
+	char fnam[100];
+	pid_t pid;
+	char v;
+	int fd, ret;
+
+	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
+	if (ret < 0 || ret >= sizeof(fnam))
+		_exit(1);
+
+	fd = open(fnam, O_RDONLY);
+	if (fd < 0) {
+		perror("write_task_init_pid_exit open of ns/pid");
+		_exit(1);
+	}
+	if (setns(fd, 0)) {
+		perror("write_task_init_pid_exit setns 1");
+		close(fd);
+		_exit(1);
+	}
+	pid = fork();
+	if (pid < 0)
+		_exit(1);
+	if (pid != 0) {
+		if (!wait_for_pid(pid))
+			_exit(1);
+		_exit(0);
+	}
+
+	/* we are the child */
+	cred.uid = 0;
+	cred.gid = 0;
+	cred.pid = 1;
+	v = '1';
+	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
+		_exit(1);
+	_exit(0);
+}
+
+static pid_t get_init_pid_for_task(pid_t task)
+{
+	int sock[2];
+	pid_t pid;
+	pid_t ret = -1;
+	char v = '0';
+	struct ucred cred;
+
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
+		perror("socketpair");
+		return -1;
+	}
+
+	pid = fork();
+	if (pid < 0)
+		goto out;
+	if (!pid) {
+		close(sock[1]);
+		write_task_init_pid_exit(sock[0], task);
+		_exit(0);
+	}
+
+	if (!recv_creds(sock[1], &cred, &v))
+		goto out;
+	ret = cred.pid;
+
+out:
+	close(sock[0]);
+	close(sock[1]);
+	if (pid > 0)
+		wait_for_pid(pid);
+	return ret;
+}
+
+static pid_t lookup_initpid_in_store(pid_t qpid)
+{
+	pid_t answer = 0;
+	struct stat sb;
+	struct pidns_init_store *e;
+	char fnam[100];
+
+	snprintf(fnam, 100, "/proc/%d/ns/pid", qpid);
+	store_lock();
+	if (stat(fnam, &sb) < 0)
+		goto out;
+	e = lookup_verify_initpid(&sb);
+	if (e) {
+		answer = e->initpid;
+		goto out;
+	}
+	answer = get_init_pid_for_task(qpid);
+	if (answer > 0)
+		save_initpid(&sb, answer);
+
+out:
+	store_unlock();
+	return answer;
+}
+
+static int wait_for_pid(pid_t pid)
+{
+	int status, ret;
+
+	if (pid <= 0)
+		return -1;
+
+again:
+	ret = waitpid(pid, &status, 0);
+	if (ret == -1) {
+		if (errno == EINTR)
+			goto again;
+		return -1;
+	}
+	if (ret != pid)
+		goto again;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return -1;
+	return 0;
+}
+
+
+/*
  * append pid to *src.
  * src: a pointer to a char* in which ot append the pid.
  * sz: the number of characters printed so far, minus trailing \0.
@@ -82,29 +361,6 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 	memcpy((*src) +*sz , tmp, tmplen);
 	*sz += tmplen;
 	(*src)[*sz] = '\0';
-}
-
-static pid_t get_init_pid_for_task(pid_t task);
-
-static int wait_for_pid(pid_t pid)
-{
-	int status, ret;
-
-	if (pid <= 0)
-		return -1;
-
-again:
-	ret = waitpid(pid, &status, 0);
-	if (ret == -1) {
-		if (errno == EINTR)
-			goto again;
-		return -1;
-	}
-	if (ret != pid)
-		goto again;
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-		return -1;
-	return 0;
 }
 
 /*
@@ -567,7 +823,7 @@ static int cg_getattr(const char *path, struct stat *sb)
 		path2 = last;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
@@ -657,7 +913,7 @@ static int cg_opendir(const char *path, struct fuse_file_info *fi)
 		}
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (cgroup) {
@@ -714,7 +970,7 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		goto out;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
@@ -816,7 +1072,7 @@ static int cg_open(const char *path, struct fuse_file_info *fi)
 	}
 	free_key(k);
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
@@ -890,6 +1146,7 @@ again:
 	deltatime = (starttime + timeout) - now;
 	if (deltatime < 0) { // timeout
 		errno = 0;
+		close(epfd);
 		return false;
 	}
 	ret = epoll_wait(epfd, &ev, 1, 1000*deltatime + 1);
@@ -912,9 +1169,6 @@ static int msgrecv(int sockfd, void *buf, size_t len)
 	return recv(sockfd, buf, len, MSG_DONTWAIT);
 }
 
-#define SEND_CREDS_OK 0
-#define SEND_CREDS_NOTSK 1
-#define SEND_CREDS_FAIL 2
 static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 {
 	struct msghdr msg = { 0 };
@@ -1718,7 +1972,7 @@ int cg_mkdir(const char *path, mode_t mode)
 	else
 		path1 = cgdir;
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, path1, &next)) {
@@ -1772,7 +2026,7 @@ static int cg_rmdir(const char *path)
 		goto out;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
@@ -1962,7 +2216,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
@@ -2144,7 +2398,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
@@ -2261,7 +2515,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
@@ -2393,7 +2647,7 @@ static long int getreaperage(pid_t pid)
 	int ret;
 	pid_t qpid;
 
-	qpid = get_init_pid_for_task(pid);
+	qpid = lookup_initpid_in_store(pid);
 	if (qpid <= 0)
 		return 0;
 
@@ -2407,89 +2661,9 @@ static long int getreaperage(pid_t pid)
 	return time(NULL) - sb.st_ctime;
 }
 
-/*
- * fork a task which switches to @task's namespace and writes '1'.
- * over a unix sock so we can read the task's reaper's pid in our
- * namespace
- */
-void write_task_init_pid_exit(int sock, pid_t target)
-{
-	struct ucred cred;
-	char fnam[100];
-	pid_t pid;
-	char v;
-	int fd, ret;
-
-	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
-	if (ret < 0 || ret >= sizeof(fnam))
-		_exit(1);
-
-	fd = open(fnam, O_RDONLY);
-	if (fd < 0) {
-		perror("write_task_init_pid_exit open of ns/pid");
-		_exit(1);
-	}
-	if (setns(fd, 0)) {
-		perror("write_task_init_pid_exit setns 1");
-		close(fd);
-		_exit(1);
-	}
-	pid = fork();
-	if (pid < 0)
-		_exit(1);
-	if (pid != 0) {
-		if (!wait_for_pid(pid))
-			_exit(1);
-		_exit(0);
-	}
-
-	/* we are the child */
-	cred.uid = 0;
-	cred.gid = 0;
-	cred.pid = 1;
-	v = '1';
-	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
-		_exit(1);
-	_exit(0);
-}
-
-static pid_t get_init_pid_for_task(pid_t task)
-{
-	int sock[2];
-	pid_t pid;
-	pid_t ret = -1;
-	char v = '0';
-	struct ucred cred;
-
-	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
-		perror("socketpair");
-		return -1;
-	}
-
-	pid = fork();
-	if (pid < 0)
-		goto out;
-	if (!pid) {
-		close(sock[1]);
-		write_task_init_pid_exit(sock[0], task);
-		_exit(0);
-	}
-
-	if (!recv_creds(sock[1], &cred, &v))
-		goto out;
-	ret = cred.pid;
-
-out:
-	close(sock[0]);
-	close(sock[1]);
-	if (pid > 0)
-		wait_for_pid(pid);
-	return ret;
-}
-
 static unsigned long get_reaper_busy(pid_t task)
 {
-	pid_t initpid = get_init_pid_for_task(task);
+	pid_t initpid = lookup_initpid_in_store(task);
 	char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
 
@@ -2589,7 +2763,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = get_init_pid_for_task(fc->pid);
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "blkio");

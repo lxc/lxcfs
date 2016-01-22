@@ -10,6 +10,7 @@ VERSION_AGE      = 0
 AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
 AM_CFLAGS += $(DBUS_CFLAGS) $(FUSE_CFLAGS) $(GLIB_CFLAGS) $(GLIBDBUS_CFLAGS) $(GIO_CFLAGS)
 AM_LDFLAGS = $(DBUS_LIBS) $(FUSE_LIBS) $(GLIB_LIBS) -pthread $(GLIBDBUS_LIBS) $(GIO_LIBS)
+#AM_CFLAGS += -DDEBUG
 
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\" 
 
@@ -39,8 +40,7 @@ pam_cgfs_la_SOURCES = pam/pam_cgfs.c
 pam_cgfs_la_CFLAGS = $(AM_CFLAGS)
 pam_cgfs_la_LIBADD = $(AM_LIBS) $(PAM_LIBS) -L$(top_srcdir)
 pam_cgfs_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version -shared
-# temporary
-pam_cgfs_la_CFLAGS += -DDEBUG
+#pam_cgfs_la_CFLAGS += -DDEBUG
 
 install-data-hook:     install-pamLTLIBRARIES
 	rm -f "$(DESTDIR)$(pamdir)/pam_cgfs.la"
