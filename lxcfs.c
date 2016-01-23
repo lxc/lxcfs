@@ -83,7 +83,7 @@ struct pidns_init_store {
 
 /* lol - look at how they are allocated in the kernel */
 #define PIDNS_HASH_SIZE 4096
-#define HASH(x) (x % PIDNS_HASH_SIZE)
+#define HASH(x) ((x) % PIDNS_HASH_SIZE)
 
 struct pidns_init_store *pidns_hash_table[PIDNS_HASH_SIZE];
 static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
