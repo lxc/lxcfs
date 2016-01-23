@@ -73,8 +73,6 @@ struct file_info {
  *	 entry and go back to a.  If so, return the
  *	 cached initpid.
  */
-/* TODO - turn this into a hashtable */
-/* TODO - periodically purge the hashtable? */
 struct pidns_init_store {
 	ino_t ino;          // inode number for /proc/$pid/ns/pid
 	pid_t initpid;      // the pid of nit in that ns
@@ -83,7 +81,11 @@ struct pidns_init_store {
 	long int lastcheck;
 };
 
-struct pidns_init_store *pidns_inits;
+/* lol - look at how they are allocated in the kernel */
+#define PIDNS_HASH_SIZE 4096
+#define HASH(x) (x % PIDNS_HASH_SIZE)
+
+struct pidns_init_store *pidns_hash_table[PIDNS_HASH_SIZE];
 static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void lock_mutex(pthread_mutex_t *l)
 {
@@ -137,17 +139,19 @@ static bool initpid_still_valid(struct pidns_init_store *e, struct stat *nsfdsb)
 static void remove_initpid(struct pidns_init_store *e)
 {
 	struct pidns_init_store *tmp;
+	int h;
 
 #if DEBUG
 	fprintf(stderr, "remove_initpid: removing entry for %d\n", e->initpid);
 #endif
-	if (pidns_inits == e) {
-		pidns_inits = e->next;
+	h = HASH(e->ino);
+	if (pidns_hash_table[h] == e) {
+		pidns_hash_table[h] = e->next;
 		free(e);
 		return;
 	}
 
-	tmp = pidns_inits;
+	tmp = pidns_hash_table[h];
 	while (tmp) {
 		if (tmp->next == e) {
 			tmp->next = e->next;
@@ -165,6 +169,7 @@ static void prune_initpid_store(void)
 	static long int last_prune = 0;
 	struct pidns_init_store *e, *prev, *delme;
 	long int now, threshold;
+	int i;
 
 	if (!last_prune) {
 		last_prune = time(NULL);
@@ -179,21 +184,23 @@ static void prune_initpid_store(void)
 	last_prune = now;
 	threshold = now - 2 * PURGE_SECS;
 
-	for (prev = NULL, e = pidns_inits; e; ) {
-		if (e->lastcheck < threshold) {
+	for (i = 0; i < PIDNS_HASH_SIZE; i++) {
+		for (prev = NULL, e = pidns_hash_table[i]; e; ) {
+			if (e->lastcheck < threshold) {
 #if DEBUG
-			fprintf(stderr, "Removing cached entry for %d\n", e->initpid);
+				fprintf(stderr, "Removing cached entry for %d\n", e->initpid);
 #endif
-			delme = e;
-			if (prev)
-				prev->next = e->next;
-			else
-				pidns_inits = e->next;
-			e = e->next;
-			free(delme);
-		} else {
-			prev = e;
-			e = e->next;
+				delme = e;
+				if (prev)
+					prev->next = e->next;
+				else
+					pidns_hash_table[i] = e->next;
+				e = e->next;
+				free(delme);
+			} else {
+				prev = e;
+				e = e->next;
+			}
 		}
 	}
 }
@@ -204,6 +211,7 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	struct pidns_init_store *e;
 	char fpath[100];
 	struct stat procsb;
+	int h;
 
 #if DEBUG
 	fprintf(stderr, "save_initpid: adding entry for %d\n", pid);
@@ -217,9 +225,10 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	e->ino = sb->st_ino;
 	e->initpid = pid;
 	e->ctime = procsb.st_ctime;
-	e->next = pidns_inits;
+	h = HASH(e->ino);
+	e->next = pidns_hash_table[h];
 	e->lastcheck = time(NULL);
-	pidns_inits = e;
+	pidns_hash_table[h] = e;
 }
 
 /*
@@ -231,7 +240,9 @@ static void save_initpid(struct stat *sb, pid_t pid)
  */
 static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 {
-	struct pidns_init_store *e = pidns_inits;
+	int h = HASH(sb->st_ino);
+	struct pidns_init_store *e = pidns_hash_table[h];
+
 	while (e) {
 		if (e->ino == sb->st_ino) {
 			if (initpid_still_valid(e, sb)) {
