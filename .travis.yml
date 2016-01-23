@@ -7,7 +7,7 @@ before_install:
  - sudo apt-get update -qq
  - sudo apt-get -y install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
  - sudo apt-get -y install -qq realpath || true
- - sudo apt-get -y install -qq automake libtool libattr1-dev
+ - sudo apt-get -y install -qq automake libtool libattr1-dev libpam0g-dev
 # need to modprobe fuse to run the tests...
 #script: ./bootstrap.sh && ./configure && make -j4 && make tests && cd tests && sudo ./main.sh
 script: ./bootstrap.sh && ./configure && make -j4 && make tests
