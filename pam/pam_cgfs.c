@@ -281,6 +281,7 @@ static bool fill_in_init_paths(void)
 	char *line = NULL;
 	size_t len = 0;
 	struct controller *c;
+	bool ret = false;
 
 	f = fopen("/proc/1/cgroup", "r");
 	if (!f)
@@ -290,27 +291,28 @@ static bool fill_in_init_paths(void)
 		char *subsystems, *ip;
 		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &ip) != 3) {
 			mysyslog(LOG_ERR, "Corrupt /proc/1/cgroup\n");
-			fclose(f);
-			return false;
+			goto out;
 		}
 		free(subsystems);
 		if (id < 0 || id > 20) {
 			mysyslog(LOG_ERR, "Too many subsystems\n");
 			free(ip);
-			fclose(f);
-			return false;
+			goto out;
 		}
 		if (ip[0] != '/') {
 			free(ip);
 			mysyslog(LOG_ERR, "ERROR: init cgroup path is not absolute!\n");
-			return false;
+			goto out;
 		}
 		prune_init_scope(ip);
 		for (c = controllers[id]; c; c = c->next)
 			c->init_path = ip;
 	}
+	ret = true;
+out:
 	fclose(f);
-	return true;
+	free(line);
+	return ret;
 }
 
 #if DEBUG
@@ -356,12 +358,14 @@ static bool get_active_controllers(void)
 		if (sscanf(line, "%d:%m[^:]:", &id, &subsystems) != 2) {
 			mysyslog(LOG_ERR, "Corrupt /proc/self/cgroup\n");
 			fclose(f);
+			free(line);
 			return false;
 		}
 		if (id < 0 || id > 20) {
 			mysyslog(LOG_ERR, "Too many subsystems\n");
 			free(subsystems);
 			fclose(f);
+			free(line);
 			return false;
 		}
 		if (strcmp(subsystems, "name=systemd") == 0)
@@ -372,6 +376,7 @@ next:
 		free(subsystems);
 	}
 	fclose(f);
+	free(line);
 
 	get_mounted_paths();
 
