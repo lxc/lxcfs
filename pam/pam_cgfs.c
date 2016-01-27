@@ -506,11 +506,15 @@ static bool cgfs_create(const char *cg, uid_t uid, gid_t gid, bool *existed)
 static bool write_int(char *path, int v)
 {
 	FILE *f = fopen(path, "w");
+	bool ret = true;
+
 	if (!f)
 		return false;
-	fprintf(f, "%d\n", v);
-	fclose(f);
-	return true;
+	if (fprintf(f, "%d\n", v) < 0)
+		ret = false;
+	if (fclose(f) != 0)
+		ret = false;
+	return ret;
 }
 
 static bool do_enter(struct controller *c, const char *cg)
