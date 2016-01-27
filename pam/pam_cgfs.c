@@ -148,6 +148,22 @@ struct controller {
 #define MAXCONTROLLERS 20
 static struct controller *controllers[MAXCONTROLLERS];
 
+/*
+ * if cpu and cpuacct are comounted, it's possible a mount
+ * exists for only one.  Find it.
+ */
+static char *find_controller_path(struct controller *c)
+{
+	while (c) {
+		char *path = must_strcat("/sys/fs/cgroup/", c->name, NULL);
+		if (exists(path))
+			return path;
+		free(path);
+		c = c->next;
+	}
+	return NULL;
+}
+
 /* Find the path at which each controller is mounted. */
 static void get_mounted_paths(void)
 {
@@ -159,11 +175,9 @@ static void get_mounted_paths(void)
 		c = controllers[i];
 		if (!c || c->mount_path)
 			continue;
-		path = must_strcat("/sys/fs/cgroup/", c->name, NULL);
-		if (!exists(path)) {
-			free(path);
+		path = find_controller_path(c);
+		if (!path)
 			continue;
-		}
 		while (c) {
 			c->mount_path = path;
 			c = c->next;
