@@ -171,20 +171,21 @@ static void get_mounted_paths(void)
 	}
 }
 
-static bool add_controller(int id, char *tok)
+static void add_controller(int id, char *tok)
 {
 	struct controller *c;
 	
-	if ((c = malloc(sizeof(struct controller))) == NULL)
-		return false;
+	do {
+		c = malloc(sizeof(struct controller));
+	} while (!c);
+	do {
+		c->name = strdup(tok);
+	} while (!c->name);
 	c->id = id;
-	if ((c->name = strdup(tok)) == NULL)
-		return false;
 	c->next = controllers[id];
 	c->mount_path = NULL;
 	c->init_path = NULL;
 	controllers[id] = c;
-	return true;
 }
 
 static void drop_controller(int which)
