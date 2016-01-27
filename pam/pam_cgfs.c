@@ -661,6 +661,7 @@ static void prune_empty_cgroups(struct controller *c, const char *user)
 	fprintf(stderr, "Pruning %s\n", path);
 #endif
 		recursive_rmdir(path);
+		free(path);
 next:
 		c = c->next;
 	}
