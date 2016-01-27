@@ -261,13 +261,13 @@ static bool mkdir_p(const char *dir, mode_t mode)
 		dir = tmp + strspn(tmp, "/");
 		tmp = dir + strcspn(dir, "/");
 		makeme = strndup(orig, dir - orig);
-		if (*makeme) {
-			if (mkdir(makeme, mode) && errno != EEXIST) {
-				fprintf(stderr, "failed to create directory '%s': %s",
-					makeme, strerror(errno));
-				free(makeme);
-				return false;
-			}
+		if (!makeme)
+			return false;
+		if (mkdir(makeme, mode) && errno != EEXIST) {
+			fprintf(stderr, "failed to create directory '%s': %s",
+				makeme, strerror(errno));
+			free(makeme);
+			return false;
 		}
 		free(makeme);
 	} while(tmp != dir);
