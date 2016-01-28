@@ -25,9 +25,9 @@ ${topdir}/lxcfs $d &
 pid=$!
 
 # put ourselves into x1
-cgm movepidabs freezer / $$
+cgm movepidabs freezer / 1
 cgm create freezer x1
-cgm movepid freezer x1 $$
+cgm movepid freezer x1 1
 
 mount -t cgroup -o freezer freezer $d2
 sudo rmdir $d2/lxcfs_test_a1/lxcfs_test_a2 || true
@@ -81,7 +81,7 @@ ${dirname}/test_syscalls $d/cgroup/freezer/lxcfs_test_a1
 ${dirname}/test_syscalls $d/cgroup/freezer/lxcfs_test_a1/lxcfs_test_a2
 
 echo "Making sure root can act on descendents"
-mycg=$(cgm getpidcgroupabs freezer $$)
+mycg=$(cgm getpidcgroupabs freezer 1)
 newcg=${mycg}/lxcfs_test_a1
 rmdir $d2/$newcg || true  # cleanup previosu run
 mkdir $d/cgroup/freezer/$newcg

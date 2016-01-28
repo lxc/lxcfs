@@ -56,16 +56,20 @@ while ! mountpoint -q $LXCFSDIR; do
 	count=$((count+1))
 done
 
+RUNTEST() {
+	unshare -fmp --mount-proc $*
+}
+
 TESTCASE="test_proc"
-${dirname}/test_proc
+RUNTEST ${dirname}/test_proc
 TESTCASE="test_cgroup"
-${dirname}/test_cgroup
+RUNTEST ${dirname}/test_cgroup
 TESTCASE="test_read_proc.sh"
-${dirname}/test_read_proc.sh
+RUNTEST ${dirname}/test_read_proc.sh
 TESTCASE="cpusetrange"
-${dirname}/cpusetrange
+RUNTEST ${dirname}/cpusetrange
 TESTCASE="meminfo hierarchy"
-${dirname}/test_meminfo_hierarchy.sh
+RUNTEST ${dirname}/test_meminfo_hierarchy.sh
 
 # Check for any defunct processes - children we didn't reap
 n=`ps -ef | grep lxcfs | grep defunct | wc -l`

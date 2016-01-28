@@ -15,15 +15,28 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
-cgm remove all lxcfs_test_proc || true
-cgm create all lxcfs_test_proc
-cgm removeonempty all lxcfs_test_proc
-cgm movepid all lxcfs_test_proc $$
+[ ! -d /sys/fs/cgroup/memory ] && exit 0
+[ ! -d /sys/fs/cgroup/cpuset ] && exit 0
 
-cgm setvalue memory $(cgm getpidcgroupabs memory $$) \
-    memory.limit_in_bytes $((1024*1024))
-cgm setvalue cpuset $(cgm getpidcgroupabs cpuset $$) \
-    cpuset.cpus 0
+initcpuset=`awk -F: '/cpuset/ { print $3 }' /proc/1/cgroup`
+initmemory=`awk -F: '/memory/ { print $3 }' /proc/1/cgroup`
+
+cpupath=/sys/fs/cgroup/cpuset/${initcpuset}
+mempath=/sys/fs/cgroup/memory/${initmemory}
+
+rmdir ${cpupath}/lxcfs_test_proc || true
+rmdir ${mempath}/lxcfs_test_proc || true
+mkdir ${cpupath}/lxcfs_test_proc
+mkdir ${mempath}/lxcfs_test_proc
+
+echo 1 > ${cpupath}/lxcfs_test_proc/tasks
+echo 1 > ${mempath}/lxcfs_test_proc/tasks
+
+echo $((1024*1024)) > ${mempath}/lxcfs_test_proc/memory.limit_in_bytes
+echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
+
+# Test uptime
+[ "$(cat ${LXCFSDIR}/proc/uptime)" = "0.0 0.0" ]
 
 # Test cpuinfo
 [ "$(grep "^processor" ${LXCFSDIR}/proc/cpuinfo | wc -l)" = "1" ]
@@ -34,11 +47,6 @@ grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo
 
 # Test meminfo
 grep -q "^MemTotal.*1024 kB$" ${LXCFSDIR}/proc/meminfo
-
-# Test uptime
-if [ -e /proc/self/ns/user ]; then
-    [ "$(lxc-unshare -s 'USER|PID' cat ${LXCFSDIR}/proc/uptime)" = "0.0 0.0" ]
-fi
 
 PASS=1
 echo PASS
