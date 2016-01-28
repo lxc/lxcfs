@@ -664,9 +664,12 @@ out:
 static void prune_init_slice(char *cg)
 {
 	char *point;
-	point = cg + strlen(cg) - strlen(INITSCOPE);
-	if (point < cg)
-		 return;
+	size_t cg_len = strlen(cg), initscope_len = strlen(INITSCOPE);
+
+	if (cg_len < initscope_len)
+		return;
+
+	point = cg + cg_len - initscope_len;
 	if (strcmp(point, INITSCOPE) == 0) {
 		if (point == cg)
 			*(point+1) = '\0';
