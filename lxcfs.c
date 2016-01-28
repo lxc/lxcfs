@@ -2191,16 +2191,9 @@ static int read_file(const char *path, char *buf, size_t size,
 			rv = 0;
 			goto err;
 		}
-		if (l < cache_size) {
-			cache += l;
-			cache_size -= l;
-			total_len += l;
-		} else {
-			cache += cache_size;
-			total_len += cache_size;
-			cache_size = 0;
-			break;
-		}
+		cache += l;
+		cache_size -= l;
+		total_len += l;
 	}
 
 	d->size = total_len;
@@ -2491,16 +2484,9 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 					rv = 0;
 					goto err;
 				}
-				if (l < cache_size){
-					cache += l;
-					cache_size -= l;
-					total_len += l;
-				}else{
-					cache += cache_size;
-					total_len += cache_size;
-					cache_size = 0;
-					break;
-				}
+				cache += l;
+				cache_size -= l;
+				total_len += l;
 			}
 			continue;
 		}
@@ -2516,16 +2502,9 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				rv = 0;
 				goto err;
 			}
-			if (l < cache_size) {
-				cache += l;
-				cache_size -= l;
-				total_len += l;
-			} else {
-				cache += cache_size;
-				total_len += cache_size;
-				cache_size = 0;
-				break;
-			}
+			cache += l;
+			cache_size -= l;
+			total_len += l;
 		}
 	}
 
@@ -2616,18 +2595,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				rv = 0;
 				goto err;
 			}
-			if (l < cache_size) {
-				cache += l;
-				cache_size -= l;
-				total_len += l;
-				continue;
-			} else {
-				//no more space, break it
-				cache += cache_size;
-				total_len += cache_size;
-				cache_size = 0;
-				break;
-			}
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+			continue;
 		}
 
 		if (sscanf(cpu_char, "%d", &cpu) != 1)
