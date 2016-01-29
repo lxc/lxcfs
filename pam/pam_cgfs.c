@@ -260,13 +260,17 @@ static void filter_controllers(const char *filter)
 static void prune_init_scope(char *cg)
 {
 	char *point;
+	size_t cg_len, initscope_len;
 
 	if (!cg)
 		return;
 
-	point = cg + strlen(cg) - strlen(INIT_SCOPE);
-	if (point < cg)
+	cg_len = strlen(cg);
+	initscope_len = strlen(INIT_SCOPE);
+	if (cg_len < initscope_len)
 		return;
+
+	point = cg + cg_len - initscope_len;
 	if (strcmp(point, INIT_SCOPE) == 0) {
 		if (point == cg)
 			*(point+1) = '\0';
