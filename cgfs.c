@@ -141,7 +141,7 @@ static bool store_hierarchy(char *stridx, char *h)
 	int idx = atoi(stridx);
 	size_t needed_len = (idx + 1) * sizeof(char *);
 
-	if (idx < 0 || idx > 30) {
+	if (idx < 0) {
 		fprintf(stderr, "Error: corrupt /proc/self/cgroup\n");
 		return false;
 	}
