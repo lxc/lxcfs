@@ -1036,7 +1036,6 @@ static int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
-			int ret;
 			ret = filler(buf, nextcg,  NULL, 0);
 			free(nextcg);
 			if (ret != 0) {
