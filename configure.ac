@@ -5,6 +5,8 @@ AC_INIT([lxcfs], [0.17], [lxc-devel@lists.linuxcontainers.org])
 AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
 AC_CONFIG_MACRO_DIR([m4])
 
+AC_SUBST([LXCFS_VERSION_ABI], "0.9.1")
+
 AM_INIT_AUTOMAKE([subdir-objects])
 
 AC_GNU_SOURCE
@@ -70,5 +72,14 @@ if test "z$pamdir" != "znone"; then
 	AC_SUBST(PAM_LIBS)
 	AC_SUBST([pamdir])
 fi
+
+# Rootfs path, where the container mount structure is assembled
+AC_ARG_WITH([rootfs-path],
+	[AC_HELP_STRING(
+		[--with-rootfs-path=dir],
+		[lxc rootfs mount point]
+	)], [], [with_rootfs_path=['${libdir}/lxc/rootfs']])
+
+AS_AC_EXPAND(LIBDIR, "$libdir")
 
 AC_OUTPUT

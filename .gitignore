@@ -35,3 +35,5 @@ pam_cgfs.la
 tags
 lxcfs-*.tar.gz
 .libs
+*.lo
+*.la

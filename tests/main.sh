@@ -70,6 +70,8 @@ TESTCASE="cpusetrange"
 RUNTEST ${dirname}/cpusetrange
 TESTCASE="meminfo hierarchy"
 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
+TESTCASE="liblxcfs reloading"
+${dirname}/test_reload.sh
 
 # Check for any defunct processes - children we didn't reap
 n=`ps -ef | grep lxcfs | grep defunct | wc -l`
