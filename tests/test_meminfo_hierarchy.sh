@@ -4,8 +4,8 @@ set -eux
 
 LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
 
-cg1=x1.$$
-cg2=x2.$$
+cg1=$(uuidgen).$$
+cg2=$(uuidgen).$$
 
 cleanup() {
 	if [ $FAILED -eq 1 ]; then

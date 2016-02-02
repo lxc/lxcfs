@@ -24,9 +24,8 @@ do
 
 	red_c "$BIN test stat"
 	$BIN $DIR/proc/stat $COUNT
-	
+
 	red_c "$BIN test meminfo"
 	$BIN $DIR/proc/meminfo $COUNT
-	
 done
 exit 0

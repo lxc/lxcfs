@@ -1,6 +1,7 @@
 #!/bin/sh -eux
 
 PASS=0
+UUID=$(uuidgen)
 
 cleanup() {
     [ "$PASS" = "1" ] || (echo FAIL && exit 1)
@@ -27,27 +28,27 @@ cpupath=/sys/fs/cgroup/cpuset/${initcpuset}
 mempath=/sys/fs/cgroup/memory/${initmemory}
 frzpath=/sys/fs/cgroup/freezer/${initfreezer}
 
-rmdir ${cpupath}/lxcfs_test_cgroup || true
-rmdir ${mempath}/lxcfs_test_cgroup || true
-rmdir ${frzpath}/lxcfs_test_cgroup || true
-mkdir ${cpupath}/lxcfs_test_cgroup
-mkdir ${mempath}/lxcfs_test_cgroup
-mkdir ${frzpath}/lxcfs_test_cgroup
+rmdir ${cpupath}/${UUID} || true
+rmdir ${mempath}/${UUID} || true
+rmdir ${frzpath}/${UUID} || true
+mkdir ${cpupath}/${UUID}
+mkdir ${mempath}/${UUID}
+mkdir ${frzpath}/${UUID}
 
 # Check that the fs is readable
 for p in ${mempath} ${frzpath} ${cpupath}; do
 	find ${p} > /dev/null
-	echo 1 > ${p}/lxcfs_test_cgroup/tasks
+	echo 1 > ${p}/${UUID}/tasks
 done
 
 # set values though lxcfs
-echo $((1024*1024)) > ${LXCFSDIR}/cgroup/memory/${initmemory}/lxcfs_test_cgroup/memory.limit_in_bytes
-echo 0 > ${LXCFSDIR}/cgroup/cpuset/${initcpuset}/lxcfs_test_cgroup/cpuset.cpus
+echo $((1024*1024)) > ${LXCFSDIR}/cgroup/memory/${initmemory}/${UUID}/memory.limit_in_bytes
+echo 0 > ${LXCFSDIR}/cgroup/cpuset/${initcpuset}/${UUID}/cpuset.cpus
 
 # and verify them through cgroupfs
-v=`cat $mempath/lxcfs_test_cgroup/memory.limit_in_bytes`
+v=`cat $mempath/${UUID}/memory.limit_in_bytes`
 [ "$v" = "$((1024*1024))" ]
-v=`cat ${cpupath}/lxcfs_test_cgroup/cpuset.cpus`
+v=`cat ${cpupath}/${UUID}/cpuset.cpus`
 [ "$v" = "0" ]
 
 PASS=1
