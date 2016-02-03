@@ -366,38 +366,22 @@ struct cgfs_files {
 	uint32_t mode;
 };
 
+#define ALLOC_NUM 20
 static bool store_hierarchy(char *stridx, char *h)
 {
-	int idx = atoi(stridx);
-	size_t needed_len = (idx + 1) * sizeof(char *);
-
-	if (idx < 0 || idx > 30) {
-		fprintf(stderr, "Error: corrupt /proc/self/cgroup\n");
-		return false;
-	}
-
-	if (!hierarchies) {
-		hierarchies = malloc(needed_len);
-		memset(hierarchies, 0, needed_len);
-		num_hierarchies = idx + 1;
-	} else if (idx >= num_hierarchies) {
-		char **tmp;
-		size_t old_len = (num_hierarchies + 1) * sizeof(char *);
-		do {
-			tmp = malloc(needed_len);
-		} while (!tmp);
-		memset(tmp, 0, needed_len);
-		memcpy(tmp, hierarchies, old_len);
-		free(hierarchies);
+	if (num_hierarchies % ALLOC_NUM == 0) {
+		size_t n = (num_hierarchies / ALLOC_NUM) + 1;
+		n *= ALLOC_NUM;
+		char **tmp = realloc(hierarchies, n * sizeof(char *));
+		printf("allocated %d\n", n);
+		if (!tmp) {
+			fprintf(stderr, "Out of memory\n");
+			exit(1);
+		}
 		hierarchies = tmp;
-		num_hierarchies = idx + 1;
 	}
 	
-	if (hierarchies[idx]) {
-		fprintf(stderr, "Error: corrupt /proc/self/cgroup\n");
-		return false;
-	}
-	hierarchies[idx] = must_copy_string(h);
+	hierarchies[num_hierarchies++] = must_copy_string(h);
 	return true;
 }
 
