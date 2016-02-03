@@ -661,7 +661,8 @@ static void usage(const char *me)
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "%s mountpoint\n", me);
+	fprintf(stderr, "%s [-p pidfile] mountpoint\n", me);
+	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "%s -h\n", me);
 	exit(1);
 }
@@ -691,7 +692,7 @@ void swallow_arg(int *argcp, char *argv[], char *which)
 	}
 }
 
-void swallow_option(int *argcp, char *argv[], char *opt, char *v)
+bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
 {
 	int i;
 
@@ -700,16 +701,16 @@ void swallow_option(int *argcp, char *argv[], char *opt, char *v)
 			continue;
 		if (strcmp(argv[i], opt) != 0)
 			continue;
-		if (strcmp(argv[i+1], v) != 0) {
-			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
-			exit(1);
-		}
+		do {
+			*v = strdup(argv[i+1]);
+		} while (!*v);
 		for (; argv[i+1]; i++) {
 			argv[i] = argv[i+2];
 		}
 		(*argcp) -= 2;
-		return;
+		return true;
 	}
+	return false;
 }
 
 static bool mkdir_p(const char *dir, mode_t mode)
@@ -833,9 +834,53 @@ static bool cgfs_setup_controllers(void)
 	return true;
 }
 
+static int set_pidfile(char *pidfile)
+{
+	int fd;
+	char buf[50];
+	struct flock fl;
+
+	fl.l_type = F_WRLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = 0;
+	fl.l_len = 0;
+
+	fd = open(pidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	if (fd == -1) {
+		fprintf(stderr, "Could not open pidfile %s: %m", pidfile);
+		return -1;
+	}
+
+	if (fcntl(fd, F_SETLK, &fl) == -1) {
+		if (errno  == EAGAIN || errno == EACCES) {
+			fprintf(stderr, "PID file '%s' is already locked.\n", pidfile);
+			close(fd);
+			return -1;
+		}
+		fprintf(stderr, "Warning; unable to lock PID file, proceeding.\n");
+	}
+
+	if (ftruncate(fd, 0) == -1) {
+		fprintf(stderr, "Error truncating PID file '%s': %m", pidfile);
+		close(fd);
+		return -1;
+	}
+
+	snprintf(buf, 50, "%ld\n", (long) getpid());
+	if (write(fd, buf, strlen(buf)) != strlen(buf)) {
+		fprintf(stderr, "Error writing to PID file '%s': %m", pidfile);
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
 int main(int argc, char *argv[])
 {
-	int ret = -1;
+	int ret = -1, pidfd;
+	char *pidfile = NULL, *v = NULL;
+	size_t pidfile_len;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
@@ -843,12 +888,6 @@ int main(int argc, char *argv[])
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
 
-	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
-	if (!dlopen_handle) {
-		fprintf(stderr, "Failed to open liblxcfs\n");
-		exit(1);
-	}
-	signal(SIGUSR1, reload_handler);
 #ifdef FORTRAVIS
 	/* for travis which runs on 12.04 */
 	if (glib_check_version (2, 36, 0) != NULL)
@@ -858,7 +897,16 @@ int main(int argc, char *argv[])
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
 	swallow_arg(&argc, argv, "-f");
-	swallow_option(&argc, argv, "-o", "allow_other");
+	if (swallow_option(&argc, argv, "-o", &v)) {
+		if (strcmp(v, "allow_other") != 0) {
+			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
+			exit(1);
+		}
+		free(v);
+		v = NULL;
+	}
+	if (swallow_option(&argc, argv, "-p", &v))
+		pidfile = v;
 
 	if (argc == 2  && strcmp(argv[1], "--version") == 0) {
 		fprintf(stderr, "%s\n", VERSION);
@@ -866,6 +914,13 @@ int main(int argc, char *argv[])
 	}
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
+
+	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
+	if (!dlopen_handle) {
+		fprintf(stderr, "Failed to open liblxcfs\n");
+		exit(1);
+	}
+	signal(SIGUSR1, reload_handler);
 
 	newargv[cnt++] = argv[0];
 	newargv[cnt++] = "-f";
@@ -877,9 +932,19 @@ int main(int argc, char *argv[])
 	if (!cgfs_setup_controllers())
 		goto out;
 
+	if (!pidfile) {
+		pidfile_len = strlen(RUNTIME_PATH) + strlen("/lxcfs.pid") + 1;
+		pidfile = alloca(pidfile_len);
+		snprintf(pidfile, pidfile_len, "%s/lxcfs.pid", RUNTIME_PATH);
+	}
+	if ((pidfd = set_pidfile(pidfile)) < 0)
+		goto out;
+
 	ret = fuse_main(nargs, newargv, &lxcfs_ops, NULL);
 
 	dlclose(dlopen_handle);
+	unlink(pidfile);
+	close(pidfd);
 
 out:
 	return ret;

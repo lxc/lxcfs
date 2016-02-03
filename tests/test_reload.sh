@@ -10,6 +10,7 @@ topdir=$(dirname ${dirname})
 
 testdir=`mktemp -t -d libs.XXX`
 installdir=`mktemp -t -d libs.XXX`
+pidfile=$(mktemp)
 libdir=${installdir}/usr/lib
 bindir=${installdir}/usr/bin
 lxcfspid=-1
@@ -26,6 +27,7 @@ cleanup() {
   fi
   rm -rf ${testdir} ${installdir}
   rm -f iwashere
+  rm -f ${pidfile}
   if [ ${FAILED} -eq 1 ]; then
     echo "liblxcfs.so reload test FAILED"
   else
@@ -38,7 +40,7 @@ trap cleanup EXIT SIGHUP SIGINT SIGTERM
 ( cd ${topdir}; DESTDIR=${installdir} make install )
 export LD_LIBRARY_PATH=${libdir}
 
-${bindir}/lxcfs ${testdir} &
+${bindir}/lxcfs -p ${pidfile} ${testdir} &
 lxcfspid=$!
 count=1
 while [ ! -d ${testdir}/proc ]; do
