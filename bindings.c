@@ -373,7 +373,6 @@ static bool store_hierarchy(char *stridx, char *h)
 		size_t n = (num_hierarchies / ALLOC_NUM) + 1;
 		n *= ALLOC_NUM;
 		char **tmp = realloc(hierarchies, n * sizeof(char *));
-		printf("allocated %d\n", n);
 		if (!tmp) {
 			fprintf(stderr, "Out of memory\n");
 			exit(1);
