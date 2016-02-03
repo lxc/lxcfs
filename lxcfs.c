@@ -28,11 +28,6 @@
 #include <sys/epoll.h>
 #include <wait.h>
 
-#ifdef FORTRAVIS
-#define GLIB_DISABLE_DEPRECATION_WARNINGS
-#include <glib-object.h>
-#endif
-
 #include "config.h" // for VERSION
 #include "bindings.h"
 
@@ -887,12 +882,6 @@ int main(int argc, char *argv[])
 	 */
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
-
-#ifdef FORTRAVIS
-	/* for travis which runs on 12.04 */
-	if (glib_check_version (2, 36, 0) != NULL)
-		g_type_init ();
-#endif
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");

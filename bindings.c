@@ -28,11 +28,6 @@
 #include <sys/epoll.h>
 #include <wait.h>
 
-#ifdef FORTRAVIS
-#define GLIB_DISABLE_DEPRECATION_WARNINGS
-#include <glib-object.h>
-#endif
-
 #include "bindings.h"
 
 #include "config.h" // for VERSION
