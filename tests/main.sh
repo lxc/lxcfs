@@ -6,6 +6,7 @@ set -ex
 
 # Run lxcfs testsuite
 export LXCFSDIR=$(mktemp -d)
+pidfile=$(mktemp)
 
 cmdline=$(realpath $0)
 dirname=$(dirname ${cmdline})
@@ -22,6 +23,7 @@ cleanup() {
 		umount -l ${LXCFSDIR}
 		rmdir ${LXCFSDIR}
 	fi
+	rm -f ${pidfile}
 	if [ ${FAILED} -eq 1 ]; then
 		echo "FAILED at $TESTCASE"
 		exit 1
@@ -35,7 +37,7 @@ lxcfs=${topdir}/lxcfs
 
 if [ -x ${lxcfs} ]; then
 	echo "Running ${lxcfs} ${LXCFSDIR}"
-	${lxcfs} ${LXCFSDIR} &
+	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	p=$!
 else
 	pidof lxcfs

@@ -28,11 +28,6 @@
 #include <sys/epoll.h>
 #include <wait.h>
 
-#ifdef FORTRAVIS
-#define GLIB_DISABLE_DEPRECATION_WARNINGS
-#include <glib-object.h>
-#endif
-
 #include "bindings.h"
 
 #include "config.h" // for VERSION
@@ -373,7 +368,6 @@ static bool store_hierarchy(char *stridx, char *h)
 		size_t n = (num_hierarchies / ALLOC_NUM) + 1;
 		n *= ALLOC_NUM;
 		char **tmp = realloc(hierarchies, n * sizeof(char *));
-		printf("allocated %d\n", n);
 		if (!tmp) {
 			fprintf(stderr, "Out of memory\n");
 			exit(1);
