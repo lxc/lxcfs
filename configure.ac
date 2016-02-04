@@ -7,7 +7,7 @@ AC_CONFIG_MACRO_DIR([m4])
 
 AC_SUBST([LXCFS_VERSION_ABI], "0.9.1")
 
-AM_INIT_AUTOMAKE([subdir-objects])
+AM_INIT_AUTOMAKE([subdir-objects -Wno-portability])
 
 AC_GNU_SOURCE
 AC_CONFIG_HEADERS([config.h])
