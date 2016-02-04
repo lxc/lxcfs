@@ -3,10 +3,6 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = tests share
 DIST_SUBDIRS = tests share
 
-VERSION_CURRENT  = 0
-VERSION_REVISION = 0
-VERSION_AGE      = 0
-
 AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
 AM_CFLAGS += $(FUSE_CFLAGS)
 AM_LDFLAGS = $(FUSE_LIBS) -pthread
