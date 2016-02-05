@@ -649,21 +649,19 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 	return fopen(pathname, "w");
 }
 
-bool cgfs_list_children(const char *controller, const char *cgroup, char ***list)
+static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool directories,
+                                void ***list, size_t typesize,
+                                void* (*iterator)(const char*, const char*, const char*))
 {
 	size_t len;
 	char *dirname, *tmpc = find_mounted_controller(controller);
 	char pathname[MAXPATHLEN];
-	size_t sz = 0, asz = BATCH_SIZE;
+	size_t sz = 0, asz = 0;
 	struct dirent dirent, *direntp;
 	DIR *dir;
 	int ret;
 
-	do {
-		*list = malloc(asz * sizeof(char *));
-	} while (!*list);
-	(*list)[0] = NULL;
-
+	*list = NULL;
 	if (!tmpc)
 		return false;
 
@@ -698,20 +696,19 @@ bool cgfs_list_children(const char *controller, const char *cgroup, char ***list
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
 			continue;
 		}
-		if (!S_ISDIR(mystat.st_mode))
+		if ((!directories && !S_ISREG(mystat.st_mode)) ||
+		    (directories && !S_ISDIR(mystat.st_mode)))
 			continue;
 
 		if (sz+2 >= asz) {
-			char **tmp;
+			void **tmp;
 			asz += BATCH_SIZE;
 			do {
-				tmp = realloc(*list, asz * sizeof(char *));
+				tmp = realloc(*list, asz * typesize);
 			} while  (!tmp);
 			*list = tmp;
 		}
-		do {
-			(*list)[sz] = strdup(direntp->d_name);
-		} while (!(*list)[sz]);
+		(*list)[sz] = (*iterator)(controller, cgroup, direntp->d_name);
 		(*list)[sz+1] = NULL;
 		sz++;
 	}
@@ -720,6 +717,20 @@ bool cgfs_list_children(const char *controller, const char *cgroup, char ***list
 		return false;
 	}
 	return true;
+}
+
+static void *make_children_list_entry(const char *controller, const char *cgroup, const char *dir_entry)
+{
+	char *dup;
+	do {
+		dup = strdup(dir_entry);
+	} while (!dup);
+	return dup;
+}
+
+bool cgfs_list_children(const char *controller, const char *cgroup, char ***list)
+{
+	return cgfs_iterate_cgroup(controller, cgroup, true, (void***)list, sizeof(*list), &make_children_list_entry);
 }
 
 void free_key(struct cgfs_files *k)
@@ -803,76 +814,19 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	return newkey;
 }
 
+static void *make_key_list_entry(const char *controller, const char *cgroup, const char *dir_entry)
+{
+	struct cgfs_files *entry = cgfs_get_key(controller, cgroup, dir_entry);
+	if (!entry) {
+		fprintf(stderr, "%s: Error getting files under %s:%s\n",
+			__func__, controller, cgroup);
+	}
+	return entry;
+}
+
 bool cgfs_list_keys(const char *controller, const char *cgroup, struct cgfs_files ***keys)
 {
-	size_t len;
-	char *dirname, *tmpc = find_mounted_controller(controller);
-	char pathname[MAXPATHLEN];
-	size_t sz = 0, asz = 0;
-	struct dirent dirent, *direntp;
-	DIR *dir;
-	int ret;
-
-	*keys = NULL;
-	if (!tmpc)
-		return false;
-
-	/* basedir / tmpc / cgroup \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
-	dirname = alloca(len);
-	snprintf(dirname, len, "%s/%s/%s", basedir, tmpc, cgroup);
-
-	dir = opendir(dirname);
-	if (!dir)
-		return false;
-
-	while (!readdir_r(dir, &dirent, &direntp)) {
-		struct stat mystat;
-		int rc;
-
-		if (!direntp)
-			break;
-
-		if (!strcmp(direntp->d_name, ".") ||
-		    !strcmp(direntp->d_name, ".."))
-			continue;
-
-		rc = snprintf(pathname, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
-		if (rc < 0 || rc >= MAXPATHLEN) {
-			fprintf(stderr, "%s: pathname too long under %s\n", __func__, dirname);
-			continue;
-		}
-
-		ret = lstat(pathname, &mystat);
-		if (ret) {
-			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
-			continue;
-		}
-		if (!S_ISREG(mystat.st_mode))
-			continue;
-
-		if (sz+2 >= asz) {
-			struct cgfs_files **tmp;
-			asz += BATCH_SIZE;
-			do {
-				tmp = realloc(*keys, asz * sizeof(struct cgfs_files *));
-			} while  (!tmp);
-			*keys = tmp;
-		}
-		(*keys)[sz] = cgfs_get_key(controller, cgroup, direntp->d_name);
-		(*keys)[sz+1] = NULL;
-		if (!(*keys)[sz]) {
-			fprintf(stderr, "%s: Error getting files under %s:%s\n",
-				__func__, controller, cgroup);
-			continue;
-		}
-		sz++;
-	}
-	if (closedir(dir) < 0) {
-		fprintf(stderr, "%s: failed closedir for %s: %s\n", __func__, dirname, strerror(errno));
-		return false;
-	}
-	return true;
+	return cgfs_iterate_cgroup(controller, cgroup, false, (void***)keys, sizeof(*keys), &make_key_list_entry);
 }
 
 bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
@@ -1695,10 +1649,12 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 		ret = 0;
 		goto out;
 	}
-	for (i = 0; clist[i]; i++) {
-		if (filler(buf, clist[i], NULL, 0) != 0) {
-			ret = -EIO;
-			goto out;
+	if (clist) {
+		for (i = 0; clist[i]; i++) {
+			if (filler(buf, clist[i], NULL, 0) != 0) {
+				ret = -EIO;
+				goto out;
+			}
 		}
 	}
 	ret = 0;
