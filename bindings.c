@@ -665,7 +665,7 @@ bool cgfs_list_children(const char *controller, const char *cgroup, char ***list
 	(*list)[0] = NULL;
 
 	if (!tmpc)
-		return NULL;
+		return false;
 
 	/* basedir / tmpc / cgroup \0 */
 	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
@@ -815,7 +815,7 @@ bool cgfs_list_keys(const char *controller, const char *cgroup, struct cgfs_file
 
 	*keys = NULL;
 	if (!tmpc)
-		return NULL;
+		return false;
 
 	/* basedir / tmpc / cgroup \0 */
 	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
