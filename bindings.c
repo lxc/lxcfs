@@ -1052,9 +1052,8 @@ static void must_strcat_pid(char **src, size_t *sz, size_t *asz, pid_t pid)
 		*src = tmp;
 		*asz += BUF_RESERVE_SIZE;
 	}
-	memcpy((*src) +*sz , tmp, tmplen);
+	memcpy((*src) +*sz , tmp, tmplen+1); /* include the \0 */
 	*sz += tmplen;
-	(*src)[*sz] = '\0';
 }
 
 /*
