@@ -37,7 +37,8 @@ cleanup() {
 
 trap cleanup EXIT SIGHUP SIGINT SIGTERM
 
-( cd ${topdir}; DESTDIR=${installdir} make install )
+( cd ${topdir}; DESTDIR=${installdir} make install)
+( cd ${topdir}; make liblxcfstest.la && cp .libs/liblxcfstest.* "${libdir}" )
 export LD_LIBRARY_PATH=${libdir}
 
 ${bindir}/lxcfs -p ${pidfile} ${testdir} &
