@@ -41,6 +41,7 @@ trap cleanup EXIT SIGHUP SIGINT SIGTERM
 export LD_LIBRARY_PATH=${libdir}
 
 ${bindir}/lxcfs -p ${pidfile} ${testdir} &
+
 lxcfspid=$!
 count=1
 while [ ! -d ${testdir}/proc ]; do
@@ -52,9 +53,14 @@ done
 rm -f iwashere
 cat ${testdir}/proc/uptime
 [ ! -f iwashere ]
+(
+  cd ${topdir};
+  make liblxcfstest.la
+  gcc -shared -fPIC -DPIC .libs/liblxcfstest_la-bindings.o .libs/liblxcfstest_la-cpuset.o -lpthread -pthread -o .libs/liblxcfstest.so
+  cp .libs/liblxcfstest.* "${libdir}"
+)
 rm -f ${libdir}/liblxcfs.so* ${libdir}/liblxcfs.la
-ln -s liblxcfstest.so.0.0.0 ${libdir}/liblxcfs.so
-cp ${libdir}/liblxcfstest.la ${libdir}/liblxcfs.la
+cp ${libdir}/liblxcfstest.so ${libdir}/liblxcfs.so
 
 kill -USR1 ${lxcfspid}
 
