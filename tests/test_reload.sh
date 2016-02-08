@@ -46,6 +46,7 @@ count=1
 while [ ! -d ${testdir}/proc ]; do
   [ $count -lt 5 ]
   sleep 1
+  count=$((count+1))
 done
 
 rm -f iwashere
