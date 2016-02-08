@@ -68,6 +68,7 @@ static void users_unlock(void)
 }
 
 static int need_reload;
+
 /* do_reload - reload the dynamic library.  Done under
  * lock and when we know the user_count was 0 */
 static void do_reload(void)
@@ -75,13 +76,22 @@ static void do_reload(void)
 	if (dlopen_handle)
 		dlclose(dlopen_handle);
 
+	/* First try loading using ld.so */
 	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
+	if (dlopen_handle)
+		goto good;
+
+	/* Fall back to loading from /usr/lib/lxcfs/liblxcfs.so */
+	dlopen_handle = dlopen(LIBDIR "lxcfs/liblxcfs.so", RTLD_LAZY);
 	if (!dlopen_handle) {
 		fprintf(stderr, "Failed to open liblxcfs\n");
 		_exit(1);
 	}
+
+good:
+	if (need_reload)
+		fprintf(stderr, "lxcfs: reloaded\n");
 	need_reload = 0;
-	fprintf(stderr, "lxcfs: reloaded\n");
 }
 
 static void up_users(void)
@@ -904,11 +914,7 @@ int main(int argc, char *argv[])
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
 
-	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
-	if (!dlopen_handle) {
-		fprintf(stderr, "Failed to open liblxcfs\n");
-		exit(1);
-	}
+	do_reload();
 	signal(SIGUSR1, reload_handler);
 
 	newargv[cnt++] = argv[0];

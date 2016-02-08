@@ -5,6 +5,7 @@ DIST_SUBDIRS = tests share
 
 AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
 AM_CFLAGS += $(FUSE_CFLAGS)
+AM_CFLAGS += -DLIBDIR=\"$(LIBDIR)\"
 AM_LDFLAGS = $(FUSE_LIBS) -pthread
 #AM_CFLAGS += -DDEBUG
 
