@@ -3,12 +3,9 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = tests share
 DIST_SUBDIRS = tests share
 
-VERSION_CURRENT  = 0
-VERSION_REVISION = 0
-VERSION_AGE      = 0
-
 AM_CFLAGS = -Wall -ggdb -D_GNU_SOURCE -DSBINDIR=\"$(SBINDIR)\" -pthread
 AM_CFLAGS += $(FUSE_CFLAGS)
+AM_CFLAGS += -DLIBDIR=\"$(LIBDIR)\"
 AM_LDFLAGS = $(FUSE_LIBS) -pthread
 #AM_CFLAGS += -DDEBUG
 
@@ -16,18 +13,17 @@ AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c cpuset.c bindings.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
-liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -shared \
-	-Wl,-soname,liblxcfs.so.$(firstword $(subst ., ,@LXCFS_VERSION_ABI@))
+liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -shared
 
 liblxcfstest_la_SOURCES = bindings.c cpuset.c bindings.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
-liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -shared \
-	-Wl,-soname,liblxcfs.so.$(firstword $(subst ., ,@LXCFS_VERSION_ABI@))
+liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -shared
 
 noinst_HEADERS = bindings.h
 
 sodir=$(libdir)
-lib_LTLIBRARIES = liblxcfs.la liblxcfstest.la
+lib_LTLIBRARIES = liblxcfs.la
+EXTRA_LTLIBRARIES = liblxcfstest.la
 
 lxcfs_SOURCES = lxcfs.c
 lxcfs_LDADD = liblxcfs.la -ldl
