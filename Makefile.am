@@ -27,7 +27,8 @@ liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -shared \
 noinst_HEADERS = bindings.h
 
 sodir=$(libdir)
-lib_LTLIBRARIES = liblxcfs.la liblxcfstest.la
+lib_LTLIBRARIES = liblxcfs.la
+EXTRA_LTLIBRARIES = liblxcfstest.la
 
 lxcfs_SOURCES = lxcfs.c
 lxcfs_LDADD = liblxcfs.la -ldl
