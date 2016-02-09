@@ -1,11 +1,11 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([lxcfs], [0.17], [lxc-devel@lists.linuxcontainers.org])
+AC_INIT([lxcfs], [0.18], [lxc-devel@lists.linuxcontainers.org])
 AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_SUBST([LXCFS_VERSION_ABI], "0.9.1")
+AC_SUBST([LXCFS_VERSION_ABI], "0.18.0")
 
 AM_INIT_AUTOMAKE([subdir-objects -Wno-portability])
 
