@@ -3593,7 +3593,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (swap_total > 0) {
-		total_len += snprintf(d->buf + total_len, d->size,
+		total_len += snprintf(d->buf + total_len, d->size - total_len,
 				 "none%*svirtual\t\t%lu\t%lu\t0\n", 36, " ",
 				 swap_total, swap_free);
 	}
