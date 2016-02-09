@@ -81,8 +81,7 @@ static void do_reload(void)
 	if (dlopen_handle)
 		goto good;
 
-	/* Fall back to loading from /usr/lib/lxcfs/liblxcfs.so */
-	dlopen_handle = dlopen(LIBDIR "lxcfs/liblxcfs.so", RTLD_LAZY);
+	dlopen_handle = dlopen("/usr/lib/lxcfs/liblxcfs.so", RTLD_LAZY);
 	if (!dlopen_handle) {
 		fprintf(stderr, "Failed to open liblxcfs\n");
 		_exit(1);
