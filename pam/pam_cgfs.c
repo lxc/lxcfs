@@ -3,13 +3,18 @@
  * Copyright © 2016 Canonical, Inc
  * Author: Serge Hallyn <serge.hallyn@ubuntu.com>
  *
- * When a user logs in, this pam module will create cgroups which
- * the user may administer, for all controllers except name=systemd,
- * or for any controllers listed on the command line (if any are
- * listed).
+ * When a user logs in, this pam module will create cgroups which the user
+ * may administer, either for all controllers or for any controllers listed
+ * on the command line (if any are listed).
  *
  * The cgroup created will be "user/$user/0" for the first session,
  * "user/$user/1" for the second, etc.
+ *
+ * name=systemd is handled specially.  If the host is an upstart system,
+ * the logged in user may not get a cgroup created.  On a systemd system,
+ * one is created but not chowned to the user.  In the former case, we
+ * create one as usual, in the latter case we simply chown whatever cgroup
+ * the user is in.
  *
  * All requested cgroups must be mounted under /sys/fs/cgroup/$controller,
  * no messing around with finding mountpoints.
@@ -140,9 +145,11 @@ next:
 struct controller {
 	struct controller *next;
 	int id;
+	bool systemd_created;
 	char *name;
 	char *mount_path;
 	char *init_path;
+	char *cur_path;
 };
 
 #define MAXCONTROLLERS 20
@@ -159,6 +166,12 @@ static char *find_controller_path(struct controller *c)
 		if (exists(path))
 			return path;
 		free(path);
+		if (strncmp(c->name, "name=", 5) == 0) {
+			path = must_strcat("/sys/fs/cgroup/", c->name + 5, NULL);
+			if (exists(path))
+				return path;
+			free(path);
+		}
 		c = c->next;
 	}
 	return NULL;
@@ -185,7 +198,7 @@ static void get_mounted_paths(void)
 	}
 }
 
-static void add_controller(int id, char *tok)
+static void add_controller(int id, char *tok, char *cur_path)
 {
 	struct controller *c;
 	
@@ -195,6 +208,9 @@ static void add_controller(int id, char *tok)
 	do {
 		c->name = strdup(tok);
 	} while (!c->name);
+	do {
+		c->cur_path = strdup(cur_path);
+	} while (!c->cur_path);
 	c->id = id;
 	c->next = controllers[id];
 	c->mount_path = NULL;
@@ -213,6 +229,7 @@ static void drop_controller(int which)
 	while (c) {
 		struct controller *tmp = c->next;
 		free(c->name);
+		free(c->cur_path);
 		free(c);
 		c = tmp;
 	}
@@ -309,8 +326,11 @@ static bool fill_in_init_paths(void)
 			goto out;
 		}
 		prune_init_scope(ip);
-		for (c = controllers[id]; c; c = c->next)
+		for (c = controllers[id]; c; c = c->next) {
+			if (strcmp(c->name, "name=systemd") == 0)
+				c->systemd_created = strcmp(ip, c->cur_path) != 0;
 			c->init_path = ip;
+		}
 	}
 	ret = true;
 out:
@@ -335,6 +355,7 @@ static void print_found_controllers(void) {
 			fprintf(stderr, " Next mount: index %d name %s\n", c->id, c->name);
 			fprintf(stderr, "             mount path %s\n", c->mount_path ? c->mount_path : "(none)");
 			fprintf(stderr, "             init task path %s\n", c->init_path);
+			fprintf(stderr, "             login task path %s\n", c->cur_path);
 			c = c->next;
 		}
 	}
@@ -350,7 +371,7 @@ static inline void print_found_controllers(void) { };
 static bool get_active_controllers(void)
 {
 	FILE *f;
-	char *line = NULL, *tok;
+	char *line = NULL, *tok, *cur_path;
 	size_t len = 0;
 
 	f = fopen("/proc/self/cgroup", "r");
@@ -359,7 +380,7 @@ static bool get_active_controllers(void)
 	while (getline(&line, &len, f) != -1) {
 		int id;
 		char *subsystems;
-		if (sscanf(line, "%d:%m[^:]:", &id, &subsystems) != 2) {
+		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &cur_path) != 3) {
 			mysyslog(LOG_ERR, "Corrupt /proc/self/cgroup\n");
 			fclose(f);
 			free(line);
@@ -368,16 +389,15 @@ static bool get_active_controllers(void)
 		if (id < 0 || id > 20) {
 			mysyslog(LOG_ERR, "Too many subsystems\n");
 			free(subsystems);
+			free(cur_path);
 			fclose(f);
 			free(line);
 			return false;
 		}
-		if (strcmp(subsystems, "name=systemd") == 0)
-			goto next;
 		for (tok = strtok(subsystems, ","); tok; tok = strtok(NULL, ","))
-			add_controller(id, tok);
-next:
+			add_controller(id, tok, cur_path);
 		free(subsystems);
+		free(cur_path);
 	}
 	fclose(f);
 	free(line);
@@ -396,11 +416,36 @@ next:
 	return true;
 }
 
+/*
+ * Handle systemd creation.  Return true if all's done.  Returns false if
+ * the caller needs to create=chown a cgroup
+ */
+static bool handle_systemd_create(const struct controller *c, uid_t uid, gid_t gid)
+{
+	char *user_path;
+
+	if (!c->systemd_created)
+		return false;
+
+	user_path = must_strcat(c->mount_path, c->cur_path, NULL);
+
+	// a name=systemd cgroup has already been created, just chown it
+	if (chown(user_path, uid, gid) < 0)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m\n",
+				user_path, (int)uid, (int)gid);
+	free(user_path);
+	return true;
+}
+
 static bool cgfs_create_forone(const struct controller *c, uid_t uid, gid_t gid, const char *cg, bool *existed)
 {
 	while (c) {
 		if (!c->mount_path || !c->init_path)
 			goto next;
+
+		if (strcmp(c->name, "name=systemd") == 0 && handle_systemd_create(c, uid, gid))
+			return true;
+
 		char *path = must_strcat(c->mount_path, c->init_path, cg, NULL);
 #if DEBUG
 		fprintf(stderr, "Creating %s for %s\n", path, c->name);
@@ -409,10 +454,11 @@ static bool cgfs_create_forone(const struct controller *c, uid_t uid, gid_t gid,
 			free(path);
 			*existed = true;
 #if DEBUG
-		fprintf(stderr, "%s existed\n", path);
+			fprintf(stderr, "%s existed\n", path);
 #endif
 			return true;
 		}
+
 		bool pass = mkdir_p(c->mount_path, path);
 #if DEBUG
 		fprintf(stderr, "Creating %s %s\n", path, pass ? "succeeded" : "failed");
@@ -551,7 +597,7 @@ static bool do_enter(struct controller *c, const char *cg)
 	return false;
 }
 
-static bool cgfs_enter(const char *cg)
+static bool cgfs_enter(const char *cg, bool skip_systemd)
 {
 	int i;
 
@@ -560,6 +606,13 @@ static bool cgfs_enter(const char *cg)
 
 		if (!c)
 			continue;
+
+		if (strcmp(c->name, "name=systemd") == 0) {
+			if (skip_systemd)
+				continue;
+			if (c->systemd_created)
+				continue;
+		}
 
 		if (!do_enter(c, cg))
 			return false;
@@ -570,7 +623,7 @@ static bool cgfs_enter(const char *cg)
 
 static void cgfs_escape(void)
 {
-	if (!cgfs_enter("/")) {
+	if (!cgfs_enter("/", true)) {
 		mysyslog(LOG_WARNING, "Failed to escape to init's cgroup\n");
 	}
 }
@@ -621,7 +674,7 @@ static int handle_login(const char *user)
 			continue;
 		}
 
-		if (!cgfs_enter(cg)) {
+		if (!cgfs_enter(cg, false)) {
 			mysyslog(LOG_ERR, "Failed to enter user cgroup %s for user %s\n", cg, user);
 			return PAM_SESSION_ERR;
 		}
