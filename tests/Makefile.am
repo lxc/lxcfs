@@ -7,4 +7,5 @@ EXTRA_DIST = \
 	test_proc \
 	test-read.c \
 	test_read_proc.sh \
+	test_reload.sh \
 	test_syscalls.c
