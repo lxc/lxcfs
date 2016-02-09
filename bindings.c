@@ -40,6 +40,7 @@ enum {
 	LXC_TYPE_PROC_UPTIME,
 	LXC_TYPE_PROC_STAT,
 	LXC_TYPE_PROC_DISKSTATS,
+	LXC_TYPE_PROC_SWAPS,
 };
 
 struct file_info {
@@ -3508,6 +3509,119 @@ err:
 	return rv;
 }
 
+static int proc_swaps_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
+	char *cg = NULL;
+	char *memswlimit_str = NULL, *memlimit_str = NULL, *memusage_str = NULL, *memswusage_str = NULL,
+             *memswlimit_default_str = NULL, *memswusage_default_str = NULL;
+	unsigned long memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0, swap_total = 0, swap_free = 0;
+	size_t total_len = 0, rv = 0;
+	char *cache = d->buf;
+
+	if (offset) {
+		if (offset > d->size)
+			return -EINVAL;
+		if (!d->cached)
+			return 0;
+		int left = d->size - offset;
+		total_len = left > size ? size: left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;
+	}
+
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
+	cg = get_pid_cgroup(initpid, "memory");
+	if (!cg)
+		return read_file("/proc/swaps", buf, size, d);
+
+	if (!cgfs_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
+		goto err;
+
+	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
+		goto err;
+
+	memlimit = strtoul(memlimit_str, NULL, 10);
+	memusage = strtoul(memusage_str, NULL, 10);
+
+	if (cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str) &&
+	    cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str)) {
+
+                /* If swap accounting is turned on, then default value is assumed to be that of cgroup / */
+                if (!cgfs_get_value("memory", "/", "memory.memsw.limit_in_bytes", &memswlimit_default_str))
+                    goto err;
+                if (!cgfs_get_value("memory", "/", "memory.memsw.usage_in_bytes", &memswusage_default_str))
+                    goto err;
+
+		memswlimit = strtoul(memswlimit_str, NULL, 10);
+		memswusage = strtoul(memswusage_str, NULL, 10);
+
+                if (!strcmp(memswlimit_str, memswlimit_default_str))
+                    memswlimit = 0;
+                if (!strcmp(memswusage_str, memswusage_default_str))
+                    memswusage = 0;
+
+		swap_total = (memswlimit - memlimit) / 1024;
+		swap_free = (memswusage - memusage) / 1024;
+	}
+
+	total_len = snprintf(d->buf, d->size, "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n");
+
+	/* When no mem + swap limit is specified or swapaccount=0*/
+	if (!memswlimit) {
+		char *line = NULL;
+		size_t linelen = 0;
+		FILE *f = fopen("/proc/meminfo", "r");
+
+		if (!f)
+			goto err;
+
+		while (getline(&line, &linelen, f) != -1) {
+			if (startswith(line, "SwapTotal:")) {
+				sscanf(line, "SwapTotal:      %8lu kB", &swap_total);
+			} else if (startswith(line, "SwapFree:")) {
+				sscanf(line, "SwapFree:      %8lu kB", &swap_free);
+			}
+		}
+
+		free(line);
+		fclose(f);
+	}
+
+	if (swap_total > 0) {
+		total_len += snprintf(d->buf + total_len, d->size,
+				 "none%*svirtual\t\t%lu\t%lu\t0\n", 36, " ",
+				 swap_total, swap_free);
+	}
+
+	if (total_len < 0) {
+		perror("Error writing to cache");
+		rv = 0;
+		goto err;
+	}
+
+	d->cached = 1;
+	d->size = (int)total_len;
+
+	if (total_len > size) total_len = size;
+	memcpy(buf, d->buf, total_len);
+	rv = total_len;
+
+err:
+	free(cg);
+	free(memswlimit_str);
+	free(memlimit_str);
+	free(memusage_str);
+	free(memswusage_str);
+	free(memswusage_default_str);
+	free(memswlimit_default_str);
+	return rv;
+}
+
 static off_t get_procfile_size(const char *which)
 {
 	FILE *f = fopen(which, "r");
@@ -3543,7 +3657,8 @@ int proc_getattr(const char *path, struct stat *sb)
 			strcmp(path, "/proc/cpuinfo") == 0 ||
 			strcmp(path, "/proc/uptime") == 0 ||
 			strcmp(path, "/proc/stat") == 0 ||
-			strcmp(path, "/proc/diskstats") == 0) {
+			strcmp(path, "/proc/diskstats") == 0 ||
+			strcmp(path, "/proc/swaps") == 0) {
 		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -3560,7 +3675,8 @@ int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offs
 				filler(buf, "meminfo", NULL, 0) != 0 ||
 				filler(buf, "stat", NULL, 0) != 0 ||
 				filler(buf, "uptime", NULL, 0) != 0 ||
-				filler(buf, "diskstats", NULL, 0) != 0)
+				filler(buf, "diskstats", NULL, 0) != 0 ||
+				filler(buf, "swaps", NULL, 0) != 0)
 		return -EINVAL;
 	return 0;
 }
@@ -3580,6 +3696,8 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_PROC_STAT;
 	else if (strcmp(path, "/proc/diskstats") == 0)
 		type = LXC_TYPE_PROC_DISKSTATS;
+	else if (strcmp(path, "/proc/swaps") == 0)
+		type = LXC_TYPE_PROC_SWAPS;
 	if (type == -1)
 		return -ENOENT;
 
@@ -3626,6 +3744,8 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		return proc_stat_read(buf, size, offset, fi);
 	case LXC_TYPE_PROC_DISKSTATS:
 		return proc_diskstats_read(buf, size, offset, fi);
+	case LXC_TYPE_PROC_SWAPS:
+		return proc_swaps_read(buf, size, offset, fi);
 	default:
 		return -EINVAL;
 	}
