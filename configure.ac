@@ -5,8 +5,6 @@ AC_INIT([lxcfs], [0.17], [lxc-devel@lists.linuxcontainers.org])
 AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_SUBST([LXCFS_VERSION_ABI], "0.9.1")
-
 AM_INIT_AUTOMAKE([subdir-objects -Wno-portability])
 
 AC_GNU_SOURCE
