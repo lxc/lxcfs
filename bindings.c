@@ -855,19 +855,25 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 static bool recv_creds(int sock, struct ucred *cred, char *v);
 static int wait_for_pid(pid_t pid);
 static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst);
+static int send_creds_clone_wrapper(void *arg);
 
 /*
- * fork a task which switches to @task's namespace and writes '1'.
+ * clone a task which switches to @task's namespace and writes '1'.
  * over a unix sock so we can read the task's reaper's pid in our
  * namespace
+ *
+ * Note: glibc's fork() does not respect pidns, which can lead to failed
+ * assertions inside glibc (and thus failed forks) if the child's pid in
+ * the pidns and the parent pid outside are identical. Using clone prevents
+ * this issue.
  */
 static void write_task_init_pid_exit(int sock, pid_t target)
 {
-	struct ucred cred;
 	char fnam[100];
 	pid_t pid;
-	char v;
 	int fd, ret;
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
 	if (ret < 0 || ret >= sizeof(fnam))
@@ -883,7 +889,7 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 		close(fd);
 		_exit(1);
 	}
-	pid = fork();
+	pid = clone(send_creds_clone_wrapper, stack + stack_size, SIGCHLD, &sock);
 	if (pid < 0)
 		_exit(1);
 	if (pid != 0) {
@@ -891,6 +897,12 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 			_exit(1);
 		_exit(0);
 	}
+}
+
+static int send_creds_clone_wrapper(void *arg) {
+	struct ucred cred;
+	char v;
+	int sock = *(int *)arg;
 
 	/* we are the child */
 	cred.uid = 0;
@@ -898,8 +910,8 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 	cred.pid = 1;
 	v = '1';
 	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
-		_exit(1);
-	_exit(0);
+		return 1;
+	return 0;
 }
 
 static pid_t get_init_pid_for_task(pid_t task)
@@ -1927,31 +1939,61 @@ static bool recv_creds(int sock, struct ucred *cred, char *v)
 	return true;
 }
 
+struct pid_ns_clone_args {
+	int *cpipe;
+	int sock;
+	pid_t tpid;
+	int (*wrapped) (int, pid_t); // pid_from_ns or pid_to_ns
+};
+
+/*
+ * pid_ns_clone_wrapper - wraps pid_to_ns or pid_from_ns for usage
+ * with clone(). This simply writes '1' as ACK back to the parent
+ * before calling the actual wrapped function.
+ */
+static int pid_ns_clone_wrapper(void *arg) {
+	struct pid_ns_clone_args* args = (struct pid_ns_clone_args *) arg;
+	char b = '1';
+
+	close(args->cpipe[0]);
+	if (write(args->cpipe[1], &b, sizeof(char)) < 0) {
+		fprintf(stderr, "%s (child): erorr on write: %s\n",
+			__func__, strerror(errno));
+	}
+	close(args->cpipe[1]);
+	return args->wrapped(args->sock, args->tpid);
+}
 
 /*
  * pid_to_ns - reads pids from a ucred over a socket, then writes the
  * int value back over the socket.  This shifts the pid from the
  * sender's pidns into tpid's pidns.
  */
-static void pid_to_ns(int sock, pid_t tpid)
+static int pid_to_ns(int sock, pid_t tpid)
 {
 	char v = '0';
 	struct ucred cred;
 
 	while (recv_creds(sock, &cred, &v)) {
 		if (v == '1')
-			_exit(0);
+			return 0;
 		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
-			_exit(1);
+			return 1;
 	}
-	_exit(0);
+	return 0;
 }
+
 
 /*
  * pid_to_ns_wrapper: when you setns into a pidns, you yourself remain
- * in your old pidns.  Only children which you fork will be in the target
- * pidns.  So the pid_to_ns_wrapper does the setns, then forks a child to
- * actually convert pids
+ * in your old pidns.  Only children which you clone will be in the target
+ * pidns.  So the pid_to_ns_wrapper does the setns, then clones a child to
+ * actually convert pids.
+ *
+ * Note: glibc's fork() does not respect pidns, which can lead to failed
+ * assertions inside glibc (and thus failed forks) if the child's pid in
+ * the pidns and the parent pid outside are identical. Using clone prevents
+ * this issue.
  */
 static void pid_to_ns_wrapper(int sock, pid_t tpid)
 {
@@ -1973,21 +2015,19 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 	if (pipe(cpipe) < 0)
 		_exit(1);
 
-	cpid = fork();
+	struct pid_ns_clone_args args = {
+		.cpipe = cpipe,
+		.sock = sock,
+		.tpid = tpid,
+		.wrapped = &pid_to_ns
+	};
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
+
+	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
 	if (cpid < 0)
 		_exit(1);
 
-	if (!cpid) {
-		char b = '1';
-		close(cpipe[0]);
-		if (write(cpipe[1], &b, sizeof(char)) < 0) {
-			fprintf(stderr, "%s (child): erorr on write: %s\n",
-				__func__, strerror(errno));
-		}
-		close(cpipe[1]);
-		pid_to_ns(sock, tpid);
-		_exit(1); // not reached
-	}
 	// give the child 1 second to be done forking and
 	// write its ack
 	if (!wait_for_sock(cpipe[0], 1))
@@ -2159,7 +2199,7 @@ out:
 	return ret;
 }
 
-static void pid_from_ns(int sock, pid_t tpid)
+static int pid_from_ns(int sock, pid_t tpid)
 {
 	pid_t vpid;
 	struct ucred cred;
@@ -2171,12 +2211,12 @@ static void pid_from_ns(int sock, pid_t tpid)
 	while (1) {
 		if (!wait_for_sock(sock, 2)) {
 			fprintf(stderr, "%s: timeout reading from parent\n", __func__);
-			_exit(1);
+			return 1;
 		}
 		if ((ret = read(sock, &vpid, sizeof(pid_t))) != sizeof(pid_t)) {
 			fprintf(stderr, "%s: bad read from parent: %s\n",
 				__func__, strerror(errno));
-			_exit(1);
+			return 1;
 		}
 		if (vpid == -1) // done
 			break;
@@ -2186,10 +2226,10 @@ static void pid_from_ns(int sock, pid_t tpid)
 			v = '1';
 			cred.pid = getpid();
 			if (send_creds(sock, &cred, v, false) != SEND_CREDS_OK)
-				_exit(1);
+				return 1;
 		}
 	}
-	_exit(0);
+	return 0;
 }
 
 static void pid_from_ns_wrapper(int sock, pid_t tpid)
@@ -2198,6 +2238,8 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 	char fnam[100];
 	pid_t cpid;
 	char v;
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
 	if (ret < 0 || ret >= sizeof(fnam))
@@ -2212,22 +2254,20 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 	if (pipe(cpipe) < 0)
 		_exit(1);
 
+	struct pid_ns_clone_args args = {
+		.cpipe = cpipe,
+		.sock = sock,
+		.tpid = tpid,
+		.wrapped = &pid_from_ns
+	};
+
 loop:
-	cpid = fork();
+	stack = alloca(stack_size);
+
+	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
 
 	if (cpid < 0)
 		_exit(1);
-
-	if (!cpid) {
-		char b = '1';
-		close(cpipe[0]);
-		if (write(cpipe[1], &b, sizeof(char)) < 0) {
-			fprintf(stderr, "%s (child): erorr on write: %s\n",
-				__func__, strerror(errno));
-		}
-		close(cpipe[1]);
-		pid_from_ns(sock, tpid);
-	}
 
 	// give the child 1 second to be done forking and
 	// write its ack
