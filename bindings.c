@@ -855,19 +855,25 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 static bool recv_creds(int sock, struct ucred *cred, char *v);
 static int wait_for_pid(pid_t pid);
 static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst);
+static int send_creds_clone_wrapper(void *arg);
 
 /*
- * fork a task which switches to @task's namespace and writes '1'.
+ * clone a task which switches to @task's namespace and writes '1'.
  * over a unix sock so we can read the task's reaper's pid in our
  * namespace
+ *
+ * Note: glibc's fork() does not respect pidns, which can lead to failed
+ * assertions inside glibc (and thus failed forks) if the child's pid in
+ * the pidns and the parent pid outside are identical. Using clone prevents
+ * this issue.
  */
 static void write_task_init_pid_exit(int sock, pid_t target)
 {
-	struct ucred cred;
 	char fnam[100];
 	pid_t pid;
-	char v;
 	int fd, ret;
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
 	if (ret < 0 || ret >= sizeof(fnam))
@@ -883,7 +889,7 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 		close(fd);
 		_exit(1);
 	}
-	pid = fork();
+	pid = clone(send_creds_clone_wrapper, stack + stack_size, SIGCHLD, &sock);
 	if (pid < 0)
 		_exit(1);
 	if (pid != 0) {
@@ -891,6 +897,12 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 			_exit(1);
 		_exit(0);
 	}
+}
+
+static int send_creds_clone_wrapper(void *arg) {
+	struct ucred cred;
+	char v;
+	int sock = *(int *)arg;
 
 	/* we are the child */
 	cred.uid = 0;
@@ -898,8 +910,8 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 	cred.pid = 1;
 	v = '1';
 	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
-		_exit(1);
-	_exit(0);
+		return 1;
+	return 0;
 }
 
 static pid_t get_init_pid_for_task(pid_t task)
