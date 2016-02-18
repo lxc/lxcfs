@@ -2238,8 +2238,6 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 	char fnam[100];
 	pid_t cpid;
 	char v;
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
 	if (ret < 0 || ret >= sizeof(fnam))
@@ -2260,32 +2258,24 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 		.tpid = tpid,
 		.wrapped = &pid_from_ns
 	};
-
-loop:
-	stack = alloca(stack_size);
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
 
 	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
-
 	if (cpid < 0)
 		_exit(1);
 
 	// give the child 1 second to be done forking and
 	// write its ack
 	if (!wait_for_sock(cpipe[0], 1))
-		goto again;
+		_exit(1);
 	ret = read(cpipe[0], &v, 1);
-	if (ret != sizeof(char) || v != '1') {
-		goto again;
-	}
+	if (ret != sizeof(char) || v != '1')
+		_exit(1);
 
 	if (!wait_for_pid(cpid))
 		_exit(1);
 	_exit(0);
-
-again:
-	kill(cpid, SIGKILL);
-	wait_for_pid(cpid);
-	goto loop;
 }
 
 /*
