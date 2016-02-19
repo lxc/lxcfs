@@ -574,7 +574,7 @@ static bool do_enter(struct controller *c, const char *cg)
 
 	while (c) {
 		if (!c->mount_path || !c->init_path)
-			continue;
+			goto next;
 		path = must_strcat(c->mount_path, c->init_path, cg, "/cgroup.procs", NULL);
 		if (!exists(path)) {
 			free(path);
@@ -591,6 +591,7 @@ static bool do_enter(struct controller *c, const char *cg)
 		if (!pass)
 			fprintf(stderr, "Failed to enter %s:%s\n", c->name, cg);
 #endif
+next:
 		c = c->next;
 	}
 
