@@ -1,0 +1,96 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Short-Description:    FUSE filesystem for LXC
+# Description:          FUSE filesystem for LXC
+# Provides:             lxcfs
+# Required-Start:       $remote_fs
+# Required-Stop:        $remote_fs
+# Default-Start:        2 3 4 5
+# Default-Stop:         0 1 6
+### END INIT INFO
+
+DAEMON=/usr/bin/lxcfs
+NAME=lxcfs
+DESC="FUSE filesystem for LXC"
+PIDFILE=/var/run/lxcfs.pid
+
+. /lib/lsb/init-functions
+
+test -f ${DAEMON} || exit 0
+
+set -e
+
+START="-m --start --quiet --pidfile ${PIDFILE} --name ${NAME} --startas $DAEMON --background"
+case "$1" in
+    start)
+        if init_is_upstart; then
+            exit 1
+        fi
+
+        # Don't start if bind-mounted from host
+        [ ! -d /var/lib/lxcfs/proc ] || exit 0
+
+        # Cleanup in case of crash
+        fusermount -u /var/lib/lxcfs 2> /dev/null || true
+        [ -L /etc/mtab ] || \
+            sed -i "/^lxcfs \/var\/lib\/lxcfs fuse.lxcfs/d" /etc/mtab
+
+        echo -n "Starting $DESC: "
+        if start-stop-daemon ${START} -- /var/lib/lxcfs >/dev/null 2>&1 ; then
+            echo "${NAME}."
+        else
+            if start-stop-daemon --test ${START} >/dev/null 2>&1; then
+                echo "(failed)."
+                exit 1
+            else
+                echo "${DAEMON} already running."
+                exit 0
+            fi
+        fi
+
+        exit 0
+    ;;
+
+    stop)
+        if init_is_upstart; then
+            exit 0
+        fi
+        echo -n "Stopping $DESC: "
+        if start-stop-daemon --stop --quiet --pidfile ${PIDFILE} \
+            --startas ${DAEMON} --retry 10 --name ${NAME} \
+            >/dev/null 2>&1 ; then
+                echo "${NAME}."
+        else
+            if start-stop-daemon --test ${START} >/dev/null 2>&1; then
+                echo "(not running)."
+                exit 0
+            else
+                echo "(failed)."
+                exit 1
+            fi
+        fi
+
+        exit 0
+    ;;
+
+    status)
+        if init_is_upstart; then
+            exit 0
+        fi
+        status_of_proc -p ${PIDFILE} "${DAEMON}" lxcfs
+    ;;
+
+    restart|force-reload)
+        if init_is_upstart; then
+            exit 1
+        fi
+        $0 stop
+        exec $0 start
+    ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart|force-reload}" 1>&2
+        exit 1
+    ;;
+esac
