@@ -2962,6 +2962,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", 
 				(memswlimit - memlimit) - (memswusage - memusage));
 			printme = lbuf;
+		} else if (startswith(line, "Slab:")) {
+			snprintf(lbuf, 100, "Slab:        %8lu kB\n", 0UL);
+			printme = lbuf;
 		} else if (startswith(line, "Buffers:")) {
 			snprintf(lbuf, 100, "Buffers:        %8lu kB\n", 0UL);
 			printme = lbuf;
