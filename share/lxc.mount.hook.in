@@ -1,14 +1,5 @@
 #!/bin/sh -e
 
-# Don't mess with containers that don't have /sys/fs/cgroup configured
-# (lxc.mount.auto = cgroup:mixed)
-
-if touch ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs; then
-    rm ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs
-else
-    exit 0
-fi
-
 # /proc files
 if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     for entry in @LXCFSTARGETDIR@/proc/*; do
@@ -19,6 +10,14 @@ fi
 
 # no need for lxcfs cgroups if we have cgroup namespaces
 [ -n "$LXC_CGNS_AWARE" ] && [ -f /proc/self/ns/cgroup ] && exit 0
+
+# Don't mess with containers that don't have /sys/fs/cgroup configured
+# (lxc.mount.auto = cgroup:mixed)
+if touch ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs; then
+    rm ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs
+else
+    exit 0
+fi
 
 # /sys/fs/cgroup files
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
