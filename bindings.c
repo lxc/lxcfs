@@ -2897,6 +2897,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file("/proc/meminfo", buf, size, d);
+	prune_init_slice(cg);
 
 	memlimit = get_min_memlimit(cg);
 	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
@@ -3079,6 +3080,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("proc/cpuinfo", buf, size, d);
+	prune_init_slice(cg);
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
@@ -3182,6 +3184,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file("/proc/stat", buf, size, d);
+	prune_init_slice(cg);
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
@@ -3326,6 +3329,7 @@ static unsigned long get_reaper_busy(pid_t task)
 	cgroup = get_pid_cgroup(initpid, "cpuacct");
 	if (!cgroup)
 		goto out;
+	prune_init_slice(cgroup);
 	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		goto out;
 	usage = strtoul(usage_str, NULL, 10);
@@ -3445,6 +3449,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
 		return read_file("/proc/diskstats", buf, size, d);
+	prune_init_slice(cg);
 
 	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced", &io_serviced_str))
 		goto err;
@@ -3568,6 +3573,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file("/proc/swaps", buf, size, d);
+	prune_init_slice(cg);
 
 	if (!cgfs_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
 		goto err;
