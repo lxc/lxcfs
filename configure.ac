@@ -105,10 +105,10 @@ case "$with_init_script" in
 				init_script=sysvinit
 				;;
 			debian)
-				init_script=upstart,systemd
+				init_script=upstart,systemd,sysvinit
 				;;
 			ubuntu)
-				init_script=upstart,systemd
+				init_script=upstart,systemd,sysvinit
 				;;
 			slackware)
 				echo -n "Warning: bsd init job not yet implemented"
