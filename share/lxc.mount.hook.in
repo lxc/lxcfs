@@ -8,6 +8,12 @@ if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     done
 fi
 
+
+# Allow nesting lxcfs
+if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
+    mount -n --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
+fi
+
 # no need for lxcfs cgroups if we have cgroup namespaces
 [ -n "$LXC_CGNS_AWARE" ] && [ -f /proc/self/ns/cgroup ] && exit 0
 
@@ -50,10 +56,6 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 done
             fi
         done
-
-        if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
-            mount -n --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
-        fi
     fi
 fi
 
