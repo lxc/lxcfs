@@ -10,11 +10,11 @@
  * The cgroup created will be "user/$user/0" for the first session,
  * "user/$user/1" for the second, etc.
  *
- * name=systemd is handled specially.  If the host is an upstart system,
- * the logged in user may not get a cgroup created.  On a systemd system,
- * one is created but not chowned to the user.  In the former case, we
- * create one as usual, in the latter case we simply chown whatever cgroup
- * the user is in.
+ * name=systemd is handled specially.  If the host is an upstart system
+ * or the login is noninteractive, then the logged in user does not get
+ * a cgroup created.  On a systemd interactive login, one is created but
+ * not chowned to the user.  In the former case, we create one as usual,
+ * in the latter case we simply chown whatever cgroup the user is in.
  *
  * All requested cgroups must be mounted under /sys/fs/cgroup/$controller,
  * no messing around with finding mountpoints.
@@ -139,7 +139,7 @@ next:
 		*e = orig;
 		b = e + 1;
 	}
-	
+
 }
 
 struct controller {
@@ -201,7 +201,7 @@ static void get_mounted_paths(void)
 static void add_controller(int id, char *tok, char *cur_path)
 {
 	struct controller *c;
-	
+
 	do {
 		c = malloc(sizeof(struct controller));
 	} while (!c);
@@ -417,10 +417,59 @@ static bool get_active_controllers(void)
 }
 
 /*
+ * the systemd-created path is: user-$uid.slice/session-c$session.scope
+ * If that is not the end of our systemd path, then we're not part of
+ * the PAM call that created that path.
+ *
+ * The last piece is chowned to $uid, the user- part not.
+ * Note - if the user creates paths that look like what we're looking for
+ * to 'fool' us, either
+ *   . they fool us, we create new cgroups, and they get auto-logged-out.
+ *   . they fool a root sudo, systemd cgroup is not changed but chowned,
+ *     and they lose ownership of their cgroups
+ */
+static bool systemd_created_slice_for_us(struct controller *c, const char *in, uid_t uid)
+{
+	char *p, *copy = strdupa(in);
+	size_t len;
+	int id;
+
+	if (!copy || strlen(copy) < strlen("/user-0.slice/session-0.scope"))
+		return false;
+	p = copy + strlen(copy) - 1;
+	/* skip any trailing '/' (shouldn't be any, but be sure) */
+	while (p >= copy && *p == '/')
+		*(p--) = '\0';
+	if (p < copy)
+		return false;
+
+	/* Get last path element */
+	while (p >= copy && *p != '/')
+		p--;
+	if (p < copy)
+		return false;
+	/* make sure it is session-something.scope */
+	len = strlen(p+1);
+	if (strncmp(p+1, "session-", strlen("session-")) != 0 ||
+			strncmp(p+1 + len - 6, ".scope", 6) != 0)
+		return false;
+
+	/* ok last path piece checks out, now check the second to last */
+	*(p+1) = '\0';
+	while (p >= copy && *(--p) != '/');
+	if (sscanf(p+1, "user-%d.slice/", &id) != 1)
+		return false;
+
+	if (id != (int)uid)
+		return false;
+
+	return true;
+}
+/*
  * Handle systemd creation.  Return true if all's done.  Returns false if
  * the caller needs to create=chown a cgroup
  */
-static bool handle_systemd_create(const struct controller *c, uid_t uid, gid_t gid)
+static bool handle_systemd_create(struct controller *c, uid_t uid, gid_t gid)
 {
 	char *user_path;
 
@@ -428,6 +477,14 @@ static bool handle_systemd_create(const struct controller *c, uid_t uid, gid_t g
 		return false;
 
 	user_path = must_strcat(c->mount_path, c->cur_path, NULL);
+
+	// Is this actually our cgroup, or was it created for someone
+	// else?
+	if (!systemd_created_slice_for_us(c, user_path, uid)) {
+		c->systemd_created = false;
+		free(user_path);
+		return false;
+	}
 
 	// a name=systemd cgroup has already been created, just chown it
 	if (chown(user_path, uid, gid) < 0)
@@ -437,7 +494,7 @@ static bool handle_systemd_create(const struct controller *c, uid_t uid, gid_t g
 	return true;
 }
 
-static bool cgfs_create_forone(const struct controller *c, uid_t uid, gid_t gid, const char *cg, bool *existed)
+static bool cgfs_create_forone(struct controller *c, uid_t uid, gid_t gid, const char *cg, bool *existed)
 {
 	while (c) {
 		if (!c->mount_path || !c->init_path)
@@ -650,7 +707,7 @@ static int handle_login(const char *user)
 	uid_t uid = 0;
 	gid_t gid = 0;
 	char cg[MAXPATHLEN];
-	
+
 	if (!get_uid_gid(user, &uid, &gid)) {
 		mysyslog(LOG_ERR, "Failed to get uid and gid for %s\n", user);
 		return PAM_SESSION_ERR;
