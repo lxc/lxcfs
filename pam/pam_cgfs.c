@@ -417,6 +417,51 @@ static bool get_active_controllers(void)
 }
 
 /*
+ * In Ubuntu 14.04, the paths created for us were
+ * '/user/$uid.user/$something.session'
+ * This can be merged better with systemd_created_slice_for_us(), but keeping
+ * it separate makes it easier to reason about the correctness.
+ */
+static bool systemd_v1_created_slice(struct controller *c, const char *in, uid_t uid)
+{
+	char *p, *copy = strdupa(in);
+	size_t len;
+	int id;
+
+	if (strlen(copy) < strlen("/user/1.user/1.session"))
+		return false;
+	p = copy + strlen(copy) - 1;
+
+	/* skip any trailing '/' (shouldn't be any, but be sure) */
+	while (p >= copy && *p == '/')
+		*(p--) = '\0';
+	if (p < copy)
+		return false;
+
+	/* Get last path element */
+	while (p >= copy && *p != '/')
+		p--;
+	if (p < copy)
+		return false;
+	/* make sure it is something.session */
+	len = strlen(p+1);
+	if (len < strlen("1.session") ||
+			strncmp(p+1 + len - 8, ".session", 8) != 0)
+		return false;
+
+	/* ok last path piece checks out, now check the second to last */
+	*(p+1) = '\0';
+	while (p >= copy && *(--p) != '/');
+	if (sscanf(p+1, "%d.user/", &id) != 1)
+		return false;
+
+	if (id != (int)uid)
+		return false;
+
+	return true;
+}
+
+/*
  * the systemd-created path is: user-$uid.slice/session-c$session.scope
  * If that is not the end of our systemd path, then we're not part of
  * the PAM call that created that path.
@@ -434,7 +479,10 @@ static bool systemd_created_slice_for_us(struct controller *c, const char *in, u
 	size_t len;
 	int id;
 
-	if (!copy || strlen(copy) < strlen("/user-0.slice/session-0.scope"))
+	if (systemd_v1_created_slice(c, in, uid))
+		return true;
+
+	if (strlen(copy) < strlen("/user-0.slice/session-0.scope"))
 		return false;
 	p = copy + strlen(copy) - 1;
 	/* skip any trailing '/' (shouldn't be any, but be sure) */
