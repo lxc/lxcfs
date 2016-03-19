@@ -28,18 +28,36 @@ fi
 # /sys/fs/cgroup files
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
     if [ -d @LXCFSTARGETDIR@/cgroup ]; then
+        # Cleanup existing mounts
+        for entry in ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/*; do
+            DEST=$(basename $entry)
+
+            if [ "${DEST}" = "cgmanager" ]; then
+                continue
+            fi
+
+            if [ ! -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" ]; then
+                continue
+            fi
+
+            while grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo; do
+                grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo | cut -d' ' -f5 | while read line; do
+                     mountpoint -q ${line} && umount -l ${line} || true
+                done
+            done
+
+            rm -Rf ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}
+        done
+
+        # Mount the new entries
         for entry in @LXCFSTARGETDIR@/cgroup/*; do
             DEST=$(basename $entry)
             if [ "$DEST" = "name=systemd" ]; then
                 DEST="systemd"
             fi
 
-            if mountpoint -q ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST; then
-                continue
-            fi
-
-            if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST ]; then
-                mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+            if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST} ]; then
+                mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}
             fi
 
             mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
