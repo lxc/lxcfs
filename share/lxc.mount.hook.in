@@ -40,9 +40,9 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
                 continue
             fi
 
-            while grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo; do
+            while grep -q "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo; do
                 grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo | cut -d' ' -f5 | while read line; do
-                     mountpoint -q ${line} && umount -l ${line} || true
+                     [ -e "${line}" ] && umount -l "${line}" || true
                 done
             done
 
