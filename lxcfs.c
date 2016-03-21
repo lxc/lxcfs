@@ -912,7 +912,7 @@ int main(int argc, char *argv[])
 
 	do_reload();
 	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
-		fprintf(stderr, "Error loading USR1 signal handler: %m\n");
+		fprintf(stderr, "Error setting USR1 signal handler: %m\n");
 		exit(1);
 	}
 
