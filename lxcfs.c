@@ -914,7 +914,10 @@ int main(int argc, char *argv[])
 		usage(argv[0]);
 
 	do_reload();
-	signal(SIGUSR1, reload_handler);
+	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
+		fprintf(stderr, "Error loading USR1 signal handler: %m\n");
+		exit(1);
+	}
 
 	newargv[cnt++] = argv[0];
 	newargv[cnt++] = "-f";
