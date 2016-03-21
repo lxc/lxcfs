@@ -22,8 +22,6 @@ AC_CONFIG_FILES([
 	share/lxc.reboot.hook
 	tests/Makefile ])
 
-AM_INIT_AUTOMAKE
-
 LT_INIT
 AC_PROG_CC
 

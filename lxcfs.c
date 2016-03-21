@@ -67,7 +67,7 @@ static void users_unlock(void)
 	unlock_mutex(&user_count_mutex);
 }
 
-static int need_reload;
+static volatile sig_atomic_t need_reload;
 
 /* do_reload - reload the dynamic library.  Done under
  * lock and when we know the user_count was 0 */
@@ -111,10 +111,7 @@ static void down_users(void)
 
 static void reload_handler(int sig)
 {
-	fprintf(stderr, "lxcfs: caught a SIGUSR1.  Reloading\n");
-	users_lock();
 	need_reload = 1;
-	users_unlock();
 }
 
 /* Functions to run the library methods */
@@ -914,7 +911,10 @@ int main(int argc, char *argv[])
 		usage(argv[0]);
 
 	do_reload();
-	signal(SIGUSR1, reload_handler);
+	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
+		fprintf(stderr, "Error loading USR1 signal handler: %m\n");
+		exit(1);
+	}
 
 	newargv[cnt++] = argv[0];
 	newargv[cnt++] = "-f";
