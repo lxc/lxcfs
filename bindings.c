@@ -1770,6 +1770,59 @@ out:
 	return ret;
 }
 
+int cg_access(const char *path, int mode)
+{
+	const char *cgroup;
+	char *last = NULL, *path1, *path2, * cgdir = NULL, *controller;
+	struct cgfs_files *k = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	int ret;
+
+	if (!fc)
+		return -EIO;
+
+	controller = pick_controller_from_path(fc, path);
+	if (!controller)
+		return -EIO;
+	cgroup = find_cgroup_in_path(path);
+	if (!cgroup)
+		return -EINVAL;
+
+	get_cgdir_and_path(cgroup, &cgdir, &last);
+	if (!last) {
+		path1 = "/";
+		path2 = cgdir;
+	} else {
+		path1 = cgdir;
+		path2 = last;
+	}
+
+	k = cgfs_get_key(controller, path1, path2);
+	if (!k) {
+		ret = -EINVAL;
+		goto out;
+	}
+	free_key(k);
+
+	pid_t initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
+	if (!caller_may_see_dir(initpid, controller, path1)) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (!fc_may_access(fc, controller, path1, path2, mode)) {
+		ret = -EACCES;
+		goto out;
+	}
+
+	ret = 0;
+
+out:
+	free(cgdir);
+	return ret;
+}
+
 int cg_release(const char *path, struct fuse_file_info *fi)
 {
 	struct file_info *f = (struct file_info *)fi->fh;
@@ -3756,6 +3809,14 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 	info->size = info->buflen;
 
 	fi->fh = (unsigned long)info;
+	return 0;
+}
+
+int proc_access(const char *path, int mask)
+{
+	/* these are all read-only */
+	if ((mask & ~R_OK) != 0)
+		return -EPERM;
 	return 0;
 }
 
