@@ -3815,7 +3815,7 @@ int proc_access(const char *path, int mask)
 {
 	/* these are all read-only */
 	if ((mask & ~R_OK) != 0)
-		return -EPERM;
+		return -EACCES;
 	return 0;
 }
 
