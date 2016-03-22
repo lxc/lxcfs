@@ -1744,7 +1744,6 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 		goto out;
 	}
 	if (!fc_may_access(fc, controller, path1, path2, fi->flags)) {
-		// should never get here
 		ret = -EACCES;
 		goto out;
 	}
@@ -2215,7 +2214,7 @@ int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	free_key(k);
 
 
-	if (!fc_may_access(fc, f->controller, f->cgroup, f->file, O_RDONLY)) { // should never get here
+	if (!fc_may_access(fc, f->controller, f->cgroup, f->file, O_RDONLY)) {
 		ret = -EACCES;
 		goto out;
 	}
