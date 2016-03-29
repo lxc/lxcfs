@@ -1682,22 +1682,29 @@ out:
 	return ret;
 }
 
-static void do_release_file_info(struct file_info *f)
+static void do_release_file_info(struct fuse_file_info *fi)
 {
+	struct file_info *f = (struct file_info *)fi->fh;
+
 	if (!f)
 		return;
+
+	fi->fh = 0;
+
 	free(f->controller);
+	f->controller = NULL;
 	free(f->cgroup);
+	f->cgroup = NULL;
 	free(f->file);
+	f->file = NULL;
 	free(f->buf);
+	f->buf = NULL;
 	free(f);
 }
 
 int cg_releasedir(const char *path, struct fuse_file_info *fi)
 {
-	struct file_info *d = (struct file_info *)fi->fh;
-
-	do_release_file_info(d);
+	do_release_file_info(fi);
 	return 0;
 }
 
@@ -1824,9 +1831,7 @@ out:
 
 int cg_release(const char *path, struct fuse_file_info *fi)
 {
-	struct file_info *f = (struct file_info *)fi->fh;
-
-	do_release_file_info(f);
+	do_release_file_info(fi);
 	return 0;
 }
 
@@ -3821,9 +3826,7 @@ int proc_access(const char *path, int mask)
 
 int proc_release(const char *path, struct fuse_file_info *fi)
 {
-	struct file_info *f = (struct file_info *)fi->fh;
-
-	do_release_file_info(f);
+	do_release_file_info(fi);
 	return 0;
 }
 
