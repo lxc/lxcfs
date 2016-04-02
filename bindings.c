@@ -3627,9 +3627,12 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		tot_ticks =  tot_ticks/1000000;
 
 		memset(lbuf, 0, 256);
-		snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-			major, minor, dev_name, read, read_merged, read_sectors, read_ticks,
-			write, write_merged, write_sectors, write_ticks, ios_pgr, tot_ticks, rq_ticks);
+		if (read || write || read_merged || write_merged || read_sectors || write_sectors || read_ticks || write_ticks)
+			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
+				major, minor, dev_name, read, read_merged, read_sectors, read_ticks,
+				write, write_merged, write_sectors, write_ticks, ios_pgr, tot_ticks, rq_ticks);
+		else
+			continue;
 
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0) {
