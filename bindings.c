@@ -375,7 +375,7 @@ static bool store_hierarchy(char *stridx, char *h)
 		}
 		hierarchies = tmp;
 	}
-	
+
 	hierarchies[num_hierarchies++] = must_copy_string(h);
 	return true;
 }
@@ -439,7 +439,7 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
 	fnam = alloca(len);
 	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
-	
+
 	return write_string(fnam, value);
 }
 
@@ -3016,7 +3016,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit - memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0) {
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", 
+			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n",
 				(memswlimit - memlimit) - (memswusage - memusage));
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
@@ -3117,8 +3117,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *cpuset = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
-	bool am_printing = false;
-	int curcpu = -1;
+	bool am_printing = false, firstline = true, is_s390x = false;
+	int curcpu = -1, cpu;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 	FILE *f = NULL;
@@ -3152,6 +3152,13 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	while (getline(&line, &linelen, f) != -1) {
 		size_t l;
+		if (firstline) {
+			firstline = false;
+			if (strstr(line, "IBM/S390") != NULL) {
+				is_s390x = true;
+				am_printing = true;
+			}
+		}
 		if (is_processor_line(line)) {
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
@@ -3172,6 +3179,32 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				total_len += l;
 			}
 			continue;
+		} else if (is_s390x && sscanf(line, "processor %d:", &cpu) == 1) {
+			char *p;
+			if (!cpu_in_cpuset(cpu, cpuset))
+				continue;
+			curcpu ++;
+			p = strchr(line, ':');
+			if (!p || !*p)
+				goto err;
+			p++;
+			l = snprintf(cache, cache_size, "processor %d:%s", curcpu,
+				    );
+			if (l < 0) {
+				perror("Error writing to cache");
+				rv = 0;
+				goto err;
+			}
+			if (l >= cache_size) {
+				fprintf(stderr, "Internal error: truncated write to cache\n");
+				rv = 0;
+				goto err;
+			}
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+			continue;
+
 		}
 		if (am_printing) {
 			l = snprintf(cache, cache_size, "%s", line);
