@@ -3157,8 +3157,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			if (strstr(line, "IBM/S390") != NULL) {
 				is_s390x = true;
 				am_printing = true;
+				continue;
 			}
 		}
+		if (strncmp(line, "# processors:", 12) == 0)
+			continue;
 		if (is_processor_line(line)) {
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
@@ -3188,8 +3191,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			if (!p || !*p)
 				goto err;
 			p++;
-			l = snprintf(cache, cache_size, "processor %d:%s", curcpu,
-				    );
+			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
 			if (l < 0) {
 				perror("Error writing to cache");
 				rv = 0;
@@ -3222,6 +3224,38 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			cache_size -= l;
 			total_len += l;
 		}
+	}
+
+	if (is_s390x) {
+		char *origcache = d->buf;
+		size_t l;
+		do {
+			d->buf = malloc(d->buflen);
+		} while (!d->buf);
+		cache = d->buf;
+		cache_size = d->buflen;
+		total_len = 0;
+		l = snprintf(cache, cache_size, "vendor_id       : IBM/S390\n");
+		if (l < 0 || l >= cache_size) {
+			free(origcache);
+			goto err;
+		}
+		cache_size -= l;
+		cache += l;
+		total_len += l;
+		l = snprintf(cache, cache_size, "# processors    : %d\n", curcpu + 1);
+		if (l < 0 || l >= cache_size) {
+			free(origcache);
+			goto err;
+		}
+		cache_size -= l;
+		cache += l;
+		total_len += l;
+		l = snprintf(cache, cache_size, "%s", origcache);
+		free(origcache);
+		if (l < 0 || l >= cache_size)
+			goto err;
+		total_len += l;
 	}
 
 	d->cached = 1;
