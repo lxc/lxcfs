@@ -1791,8 +1791,10 @@ int cg_access(const char *path, int mode)
 	if (!controller)
 		return -EIO;
 	cgroup = find_cgroup_in_path(path);
-	if (!cgroup)
-		return -EINVAL;
+	if (!cgroup) {
+		// access("/sys/fs/cgroup/systemd", mode) - rx allowed, w not
+		return mode & W_OK == 0 ? 0 : -EACCES;
+	}
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
