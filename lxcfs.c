@@ -799,7 +799,7 @@ static bool umount_if_mounted(void)
 
 static bool setup_cgfs_dir(void)
 {
-	if (!mkdir_p(basedir, 0700)) {
+	if (!mkdir_p(basedir, 0755)) {
 		fprintf(stderr, "Failed to create lxcfs cgdir\n");
 		return false;
 	}
@@ -807,7 +807,7 @@ static bool setup_cgfs_dir(void)
 		fprintf(stderr, "Failed to clean up old lxcfs cgdir\n");
 		return false;
 	}
-	if (mount("tmpfs", basedir, "tmpfs", 0, "size=100000,mode=700") < 0) {
+	if (mount("tmpfs", basedir, "tmpfs", 0, "size=100000,mode=755") < 0) {
 		fprintf(stderr, "Failed to mount tmpfs for private controllers\n");
 		return false;
 	}
