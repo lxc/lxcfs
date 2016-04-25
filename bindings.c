@@ -2865,7 +2865,7 @@ static int read_file(const char *path, char *buf, size_t size,
 		return 0;
 
 	while (getline(&line, &linelen, f) != -1) {
-		size_t l = snprintf(cache, cache_size, "%s", line);
+		ssize_t l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0) {
 			perror("Error writing to cache");
 			rv = 0;
@@ -2882,7 +2882,8 @@ static int read_file(const char *path, char *buf, size_t size,
 	}
 
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
@@ -3003,7 +3004,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		goto err;
 
 	while (getline(&line, &linelen, f) != -1) {
-		size_t l;
+		ssize_t l;
 		char *printme, lbuf[100];
 
 		memset(lbuf, 0, 100);
@@ -3158,7 +3159,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		goto err;
 
 	while (getline(&line, &linelen, f) != -1) {
-		size_t l;
+		ssize_t l;
 		if (firstline) {
 			firstline = false;
 			if (strstr(line, "IBM/S390") != NULL) {
@@ -3235,7 +3236,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	if (is_s390x) {
 		char *origcache = d->buf;
-		size_t l;
+		ssize_t l;
 		do {
 			d->buf = malloc(d->buflen);
 		} while (!d->buf);
@@ -3335,7 +3336,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	while (getline(&line, &linelen, f) != -1) {
-		size_t l;
+		ssize_t l;
 		int cpu;
 		char cpu_char[10]; /* That's a lot of cores */
 		char *c;
@@ -3507,7 +3508,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	long int reaperage = getreaperage(fc->pid);
 	unsigned long int busytime = get_reaper_busy(fc->pid), idletime;
 	char *cache = d->buf;
-	size_t total_len = 0;
+	ssize_t total_len = 0;
 
 #if RELOADTEST
 	iwashere();
@@ -3602,7 +3603,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		goto err;
 
 	while (getline(&line, &linelen, f) != -1) {
-		size_t l;
+		ssize_t l;
 		char lbuf[256];
 
 		i = sscanf(line, "%u %u %71s", &major, &minor, dev_name);
@@ -3685,7 +3686,8 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	char *memswlimit_str = NULL, *memlimit_str = NULL, *memusage_str = NULL, *memswusage_str = NULL,
              *memswlimit_default_str = NULL, *memswusage_default_str = NULL;
 	unsigned long memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0, swap_total = 0, swap_free = 0;
-	size_t total_len = 0, rv = 0;
+	ssize_t total_len = 0, rv = 0;
+	ssize_t l = 0;
 	char *cache = d->buf;
 
 	if (offset) {
@@ -3761,12 +3763,13 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (swap_total > 0) {
-		total_len += snprintf(d->buf + total_len, d->size - total_len,
-				 "none%*svirtual\t\t%lu\t%lu\t0\n", 36, " ",
-				 swap_total, swap_free);
+		l = snprintf(d->buf + total_len, d->size - total_len,
+				"none%*svirtual\t\t%lu\t%lu\t0\n", 36, " ",
+				swap_total, swap_free);
+		total_len += l;
 	}
 
-	if (total_len < 0) {
+	if (total_len < 0 || l < 0) {
 		perror("Error writing to cache");
 		rv = 0;
 		goto err;
