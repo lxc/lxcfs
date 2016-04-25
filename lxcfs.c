@@ -836,7 +836,7 @@ static bool do_mount_cgroup(char *controller)
 
 static bool do_mount_cgroups(void)
 {
-	bool ret;
+	bool ret = false;
 	FILE *f;
 	char *line = NULL;
 	size_t len = 0;
