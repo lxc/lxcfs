@@ -48,6 +48,7 @@ TEST_CPUSET: tests/cpusetrange.c cpuset.c
 TEST_SYSCALLS: tests/test_syscalls.c
 	$(CC) -o tests/test_syscalls tests/test_syscalls.c
 
+if HAVE_PAM
 pam_LTLIBRARIES = pam_cgfs.la
 pam_cgfs_la_SOURCES = pam/pam_cgfs.c
 pam_cgfs_la_CFLAGS = $(AM_CFLAGS)
@@ -60,6 +61,7 @@ install-data-hook:     install-pamLTLIBRARIES
 	rm -f "$(DESTDIR)$(pamdir)/pam_cgfs.a"
 uninstall-local:
 	rm -f "$(DESTDIR)$(pamdir)/pam_cgfs.so"
+endif
 
 
 tests: TEST_READ TEST_CPUSET TEST_SYSCALLS
