@@ -462,6 +462,25 @@ static bool systemd_v1_created_slice(struct controller *c, const char *in, uid_t
 }
 
 /*
+ * So long as our path relative to init starts with /user.slice/user-$uid.slice,
+ * assumem it belongs to $uid and chown it
+ */
+static bool under_systemd_user_slice(struct controller *c, uid_t uid)
+{
+	char buf[100];
+	size_t curlen, initlen;
+
+	curlen = strlen(c->cur_path);
+	initlen = strlen(c->init_path);
+	if (curlen <= initlen)
+		return false;
+	if (strncmp(c->cur_path, c->init_path, initlen) != 0)
+		return false;
+	snprintf(buf, 100, "/user.slice/user-%d.slice/", (int)uid);
+	return strncmp(c->cur_path + initlen, buf, strlen(buf)) == 0;
+}
+
+/*
  * the systemd-created path is: user-$uid.slice/session-c$session.scope
  * If that is not the end of our systemd path, then we're not part of
  * the PAM call that created that path.
@@ -480,6 +499,9 @@ static bool systemd_created_slice_for_us(struct controller *c, const char *in, u
 	int id;
 
 	if (systemd_v1_created_slice(c, in, uid))
+		return true;
+
+	if (under_systemd_user_slice(c, uid))
 		return true;
 
 	if (strlen(copy) < strlen("/user-0.slice/session-0.scope"))
