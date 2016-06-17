@@ -477,6 +477,8 @@ static bool under_systemd_user_slice(struct controller *c, uid_t uid)
 	if (strncmp(c->cur_path, c->init_path, initlen) != 0)
 		return false;
 	snprintf(buf, 100, "/user.slice/user-%d.slice/", (int)uid);
+	if (initlen == 1)
+		initlen = 0; // skip the '/'
 	return strncmp(c->cur_path + initlen, buf, strlen(buf)) == 0;
 }
 
