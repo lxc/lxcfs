@@ -3951,6 +3951,14 @@ static void __attribute__((constructor)) collect_subsystems(void)
 			goto out;
 		*p2 = '\0';
 
+		/* With cgroupv2 /proc/self/cgroup can contain entries of the
+		 * form: 0::/ This will cause lxcfs to fail the cgroup mounts
+		 * because it parses out the empty string "" and later on passes
+		 * it to mount(). Let's skip such entries.
+		 */
+		if (!strcmp(p, ""))
+			continue;
+
 		if (!store_hierarchy(line, p))
 			goto out;
 	}
