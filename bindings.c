@@ -384,7 +384,7 @@ static void print_subsystems(void)
 {
 	int i;
 
-	fprintf(stderr, "hierarchies:");
+	fprintf(stderr, "hierarchies:\n");
 	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
 			fprintf(stderr, " %d: %s\n", i, hierarchies[i]);
@@ -435,10 +435,10 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
+	/* BASEDIR / tmpc / cgroup / file \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
+	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, file);
 
 	return write_string(fnam, value);
 }
@@ -486,10 +486,10 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 
 	if (!tmpc)
 		return -EINVAL;
-	/* basedir / tmpc / cg \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
+	/* BASEDIR / tmpc / cg \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cg) + 3;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
+	snprintf(dirnam, len, "%s/%s/%s", BASEDIR,tmpc, cg);
 
 	if (mkdir(dirnam, 0755) < 0)
 		return -errno;
@@ -576,10 +576,10 @@ bool cgfs_remove(const char *controller, const char *cg)
 
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cg \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
+	/* BASEDIR / tmpc / cg \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cg) + 3;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
+	snprintf(dirnam, len, "%s/%s/%s", BASEDIR,tmpc, cg);
 	return recursive_rmdir(dirnam);
 }
 
@@ -590,10 +590,10 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(file) + 3;
+	/* BASEDIR / tmpc / file \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(file) + 3;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
+	snprintf(pathname, len, "%s/%s/%s", BASEDIR, tmpc, file);
 	if (chmod(pathname, mode) < 0)
 		return false;
 	return true;
@@ -622,10 +622,10 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 
 	if (!tmpc)
 		return -EINVAL;
-	/* basedir / tmpc / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(file) + 3;
+	/* BASEDIR / tmpc / file \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(file) + 3;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
+	snprintf(pathname, len, "%s/%s/%s", BASEDIR, tmpc, file);
 	if (chown(pathname, uid, gid) < 0)
 		return -errno;
 
@@ -643,10 +643,10 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 
 	if (!tmpc)
 		return NULL;
-	/* basedir / tmpc / cgroup / "cgroup.procs" \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 4 + strlen("cgroup.procs");
+	/* BASEDIR / tmpc / cgroup / "cgroup.procs" \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 4 + strlen("cgroup.procs");
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s/cgroup.procs", basedir, tmpc, cgroup);
+	snprintf(pathname, len, "%s/%s/%s/cgroup.procs", BASEDIR, tmpc, cgroup);
 	return fopen(pathname, "w");
 }
 
@@ -666,10 +666,10 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 	if (!tmpc)
 		return false;
 
-	/* basedir / tmpc / cgroup \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
+	/* BASEDIR / tmpc / cgroup \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 3;
 	dirname = alloca(len);
-	snprintf(dirname, len, "%s/%s/%s", basedir, tmpc, cgroup);
+	snprintf(dirname, len, "%s/%s/%s", BASEDIR, tmpc, cgroup);
 
 	dir = opendir(dirname);
 	if (!dir)
@@ -761,10 +761,10 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
+	/* BASEDIR / tmpc / cgroup / file \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
+	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, file);
 
 	*value = slurp_file(fnam);
 	return *value != NULL;
@@ -787,12 +787,12 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file && index(file, '/'))
 		return NULL;
 
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
+	/* BASEDIR / tmpc / cgroup / file \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 3;
 	if (file)
 		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s%s%s", basedir, tmpc, cgroup,
+	snprintf(fnam, len, "%s/%s/%s%s%s", BASEDIR, tmpc, cgroup,
 		file ? "/" : "", file ? file : "");
 
 	ret = stat(fnam, &sb);
@@ -838,10 +838,10 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / f \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(f) + 4;
+	/* BASEDIR / tmpc / cgroup / f \0 */
+	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(f) + 4;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, f);
+	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, f);
 
 	ret = stat(fnam, &sb);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
