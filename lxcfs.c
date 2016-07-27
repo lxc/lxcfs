@@ -8,28 +8,28 @@
 
 #define FUSE_USE_VERSION 26
 
-#include <stdio.h>
 #include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <libgen.h>
-#include <sched.h>
 #include <pthread.h>
-#include <dlfcn.h>
-#include <linux/sched.h>
-#include <sys/socket.h>
-#include <sys/mount.h>
-#include <sys/epoll.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <wait.h>
+#include <linux/sched.h>
+#include <sys/epoll.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
 
-#include "config.h" // for VERSION
 #include "bindings.h"
+#include "config.h" // for VERSION
 
 void *dlopen_handle;
 
