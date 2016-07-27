@@ -789,8 +789,8 @@ static bool mkdir_p(const char *dir, mode_t mode)
 
 static bool umount_if_mounted(void)
 {
-	if (umount2(basedir, MNT_DETACH) < 0 && errno != EINVAL) {
-		fprintf(stderr, "failed to umount %s: %s\n", basedir,
+	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
+		fprintf(stderr, "failed to umount %s: %s\n", BASEDIR,
 			strerror(errno));
 		return false;
 	}
@@ -799,7 +799,7 @@ static bool umount_if_mounted(void)
 
 static bool setup_cgfs_dir(void)
 {
-	if (!mkdir_p(basedir, 0700)) {
+	if (!mkdir_p(BASEDIR, 0700)) {
 		fprintf(stderr, "Failed to create lxcfs cgdir\n");
 		return false;
 	}
@@ -807,7 +807,7 @@ static bool setup_cgfs_dir(void)
 		fprintf(stderr, "Failed to clean up old lxcfs cgdir\n");
 		return false;
 	}
-	if (mount("tmpfs", basedir, "tmpfs", 0, "size=100000,mode=700") < 0) {
+	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
 		fprintf(stderr, "Failed to mount tmpfs for private controllers\n");
 		return false;
 	}
@@ -820,9 +820,9 @@ static bool do_mount_cgroup(char *controller)
 	size_t len;
 	int ret;
 
-	len = strlen(basedir) + strlen(controller) + 2;
+	len = strlen(BASEDIR) + strlen(controller) + 2;
 	target = alloca(len);
-	ret = snprintf(target, len, "%s/%s", basedir, controller);
+	ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
 	if (ret < 0 || ret >= len)
 		return false;
 	if (mkdir(target, 0755) < 0 && errno != EEXIST)
