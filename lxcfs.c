@@ -27,9 +27,25 @@
 #include <sys/epoll.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 
 #include "bindings.h"
 #include "config.h" // for VERSION
+
+/* Define pivot_root() if missing from the C library */
+#ifndef HAVE_PIVOT_ROOT
+static int pivot_root(const char * new_root, const char * put_old)
+{
+#ifdef __NR_pivot_root
+return syscall(__NR_pivot_root, new_root, put_old);
+#else
+errno = ENOSYS;
+return -1;
+#endif
+}
+#else
+extern int pivot_root(const char * new_root, const char * put_old);
+#endif
 
 void *dlopen_handle;
 
@@ -797,6 +813,102 @@ static bool umount_if_mounted(void)
 	return true;
 }
 
+static int pivot_enter(void)
+{
+	int ret = -1, oldroot = -1, newroot = -1;
+
+	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	if (oldroot < 0) {
+		fprintf(stderr, "%s: Failed to open old root for fchdir.\n", __func__);
+		return ret;
+	}
+
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	if (newroot < 0) {
+		fprintf(stderr, "%s: Failed to open new root for fchdir.\n", __func__);
+		goto err;
+	}
+
+	/* change into new root fs */
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to change directory to new rootfs: %s.\n", __func__, ROOTDIR);
+		goto err;
+	}
+
+	/* pivot_root into our new root fs */
+	if (pivot_root(".", ".") < 0) {
+		fprintf(stderr, "%s: pivot_root() syscall failed: %s.\n", __func__, strerror(errno));
+		goto err;
+	}
+
+	/*
+	 * At this point the old-root is mounted on top of our new-root.
+	 * To unmounted it we must not be chdir'd into it, so escape back
+	 * to the old-root.
+	 */
+	if (fchdir(oldroot) < 0) {
+		fprintf(stderr, "%s: Failed to enter old root.\n", __func__);
+		goto err;
+	}
+	if (umount2(".", MNT_DETACH) < 0) {
+		fprintf(stderr, "%s: Failed to detach old root.\n", __func__);
+		goto err;
+	}
+
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to re-enter new root.\n", __func__);
+		goto err;
+	}
+
+	ret = 0;
+
+err:
+	if (oldroot > 0)
+		close(oldroot);
+	if (newroot > 0)
+		close(newroot);
+	return ret;
+}
+
+/* Prepare our new clean root. */
+static int pivot_prepare(void)
+{
+	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
+		fprintf(stderr, "%s: Failed to create directory for new root.\n", __func__);
+		return -1;
+	}
+
+	if (mount("/", ROOTDIR, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount / for new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(RUNTIME_PATH, ROOTDIR RUNTIME_PATH, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount /run into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(BASEDIR, ROOTDIR BASEDIR, NULL, MS_REC | MS_MOVE, 0) < 0) {
+		printf("%s: failed to move " BASEDIR " into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int pivot_new_root(void)
+{
+	/* Prepare new root. */
+	if (pivot_prepare() < 0)
+		return -1;
+
+	/* Pivot into new root. */
+	if (pivot_enter() < 0)
+		return -1;
+
+	return 0;
+}
+
 static bool setup_cgfs_dir(void)
 {
 	if (!mkdir_p(BASEDIR, 0700)) {
@@ -870,6 +982,10 @@ static bool do_mount_cgroups(void)
 		if (!do_mount_cgroup(p))
 			goto out;
 	}
+
+	if (pivot_new_root() < 0)
+		goto out;
+
 	ret = true;
 
 out:
