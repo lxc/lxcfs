@@ -666,17 +666,22 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 
 FILE *open_pids_file(const char *controller, const char *cgroup)
 {
-	int cfd;
+	int fd, cfd;
 	size_t len;
 	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return NULL;
-	/* BASEDIR / tmpc / cgroup / "cgroup.procs" \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 4 + strlen("cgroup.procs");
+	/* . + /cgroup + / "cgroup.procs" + \0 */
+	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s/cgroup.procs", BASEDIR, tmpc, cgroup);
-	return fopen(pathname, "w");
+	snprintf(pathname, len, "%s%s/cgroup.procs", *cgroup == '/' ? "." : "", cgroup);
+
+	fd = openat(cfd, pathname, O_WRONLY);
+	if (fd < 0)
+		return NULL;
+
+	return fdopen(fd, "w");
 }
 
 static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool directories,
