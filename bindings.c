@@ -329,12 +329,12 @@ static char *slurp_file(const char *from, int fd)
 	return contents;
 }
 
-static bool write_string(const char *fnam, const char *string)
+static bool write_string(const char *fnam, const char *string, int fd)
 {
 	FILE *f;
 	size_t len, ret;
 
-	if (!(f = fopen(fnam, "w")))
+	if (!(f = fdopen(fd, "w")))
 		return false;
 	len = strlen(string);
 	ret = fwrite(string, 1, len, f);
@@ -432,18 +432,24 @@ static char *find_mounted_controller(const char *controller, int *cfd)
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value)
 {
-	int cfd;
+	int ret, fd, cfd;
 	size_t len;
 	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
-	/* BASEDIR / tmpc / cgroup / file \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
+	/* . + /cgroup + / + file + \0 */
+	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, file);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
 
-	return write_string(fnam, value);
+	fd = openat(cfd, fnam, O_WRONLY);
+	if (fd < 0)
+		return false;
+
+	return write_string(fnam, value, fd);
 }
 
 // Chown all the files in the cgroup directory.  We do this when we create
