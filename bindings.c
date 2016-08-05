@@ -1323,10 +1323,18 @@ static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg,
 	prune_init_slice(c2);
 
 	/*
-	 * callers pass in '/' for root cgroup, otherwise they pass
-	 * in a cgroup without leading '/'
+	 * callers pass in '/' or './' (openat()) for root cgroup, otherwise
+	 * they pass in a cgroup without leading '/'
+	 *
+	 * The original line here was:
+	 *	linecmp = *cg == '/' ? c2 : c2+1;
+	 * TODO: I'm not sure why you'd want to increment when *cg != '/'?
+	 *       Serge, do you know?
 	 */
-	linecmp = *cg == '/' ? c2 : c2+1;
+	if (*cg == '/' || !strncmp(cg, "./", 2))
+		linecmp = c2;
+	else
+		linecmp = c2 + 1;
 	if (strncmp(linecmp, cg, strlen(linecmp)) != 0) {
 		if (nextcg) {
 			*nextcg = get_next_cgroup_dir(linecmp, cg);
