@@ -256,10 +256,10 @@ static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 	return NULL;
 }
 
-static int is_dir(const char *path)
+static int is_dir(const char *path, int fd)
 {
 	struct stat statbuf;
-	int ret = stat(path, &statbuf);
+	int ret = fstatat(fd, path, &statbuf, fd);
 	if (ret == 0 && S_ISDIR(statbuf.st_mode))
 		return 1;
 	return 0;
@@ -626,7 +626,7 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 	return true;
 }
 
-static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
+static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid, int fd)
 {
 	size_t len;
 	char *fname;
@@ -634,10 +634,10 @@ static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
 	len = strlen(dirname) + strlen("/cgroup.procs") + 1;
 	fname = alloca(len);
 	snprintf(fname, len, "%s/tasks", dirname);
-	if (chown(fname, uid, gid) != 0)
+	if (fchownat(fd, fname, uid, gid, 0) != 0)
 		return -errno;
 	snprintf(fname, len, "%s/cgroup.procs", dirname);
-	if (chown(fname, uid, gid) != 0)
+	if (fchownat(fd, fname, uid, gid, 0) != 0)
 		return -errno;
 	return 0;
 }
@@ -650,16 +650,16 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 
 	if (!tmpc)
 		return -EINVAL;
-	/* BASEDIR / tmpc / file \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(file) + 3;
+	/* . + /file + \0 */
+	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", BASEDIR, tmpc, file);
-	if (chown(pathname, uid, gid) < 0)
+	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	if (fchownat(cfd, pathname, uid, gid, 0) < 0)
 		return -errno;
 
-	if (is_dir(pathname))
+	if (is_dir(pathname, cfd))
 		// like cgmanager did, we want to chown the tasks file as well
-		return chown_tasks_files(pathname, uid, gid);
+		return chown_tasks_files(pathname, uid, gid, cfd);
 
 	return 0;
 }
