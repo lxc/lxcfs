@@ -662,46 +662,50 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
                                 void ***list, size_t typesize,
                                 void* (*iterator)(const char*, const char*, const char*))
 {
-	int cfd;
+	int cfd, fd, ret;
 	size_t len;
-	char *dirname, *tmpc = find_mounted_controller(controller, &cfd);
+	char *cg, *tmpc;
 	char pathname[MAXPATHLEN];
 	size_t sz = 0, asz = 0;
-	struct dirent dirent, *direntp;
+	struct dirent *dirent;
 	DIR *dir;
-	int ret;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	*list = NULL;
 	if (!tmpc)
 		return false;
 
-	/* BASEDIR / tmpc / cgroup \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 3;
-	dirname = alloca(len);
-	snprintf(dirname, len, "%s/%s/%s", BASEDIR, tmpc, cgroup);
+	/* Make sure we pass a relative path to openat(). */
+	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
+	cg = alloca(len);
+	ret = snprintf(cg, len, "%s%s", *cgroup == '/' ? "." : "", cgroup);
+	if (ret < 0 || (size_t)ret >= len) {
+		fprintf(stderr, "%s: pathname too long under %s\n", __func__, cgroup);
+		return false;
+	}
 
-	dir = opendir(dirname);
+	fd = openat(cfd, cg, O_DIRECTORY);
+	if (fd < 0)
+		return false;
+
+	dir = fdopendir(fd);
 	if (!dir)
 		return false;
 
-	while (!readdir_r(dir, &dirent, &direntp)) {
+	while ((dirent = readdir(dir))) {
 		struct stat mystat;
-		int rc;
 
-		if (!direntp)
-			break;
-
-		if (!strcmp(direntp->d_name, ".") ||
-		    !strcmp(direntp->d_name, ".."))
+		if (!strcmp(dirent->d_name, ".") ||
+		    !strcmp(dirent->d_name, ".."))
 			continue;
 
-		rc = snprintf(pathname, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
-		if (rc < 0 || rc >= MAXPATHLEN) {
-			fprintf(stderr, "%s: pathname too long under %s\n", __func__, dirname);
+		ret = snprintf(pathname, MAXPATHLEN, "%s/%s", cg, dirent->d_name);
+		if (ret < 0 || ret >= MAXPATHLEN) {
+			fprintf(stderr, "%s: pathname too long under %s\n", __func__, cg);
 			continue;
 		}
 
-		ret = lstat(pathname, &mystat);
+		ret = fstatat(cfd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
 		if (ret) {
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
 			continue;
@@ -718,12 +722,12 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 			} while  (!tmp);
 			*list = tmp;
 		}
-		(*list)[sz] = (*iterator)(controller, cgroup, direntp->d_name);
+		(*list)[sz] = (*iterator)(controller, cg, dirent->d_name);
 		(*list)[sz+1] = NULL;
 		sz++;
 	}
 	if (closedir(dir) < 0) {
-		fprintf(stderr, "%s: failed closedir for %s: %s\n", __func__, dirname, strerror(errno));
+		fprintf(stderr, "%s: failed closedir for %s: %s\n", __func__, cgroup, strerror(errno));
 		return false;
 	}
 	return true;
@@ -782,12 +786,11 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 
 struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, const char *file)
 {
-	int cfd;
+	int ret, cfd;
 	size_t len;
 	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 	struct stat sb;
 	struct cgfs_files *newkey;
-	int ret;
 
 	if (!tmpc)
 		return false;
@@ -798,15 +801,15 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file && index(file, '/'))
 		return NULL;
 
-	/* BASEDIR / tmpc / cgroup / file \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + 3;
+	/* . + /cgroup + / + file + \0 */
+	len = strlen(cgroup) + 3;
 	if (file)
 		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s%s%s", BASEDIR, tmpc, cgroup,
-		file ? "/" : "", file ? file : "");
+	snprintf(fnam, len, "%s%s%s%s", *cgroup == '/' ? "." : "", cgroup,
+		 file ? "/" : "", file ? file : "");
 
-	ret = stat(fnam, &sb);
+	ret = fstatat(cfd, fnam, &sb, 0);
 	if (ret < 0)
 		return NULL;
 
