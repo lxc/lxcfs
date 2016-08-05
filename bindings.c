@@ -454,13 +454,13 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 
 // Chown all the files in the cgroup directory.  We do this when we create
 // a cgroup on behalf of a user.
-static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
+static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid, int fd)
 {
-	struct dirent dirent, *direntp;
+	struct dirent *direntp;
 	char path[MAXPATHLEN];
 	size_t len;
 	DIR *d;
-	int ret;
+	int fd1, ret;
 
 	len = strlen(dirname);
 	if (len >= MAXPATHLEN) {
@@ -468,13 +468,17 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 		return;
 	}
 
-	d = opendir(dirname);
+	fd1 = openat(fd, dirname, O_DIRECTORY);
+	if (fd1 < 0)
+		return;
+
+	d = fdopendir(fd1);
 	if (!d) {
 		fprintf(stderr, "chown_all_cgroup_files: failed to open %s\n", dirname);
 		return;
 	}
 
-	while (readdir_r(d, &dirent, &direntp) == 0 && direntp) {
+	while ((direntp = readdir(d))) {
 		if (!strcmp(direntp->d_name, ".") || !strcmp(direntp->d_name, ".."))
 			continue;
 		ret = snprintf(path, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
@@ -482,7 +486,7 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 			fprintf(stderr, "chown_all_cgroup_files: pathname too long under %s\n", dirname);
 			continue;
 		}
-		if (chown(path, uid, gid) < 0)
+		if (fchownat(fd, path, uid, gid, 0) < 0)
 			fprintf(stderr, "Failed to chown file %s to %u:%u", path, uid, gid);
 	}
 	closedir(d);
@@ -496,21 +500,21 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 
 	if (!tmpc)
 		return -EINVAL;
-	/* BASEDIR / tmpc / cg \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cg) + 3;
+	/* . + /cg + \0 */
+	len = strlen(cg) + 2;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", BASEDIR,tmpc, cg);
+	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
 
-	if (mkdir(dirnam, 0755) < 0)
+	if (mkdirat(cfd, dirnam, 0755) < 0)
 		return -errno;
 
 	if (uid == 0 && gid == 0)
 		return 0;
 
-	if (chown(dirnam, uid, gid) < 0)
+	if (fchownat(cfd, dirnam, uid, gid, 0) < 0)
 		return -errno;
 
-	chown_all_cgroup_files(dirnam, uid, gid);
+	chown_all_cgroup_files(dirnam, uid, gid, cfd);
 
 	return 0;
 }
