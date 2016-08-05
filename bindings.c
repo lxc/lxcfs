@@ -1357,7 +1357,7 @@ static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 	char *c2, *task_cg;
 	size_t target_len, task_len;
 
-	if (strcmp(cg, "/") == 0)
+	if (strcmp(cg, "/") == 0 || strcmp(cg, "./") == 0)
 		return true;
 
 	c2 = get_pid_cgroup(pid, contrl);
