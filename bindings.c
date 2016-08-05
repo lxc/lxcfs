@@ -519,14 +519,19 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	return 0;
 }
 
-static bool recursive_rmdir(const char *dirname)
+static bool recursive_rmdir(const char *dirname, int fd)
 {
-	struct dirent dirent, *direntp;
+	struct dirent *direntp;
 	DIR *dir;
 	bool ret = false;
 	char pathname[MAXPATHLEN];
+	int dupfd;
 
-	dir = opendir(dirname);
+	dupfd = dup(fd); // fdopendir() does bad things once it uses an fd.
+	if (dupfd < 0)
+		return false;
+
+	dir = fdopendir(dupfd);
 	if (!dir) {
 #if DEBUG
 		fprintf(stderr, "%s: failed to open %s: %s\n", __func__, dirname, strerror(errno));
@@ -534,7 +539,7 @@ static bool recursive_rmdir(const char *dirname)
 		return false;
 	}
 
-	while (!readdir_r(dir, &dirent, &direntp)) {
+	while ((direntp = readdir(dir))) {
 		struct stat mystat;
 		int rc;
 
@@ -551,7 +556,7 @@ static bool recursive_rmdir(const char *dirname)
 			continue;
 		}
 
-		ret = lstat(pathname, &mystat);
+		ret = fstatat(fd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
 		if (ret) {
 #if DEBUG
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
@@ -559,7 +564,7 @@ static bool recursive_rmdir(const char *dirname)
 			continue;
 		}
 		if (S_ISDIR(mystat.st_mode)) {
-			if (!recursive_rmdir(pathname)) {
+			if (!recursive_rmdir(pathname, fd)) {
 #if DEBUG
 				fprintf(stderr, "Error removing %s\n", pathname);
 #endif
@@ -573,29 +578,35 @@ static bool recursive_rmdir(const char *dirname)
 		ret = false;
 	}
 
-	if (rmdir(dirname) < 0) {
+	if (unlinkat(fd, dirname, AT_REMOVEDIR) < 0) {
 #if DEBUG
 		fprintf(stderr, "%s: failed to delete %s: %s\n", __func__, dirname, strerror(errno));
 #endif
 		ret = false;
 	}
+	close(fd);
 
 	return ret;
 }
 
 bool cgfs_remove(const char *controller, const char *cg)
 {
-	int cfd;
+	int fd, cfd;
 	size_t len;
 	char *dirnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
-	/* BASEDIR / tmpc / cg \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cg) + 3;
+	/* . +  /cg + \0 */
+	len = strlen(cg) + 2;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", BASEDIR,tmpc, cg);
-	return recursive_rmdir(dirnam);
+	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
+
+	fd = openat(cfd, dirnam, O_DIRECTORY);
+	if (fd < 0)
+		return false;
+
+	return recursive_rmdir(dirnam, fd);
 }
 
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
