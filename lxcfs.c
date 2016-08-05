@@ -8,6 +8,7 @@
 
 #define FUSE_USE_VERSION 26
 
+#include <alloca.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -25,6 +26,7 @@
 #include <wait.h>
 #include <linux/sched.h>
 #include <sys/epoll.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -128,6 +130,27 @@ static void down_users(void)
 static void reload_handler(int sig)
 {
 	need_reload = 1;
+}
+
+/*
+ * Functions and types to ease the use of clone()/__clone2()
+ */
+pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+{
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
+	pid_t ret;
+
+#ifdef __ia64__
+	ret = __clone2(do_clone, stack,
+		       stack_size, flags | SIGCHLD, &clone_arg);
+#else
+	ret = clone(fn, stack  + stack_size, flags | SIGCHLD, &arg);
+#endif
+	if (ret < 0)
+		fprintf(stderr, "failed to clone (%#x): %s", flags, strerror(errno));
+
+	return ret;
 }
 
 /* Functions to run the library methods */
@@ -896,17 +919,17 @@ static int pivot_prepare(void)
 	return 0;
 }
 
-static int pivot_new_root(void)
+static bool pivot_new_root(void)
 {
 	/* Prepare new root. */
 	if (pivot_prepare() < 0)
-		return -1;
+		return false;
 
 	/* Pivot into new root. */
 	if (pivot_enter() < 0)
-		return -1;
+		return false;
 
-	return 0;
+	return true;
 }
 
 static bool setup_cgfs_dir(void)
@@ -926,76 +949,53 @@ static bool setup_cgfs_dir(void)
 	return true;
 }
 
-static bool do_mount_cgroup(char *controller)
+static bool do_mount_cgroups(void)
 {
 	char *target;
-	size_t len;
-	int ret;
+	size_t clen, len;
+	int i, fd, ret;
 
-	len = strlen(BASEDIR) + strlen(controller) + 2;
-	target = alloca(len);
-	ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
-	if (ret < 0 || ret >= len)
-		return false;
-	if (mkdir(target, 0755) < 0 && errno != EEXIST)
-		return false;
-	if (mount(controller, target, "cgroup", 0, controller) < 0) {
-		fprintf(stderr, "Failed mounting cgroup %s\n", controller);
-		return false;
+	for (i = 0; i < num_hierarchies; i++) {
+		char *controller = hierarchies[i];
+		clen = strlen(controller);
+		len = strlen(BASEDIR) + clen + 2;
+		target = malloc(len);
+		if (!target)
+			return false;
+		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
+		if (ret < 0 || ret >= len) {
+			free(target);
+			return false;
+		}
+		if (mkdir(target, 0755) < 0 && errno != EEXIST) {
+			free(target);
+			return false;
+		}
+		if (mount(controller, target, "cgroup", 0, controller) < 0) {
+			fprintf(stderr, "Failed mounting cgroup %s\n", controller);
+			free(target);
+			return false;
+		}
+
+		fd = open(target, O_DIRECTORY);
+		if (fd < 0) {
+			free(target);
+			return false;
+		}
+
+		fd_hierarchies[i] = fd;
+		free(target);
 	}
 	return true;
 }
 
-static bool do_mount_cgroups(void)
+static int cgfs_setup_controllers(void *data)
 {
-	bool ret = false;
-	FILE *f;
-	char *line = NULL;
-	size_t len = 0;
-
-	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
-		fprintf(stderr, "Error opening /proc/self/cgroup: %s\n", strerror(errno));
-		return false;
+	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
+		fprintf(stderr, "%s: Failed to re-mount / private: %s.\n", __func__, strerror(errno));
+		return -1;
 	}
 
-	while (getline(&line, &len, f) != -1) {
-		char *p, *p2;
-
-		p = strchr(line, ':');
-		if (!p)
-			goto out;
-		*(p++) = '\0';
-
-		p2 = strrchr(p, ':');
-		if (!p2)
-			goto out;
-		*p2 = '\0';
-
-		/* With cgroupv2 /proc/self/cgroup can contain entries of the
-		 * form: 0::/ This will cause lxcfs to fail the cgroup mounts
-		 * because it parses out the empty string "" and later on passes
-		 * it to mount(). Let's skip such entries.
-		 */
-		if (!strcmp(p, ""))
-			continue;
-
-		if (!do_mount_cgroup(p))
-			goto out;
-	}
-
-	if (pivot_new_root() < 0)
-		goto out;
-
-	ret = true;
-
-out:
-	free(line);
-	fclose(f);
-	return ret;
-}
-
-static bool cgfs_setup_controllers(void)
-{
 	if (!setup_cgfs_dir()) {
 		return false;
 	}
@@ -1004,6 +1004,9 @@ static bool cgfs_setup_controllers(void)
 		fprintf(stderr, "Failed to set up cgroup mounts\n");
 		return false;
 	}
+
+	if (!pivot_new_root())
+		return false;
 
 	return true;
 }
@@ -1096,8 +1099,22 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
-	if (!cgfs_setup_controllers())
+	/* Share memory with our clone(). */
+	fd_hierarchies = mmap(NULL, sizeof(int *) * num_hierarchies, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (!fd_hierarchies)
 		goto out;
+
+	/* Mount cgroups in private mount namespace while sharing open file
+	 * desciptores between clone() and parent. */
+	pid_t pid = lxcfs_clone(cgfs_setup_controllers, NULL, CLONE_NEWNS | CLONE_FILES);
+	if (pid < 0) {
+		fprintf(stderr, "%s: Error cloning new mount namespace: %s\n", __func__, strerror(errno));
+		goto out;
+	}
+	if (waitpid(pid, NULL, 0) < 0) {
+		fprintf(stderr, "%s: Error waiting on cloned child: %s\n", __func__, strerror(errno));
+		goto out;
+	}
 
 	if (!pidfile) {
 		pidfile_len = strlen(RUNTIME_PATH) + strlen("/lxcfs.pid") + 1;
