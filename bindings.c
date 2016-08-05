@@ -350,12 +350,6 @@ static bool write_string(const char *fnam, const char *string)
 	return true;
 }
 
-/*
- * hierarchies, i.e. 'cpu,cpuacct'
- */
-char **hierarchies;
-int num_hierarchies;
-
 struct cgfs_files {
 	char *name;
 	uint32_t uid, gid;
