@@ -860,12 +860,14 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 
 	if (!tmpc)
 		return false;
-	/* BASEDIR / tmpc / cgroup / f \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(f) + 4;
+	/* . + /cgroup + / + f + \0 */
+	len = strlen(cgroup) + strlen(f) + 3;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, f);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, f);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
 
-	ret = stat(fnam, &sb);
+	ret = fstatat(cfd, fnam, &sb, 0);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
 		return false;
 	return true;
