@@ -617,11 +617,11 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 
 	if (!tmpc)
 		return false;
-	/* BASEDIR / tmpc / file \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(file) + 3;
+	/* . + /file + \0 */
+	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", BASEDIR, tmpc, file);
-	if (chmod(pathname, mode) < 0)
+	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	if (fchmodat(cfd, pathname, mode, 0) < 0)
 		return false;
 	return true;
 }
