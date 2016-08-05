@@ -405,17 +405,25 @@ static bool in_comma_list(const char *needle, const char *haystack)
 }
 
 /* do we need to do any massaging here?  I'm not sure... */
-static char *find_mounted_controller(const char *controller)
+/* Return the mounted controller and store the corresponding open file descriptor
+ * referring to the controller mountpoint in the private lxcfs namespace in
+ * @cfd.
+ */
+static char *find_mounted_controller(const char *controller, int *cfd)
 {
 	int i;
 
 	for (i = 0; i < num_hierarchies; i++) {
 		if (!hierarchies[i])
 			continue;
-		if (strcmp(hierarchies[i], controller) == 0)
+		if (strcmp(hierarchies[i], controller) == 0) {
+			*cfd = fd_hierarchies[i];
 			return hierarchies[i];
-		if (in_comma_list(controller, hierarchies[i]))
+		}
+		if (in_comma_list(controller, hierarchies[i])) {
+			*cfd = fd_hierarchies[i];
 			return hierarchies[i];
+		}
 	}
 
 	return NULL;
@@ -424,8 +432,9 @@ static char *find_mounted_controller(const char *controller)
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value)
 {
+	int cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
@@ -475,8 +484,9 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 
 int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
+	int cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller);
+	char *dirnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return -EINVAL;
@@ -565,8 +575,9 @@ static bool recursive_rmdir(const char *dirname)
 
 bool cgfs_remove(const char *controller, const char *cg)
 {
+	int cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller);
+	char *dirnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
@@ -579,8 +590,9 @@ bool cgfs_remove(const char *controller, const char *cg)
 
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
+	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
@@ -611,8 +623,9 @@ static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
 
 int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
+	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return -EINVAL;
@@ -632,8 +645,9 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 
 FILE *open_pids_file(const char *controller, const char *cgroup)
 {
+	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return NULL;
@@ -648,8 +662,9 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
                                 void ***list, size_t typesize,
                                 void* (*iterator)(const char*, const char*, const char*))
 {
+	int cfd;
 	size_t len;
-	char *dirname, *tmpc = find_mounted_controller(controller);
+	char *dirname, *tmpc = find_mounted_controller(controller, &cfd);
 	char pathname[MAXPATHLEN];
 	size_t sz = 0, asz = 0;
 	struct dirent dirent, *direntp;
@@ -750,8 +765,9 @@ void free_keys(struct cgfs_files **keys)
 
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
 {
+	int cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
@@ -766,8 +782,9 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 
 struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, const char *file)
 {
+	int cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 	struct stat sb;
 	struct cgfs_files *newkey;
 	int ret;
@@ -825,8 +842,10 @@ bool cgfs_list_keys(const char *controller, const char *cgroup, struct cgfs_file
 }
 
 bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
-{      size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+{
+	int cfd;
+	size_t len;
+	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 	int ret;
 	struct stat sb;
 
@@ -1173,13 +1192,14 @@ static void stripnewline(char *x)
 
 static char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
+	int cfd;
 	char fnam[PROCLEN];
 	FILE *f;
 	char *answer = NULL;
 	char *line = NULL;
 	size_t len = 0;
 	int ret;
-	const char *h = find_mounted_controller(contrl);
+	const char *h = find_mounted_controller(contrl, &cfd);
 	if (!h)
 		return NULL;
 
