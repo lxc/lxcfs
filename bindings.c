@@ -307,11 +307,11 @@ static void append_line(char **contents, size_t *len, char *line, ssize_t linele
 	*len = newlen;
 }
 
-static char *slurp_file(const char *from)
+static char *slurp_file(const char *from, int fd)
 {
 	char *line = NULL;
 	char *contents = NULL;
-	FILE *f = fopen(from, "r");
+	FILE *f = fdopen(fd, "r");
 	size_t len = 0, fulllen = 0;
 	ssize_t linelen;
 
@@ -769,18 +769,24 @@ void free_keys(struct cgfs_files **keys)
 
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
 {
-	int cfd;
+	int ret, fd, cfd;
 	size_t len;
 	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
 
 	if (!tmpc)
 		return false;
-	/* BASEDIR / tmpc / cgroup / file \0 */
-	len = strlen(BASEDIR) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
+	/* . + /cgroup + / + file + \0 */
+	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", BASEDIR, tmpc, cgroup, file);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return NULL;
 
-	*value = slurp_file(fnam);
+	fd = openat(cfd, fnam, O_RDONLY);
+	if (fd < 0)
+		return NULL;
+
+	*value = slurp_file(fnam, fd);
 	return *value != NULL;
 }
 
