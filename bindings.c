@@ -8,29 +8,45 @@
 
 #define FUSE_USE_VERSION 26
 
-#include <stdio.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <libgen.h>
-#include <sched.h>
 #include <pthread.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <wait.h>
 #include <linux/sched.h>
+#include <sys/epoll.h>
+#include <sys/mman.h>
+#include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <sys/mount.h>
-#include <sys/epoll.h>
-#include <wait.h>
+#include <sys/syscall.h>
 
 #include "bindings.h"
-
 #include "config.h" // for VERSION
+
+/* Define pivot_root() if missing from the C library */
+#ifndef HAVE_PIVOT_ROOT
+static int pivot_root(const char * new_root, const char * put_old)
+{
+#ifdef __NR_pivot_root
+return syscall(__NR_pivot_root, new_root, put_old);
+#else
+errno = ENOSYS;
+return -1;
+#endif
+}
+#else
+extern int pivot_root(const char * new_root, const char * put_old);
+#endif
 
 enum {
 	LXC_TYPE_CGDIR,
@@ -94,6 +110,26 @@ static void lock_mutex(pthread_mutex_t *l)
 		exit(1);
 	}
 }
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Number of hierarchies mounted. */
+static int num_hierarchies;
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Hierachies mounted {cpuset, blkio, ...}:
+ * Initialized via __constructor__ collect_and_mount_subsystems(). */
+static char **hierarchies;
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Open file descriptors:
+ * @fd_hierarchies[i] refers to cgroup @hierarchies[i]. They are mounted in a
+ * private mount namespace.
+ * Initialized via __constructor__ collect_and_mount_subsystems().
+ * @fd_hierarchies[i] can be used to perform file operations on the cgroup
+ * mounts and respective files in the private namespace even when located in
+ * another namespace using the *at() family of functions
+ * {openat(), fchownat(), ...}. */
+static int *fd_hierarchies;
 
 static void unlock_mutex(pthread_mutex_t *l)
 {
@@ -4023,7 +4059,244 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 }
 
-static void __attribute__((constructor)) collect_subsystems(void)
+/*
+ * Functions and types to ease the use of clone()/__clone2()
+ */
+static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+{
+	size_t stack_size = sysconf(_SC_PAGESIZE);
+	void *stack = alloca(stack_size);
+	pid_t ret;
+
+#ifdef __ia64__
+	ret = __clone2(do_clone, stack,
+		       stack_size, flags | SIGCHLD, &clone_arg);
+#else
+	ret = clone(fn, stack  + stack_size, flags | SIGCHLD, &arg);
+#endif
+	if (ret < 0)
+		fprintf(stderr, "failed to clone (%#x): %s", flags, strerror(errno));
+
+	return ret;
+}
+
+/*
+ * Functions needed to setup cgroups in the __constructor__.
+ * After the constructor has collected the mounted hierarchies we clone() a new
+ * process which mounts the private lxcfs cgroup mounts in a new private mount
+ * namespace not accessible to other processes. We then open an fd for each
+ * mounted hierarchy and use CLONE_FILES to keep them valid in both the child
+ * and the parent.
+ */
+
+static bool mkdir_p(const char *dir, mode_t mode)
+{
+	const char *tmp = dir;
+	const char *orig = dir;
+	char *makeme;
+
+	do {
+		dir = tmp + strspn(tmp, "/");
+		tmp = dir + strcspn(dir, "/");
+		makeme = strndup(orig, dir - orig);
+		if (!makeme)
+			return false;
+		if (mkdir(makeme, mode) && errno != EEXIST) {
+			fprintf(stderr, "failed to create directory '%s': %s",
+				makeme, strerror(errno));
+			free(makeme);
+			return false;
+		}
+		free(makeme);
+	} while(tmp != dir);
+
+	return true;
+}
+
+static bool umount_if_mounted(void)
+{
+	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
+		fprintf(stderr, "failed to umount %s: %s\n", BASEDIR,
+			strerror(errno));
+		return false;
+	}
+	return true;
+}
+
+static int pivot_enter(void)
+{
+	int ret = -1, oldroot = -1, newroot = -1;
+
+	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	if (oldroot < 0) {
+		fprintf(stderr, "%s: Failed to open old root for fchdir.\n", __func__);
+		return ret;
+	}
+
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	if (newroot < 0) {
+		fprintf(stderr, "%s: Failed to open new root for fchdir.\n", __func__);
+		goto err;
+	}
+
+	/* change into new root fs */
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to change directory to new rootfs: %s.\n", __func__, ROOTDIR);
+		goto err;
+	}
+
+	/* pivot_root into our new root fs */
+	if (pivot_root(".", ".") < 0) {
+		fprintf(stderr, "%s: pivot_root() syscall failed: %s.\n", __func__, strerror(errno));
+		goto err;
+	}
+
+	/*
+	 * At this point the old-root is mounted on top of our new-root.
+	 * To unmounted it we must not be chdir'd into it, so escape back
+	 * to the old-root.
+	 */
+	if (fchdir(oldroot) < 0) {
+		fprintf(stderr, "%s: Failed to enter old root.\n", __func__);
+		goto err;
+	}
+	if (umount2(".", MNT_DETACH) < 0) {
+		fprintf(stderr, "%s: Failed to detach old root.\n", __func__);
+		goto err;
+	}
+
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to re-enter new root.\n", __func__);
+		goto err;
+	}
+
+	ret = 0;
+
+err:
+	if (oldroot > 0)
+		close(oldroot);
+	if (newroot > 0)
+		close(newroot);
+	return ret;
+}
+
+/* Prepare our new clean root. */
+static int pivot_prepare(void)
+{
+	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
+		fprintf(stderr, "%s: Failed to create directory for new root.\n", __func__);
+		return -1;
+	}
+
+	if (mount("/", ROOTDIR, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount / for new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(RUNTIME_PATH, ROOTDIR RUNTIME_PATH, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount /run into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(BASEDIR, ROOTDIR BASEDIR, NULL, MS_REC | MS_MOVE, 0) < 0) {
+		printf("%s: failed to move " BASEDIR " into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static bool pivot_new_root(void)
+{
+	/* Prepare new root. */
+	if (pivot_prepare() < 0)
+		return false;
+
+	/* Pivot into new root. */
+	if (pivot_enter() < 0)
+		return false;
+
+	return true;
+}
+
+static bool setup_cgfs_dir(void)
+{
+	if (!mkdir_p(BASEDIR, 0700)) {
+		fprintf(stderr, "Failed to create lxcfs cgdir\n");
+		return false;
+	}
+	if (!umount_if_mounted()) {
+		fprintf(stderr, "Failed to clean up old lxcfs cgdir\n");
+		return false;
+	}
+	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
+		fprintf(stderr, "Failed to mount tmpfs for private controllers\n");
+		return false;
+	}
+	return true;
+}
+
+static bool do_mount_cgroups(void)
+{
+	char *target;
+	size_t clen, len;
+	int i, ret;
+
+	for (i = 0; i < num_hierarchies; i++) {
+		char *controller = hierarchies[i];
+		clen = strlen(controller);
+		len = strlen(BASEDIR) + clen + 2;
+		target = malloc(len);
+		if (!target)
+			return false;
+		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
+		if (ret < 0 || ret >= len) {
+			free(target);
+			return false;
+		}
+		if (mkdir(target, 0755) < 0 && errno != EEXIST) {
+			free(target);
+			return false;
+		}
+		if (mount(controller, target, "cgroup", 0, controller) < 0) {
+			fprintf(stderr, "Failed mounting cgroup %s\n", controller);
+			free(target);
+			return false;
+		}
+
+		fd_hierarchies[i] = open(target, O_DIRECTORY);
+		if (fd_hierarchies[i] < 0) {
+			free(target);
+			return false;
+		}
+		free(target);
+	}
+	return true;
+}
+
+int cgfs_setup_controllers(void *data)
+{
+	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
+		fprintf(stderr, "%s: Failed to re-mount / private: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (!setup_cgfs_dir()) {
+		return false;
+	}
+
+	if (!do_mount_cgroups()) {
+		fprintf(stderr, "Failed to set up cgroup mounts\n");
+		return false;
+	}
+
+	if (!pivot_new_root())
+		return false;
+
+	return true;
+}
+
+static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
 	FILE *f;
 	char *line = NULL;
@@ -4058,6 +4331,26 @@ static void __attribute__((constructor)) collect_subsystems(void)
 			goto out;
 	}
 
+	/* Now use clone(CLONE_NEWNS | CLONE_FILES) to mount cgroup hierarchies
+	 * in a private mount namespace to hide them from other processes that
+	 * would otherwise get confused. As fuse needs to be able to perform
+	 * file operations on the cgroup hierarchies. Hence we share open file
+	 * descriptors opened in the private mount namespace referring to those
+	 * hierarchies between child and parent process. */
+	fd_hierarchies = mmap(NULL, sizeof(int *) * num_hierarchies, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (!fd_hierarchies)
+		goto out;
+
+	pid_t pid = lxcfs_clone(cgfs_setup_controllers, NULL, CLONE_NEWNS | CLONE_FILES);
+	if (pid < 0) {
+		fprintf(stderr, "%s: Error cloning new mount namespace: %s\n", __func__, strerror(errno));
+		goto out;
+	}
+	if (waitpid(pid, NULL, 0) < 0) {
+		fprintf(stderr, "%s: Error waiting on cloned child: %s\n", __func__, strerror(errno));
+		goto out;
+	}
+
 	print_subsystems();
 
 out:
@@ -4069,8 +4362,13 @@ static void __attribute__((destructor)) free_subsystems(void)
 {
 	int i;
 
-	for (i = 0; i < num_hierarchies; i++)
+	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
 			free(hierarchies[i]);
+		if (fd_hierarchies[i] >= 0)
+			close(fd_hierarchies[i]);
+	}
 	free(hierarchies);
+	if (fd_hierarchies)
+		munmap(fd_hierarchies, sizeof(int *) * num_hierarchies);
 }
