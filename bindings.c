@@ -434,11 +434,15 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 {
 	int ret, fd, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *fnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* . + /cgroup + / + file + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
 	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
 	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
@@ -496,11 +500,15 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
 	int cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *dirnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return -EINVAL;
-	/* . + /cg + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cg + \0
+	 */
 	len = strlen(cg) + 2;
 	dirnam = alloca(len);
 	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
@@ -593,11 +601,15 @@ bool cgfs_remove(const char *controller, const char *cg)
 {
 	int fd, cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *dirnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* . +  /cg + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . +  /cg + \0
+	 */
 	len = strlen(cg) + 2;
 	dirnam = alloca(len);
 	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
@@ -613,11 +625,15 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
 	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* . + /file + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /file + \0
+	 */
 	len = strlen(file) + 2;
 	pathname = alloca(len);
 	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
@@ -646,11 +662,15 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 {
 	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return -EINVAL;
-	/* . + /file + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /file + \0
+	 */
 	len = strlen(file) + 2;
 	pathname = alloca(len);
 	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
@@ -668,11 +688,15 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 {
 	int fd, cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller, &cfd);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return NULL;
-	/* . + /cgroup + / "cgroup.procs" + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / "cgroup.procs" + \0
+	 */
 	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
 	pathname = alloca(len);
 	snprintf(pathname, len, "%s%s/cgroup.procs", *cgroup == '/' ? "." : "", cgroup);
@@ -701,7 +725,7 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 	if (!tmpc)
 		return false;
 
-	/* Make sure we pass a relative path to openat(). */
+	/* Make sure we pass a relative path to *at() family of functions. */
 	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
 	cg = alloca(len);
 	ret = snprintf(cg, len, "%s%s", *cgroup == '/' ? "." : "", cgroup);
@@ -797,11 +821,15 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 {
 	int ret, fd, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *fnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* . + /cgroup + / + file + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
 	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
 	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
@@ -820,10 +848,11 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 {
 	int ret, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *fnam, *tmpc;
 	struct stat sb;
 	struct cgfs_files *newkey;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
 
@@ -833,7 +862,9 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file && index(file, '/'))
 		return NULL;
 
-	/* . + /cgroup + / + file + \0 */
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
 	len = strlen(cgroup) + 3;
 	if (file)
 		len += strlen(file) + 1;
@@ -880,13 +911,17 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 {
 	int cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller, &cfd);
+	char *fnam, *tmpc;
 	int ret;
 	struct stat sb;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* . + /cgroup + / + f + \0 */
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + f + \0
+	 */
 	len = strlen(cgroup) + strlen(f) + 3;
 	fnam = alloca(len);
 	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, f);
@@ -896,6 +931,7 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 	ret = fstatat(cfd, fnam, &sb, 0);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
 		return false;
+
 	return true;
 }
 
