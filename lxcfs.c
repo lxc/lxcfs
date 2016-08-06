@@ -953,7 +953,7 @@ static bool do_mount_cgroups(void)
 {
 	char *target;
 	size_t clen, len;
-	int i, fd, ret;
+	int i, ret;
 
 	for (i = 0; i < num_hierarchies; i++) {
 		char *controller = hierarchies[i];
@@ -977,13 +977,11 @@ static bool do_mount_cgroups(void)
 			return false;
 		}
 
-		fd = open(target, O_DIRECTORY);
-		if (fd < 0) {
+		fd_hierarchies[i] = open(target, O_DIRECTORY);
+		if (fd_hierarchies[i] < 0) {
 			free(target);
 			return false;
 		}
-
-		fd_hierarchies[i] = fd;
 		free(target);
 	}
 	return true;
@@ -1053,11 +1051,20 @@ static int set_pidfile(char *pidfile)
 	return fd;
 }
 
+static void close_fd_hierarchies(void)
+{
+	int i;
+	for (i = 0; i < num_hierarchies; i++)
+		if (fd_hierarchies[i] > 0)
+			close(fd_hierarchies[i]);
+}
+
 int main(int argc, char *argv[])
 {
-	int ret = -1, pidfd;
+	int ret = EXIT_FAILURE;
+	int pidfd = -1;
 	char *pidfile = NULL, *v = NULL;
-	size_t pidfile_len;
+	size_t pidfile_len, mmap_len = 0;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
@@ -1071,7 +1078,7 @@ int main(int argc, char *argv[])
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		if (strcmp(v, "allow_other") != 0) {
 			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		free(v);
 		v = NULL;
@@ -1081,7 +1088,7 @@ int main(int argc, char *argv[])
 
 	if (argc == 2  && strcmp(argv[1], "--version") == 0) {
 		fprintf(stderr, "%s\n", VERSION);
-		exit(0);
+		exit(EXIT_SUCCESS);
 	}
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
@@ -1089,7 +1096,7 @@ int main(int argc, char *argv[])
 	do_reload();
 	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
 		fprintf(stderr, "Error setting USR1 signal handler: %m\n");
-		exit(1);
+		goto out;
 	}
 
 	newargv[cnt++] = argv[0];
@@ -1100,7 +1107,8 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = NULL;
 
 	/* Share memory with our clone(). */
-	fd_hierarchies = mmap(NULL, sizeof(int *) * num_hierarchies, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	mmap_len = sizeof(int *) * num_hierarchies;
+	fd_hierarchies = mmap(NULL, mmap_len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (!fd_hierarchies)
 		goto out;
 
@@ -1124,12 +1132,18 @@ int main(int argc, char *argv[])
 	if ((pidfd = set_pidfile(pidfile)) < 0)
 		goto out;
 
-	ret = fuse_main(nargs, newargv, &lxcfs_ops, NULL);
-
-	dlclose(dlopen_handle);
-	unlink(pidfile);
-	close(pidfd);
+	if (!fuse_main(nargs, newargv, &lxcfs_ops, NULL))
+		ret = EXIT_SUCCESS;
 
 out:
-	return ret;
+	if (dlopen_handle)
+		dlclose(dlopen_handle);
+	if (pidfile)
+		unlink(pidfile);
+	if (pidfd > 0)
+		close(pidfd);
+	close_fd_hierarchies();
+	if (fd_hierarchies)
+		munmap(fd_hierarchies, mmap_len);
+	exit(ret);
 }

@@ -5,9 +5,17 @@
 /* Number of hierarchies mounted. */
 int num_hierarchies;
 
-/* Initialized via __constructor__ see bindings.c */
+/* Hierachies mounted {cpuset, blkio, ...}:
+ * Initialized via  static void __attribute__((constructor)) collect_subsystems(void)
+ * in bindings.c */
 char **hierarchies;
 
+/* Open file descriptors:
+ * @fd_hierarchies[i] refers to cgroup @hierarchies[i]. They are mounted in a
+ * private mount namespace. Initialized in main() in lxcfs.c.
+ * @fd_hierarchies[i] can be used to perform file operations on the files in the
+ * private namespace even when located in another namespace using the *at()
+ * family of functions {openat(), fchownat(), ...}. */
 int *fd_hierarchies;
 
 extern int cg_write(const char *path, const char *buf, size_t size, off_t offset,
