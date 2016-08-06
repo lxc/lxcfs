@@ -1106,14 +1106,17 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
-	/* Share memory with our clone(). */
+	/* Now use clone(CLONE_NEWNS | CLONE_FILES) to mount cgroup hierarchies
+	 * in a private mount namespace to hide them from other processes that
+	 * would otherwise get confused. As fuse needs to be able to perform
+	 * file operations on the cgroup hierarchies. Hence we share open file
+	 * descriptors opened in the private mount namespace referring to those
+	 * hierarchies between child and parent process. */
 	mmap_len = sizeof(int *) * num_hierarchies;
 	fd_hierarchies = mmap(NULL, mmap_len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (!fd_hierarchies)
 		goto out;
 
-	/* Mount cgroups in private mount namespace while sharing open file
-	 * desciptores between clone() and parent. */
 	pid_t pid = lxcfs_clone(cgfs_setup_controllers, NULL, CLONE_NEWNS | CLONE_FILES);
 	if (pid < 0) {
 		fprintf(stderr, "%s: Error cloning new mount namespace: %s\n", __func__, strerror(errno));
