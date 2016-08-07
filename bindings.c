@@ -426,7 +426,7 @@ static bool in_comma_list(const char *needle, const char *haystack)
 	const char *s = haystack, *e;
 	size_t nlen = strlen(needle);
 
-	while (*s && (e = index(s, ','))) {
+	while (*s && (e = strchr(s, ','))) {
 		if (nlen != e - s) {
 			s = e + 1;
 			continue;
@@ -895,7 +895,7 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file && *file == '/')
 		file++;
 
-	if (file && index(file, '/'))
+	if (file && strchr(file, '/'))
 		return NULL;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -917,8 +917,8 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	} while (!newkey);
 	if (file)
 		newkey->name = must_copy_string(file);
-	else if (rindex(cgroup, '/'))
-		newkey->name = must_copy_string(rindex(cgroup, '/'));
+	else if (strrchr(cgroup, '/'))
+		newkey->name = must_copy_string(strrchr(cgroup, '/'));
 	else
 		newkey->name = must_copy_string(cgroup);
 	newkey->uid = sb.st_uid;
@@ -1280,7 +1280,7 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 		return NULL;
 	}
 
-	if (strcmp(querycg, "/") == 0)
+	if ((strcmp(querycg, "/") == 0) || (strcmp(querycg, "./") == 0))
 		start =  strdup(taskcg + 1);
 	else
 		start = strdup(taskcg + strlen(querycg) + 1);
