@@ -4060,33 +4060,7 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 }
 
 /*
- * Functions and types to ease the use of clone()/__clone2()
- */
-static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
-{
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
-	pid_t ret;
-
-#ifdef __ia64__
-	ret = __clone2(do_clone, stack,
-		       stack_size, flags | SIGCHLD, &clone_arg);
-#else
-	ret = clone(fn, stack  + stack_size, flags | SIGCHLD, &arg);
-#endif
-	if (ret < 0)
-		fprintf(stderr, "failed to clone (%#x): %s", flags, strerror(errno));
-
-	return ret;
-}
-
-/*
  * Functions needed to setup cgroups in the __constructor__.
- * After the constructor has collected the mounted hierarchies we clone() a new
- * process which mounts the private lxcfs cgroup mounts in a new private mount
- * namespace not accessible to other processes. We then open an fd for each
- * mounted hierarchy and use CLONE_FILES to keep them valid in both the child
- * and the parent.
  */
 
 static bool mkdir_p(const char *dir, mode_t mode)
@@ -4116,8 +4090,7 @@ static bool mkdir_p(const char *dir, mode_t mode)
 static bool umount_if_mounted(void)
 {
 	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
-		fprintf(stderr, "failed to umount %s: %s\n", BASEDIR,
-			strerror(errno));
+		fprintf(stderr, "failed to unmount %s: %s.\n", BASEDIR, strerror(errno));
 		return false;
 	}
 	return true;
@@ -4222,17 +4195,30 @@ static bool pivot_new_root(void)
 static bool setup_cgfs_dir(void)
 {
 	if (!mkdir_p(BASEDIR, 0700)) {
-		fprintf(stderr, "Failed to create lxcfs cgdir\n");
+		fprintf(stderr, "Failed to create lxcfs cgroup mountpoint.\n");
 		return false;
 	}
+
 	if (!umount_if_mounted()) {
-		fprintf(stderr, "Failed to clean up old lxcfs cgdir\n");
+		fprintf(stderr, "Failed to clean up old lxcfs cgroup mountpoint.\n");
 		return false;
 	}
+
+	if (unshare(CLONE_NEWNS) < 0) {
+		fprintf(stderr, "%s: Failed to unshare mount namespace: %s.\n", __func__, strerror(errno));
+		return false;
+	}
+
+	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
+		fprintf(stderr, "%s: Failed to remount / private: %s.\n", __func__, strerror(errno));
+		return false;
+	}
+
 	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
-		fprintf(stderr, "Failed to mount tmpfs for private controllers\n");
+		fprintf(stderr, "Failed to mount tmpfs over lxcfs cgroup mountpoint.\n");
 		return false;
 	}
+
 	return true;
 }
 
@@ -4274,19 +4260,13 @@ static bool do_mount_cgroups(void)
 	return true;
 }
 
-int cgfs_setup_controllers(void *data)
+static bool cgfs_setup_controllers(void)
 {
-	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
-		fprintf(stderr, "%s: Failed to re-mount / private: %s.\n", __func__, strerror(errno));
-		return -1;
-	}
-
-	if (!setup_cgfs_dir()) {
+	if (!setup_cgfs_dir())
 		return false;
-	}
 
 	if (!do_mount_cgroups()) {
-		fprintf(stderr, "Failed to set up cgroup mounts\n");
+		fprintf(stderr, "Failed to set up private lxcfs cgroup mounts.\n");
 		return false;
 	}
 
@@ -4296,11 +4276,25 @@ int cgfs_setup_controllers(void *data)
 	return true;
 }
 
+static int preserve_ns(int pid)
+{
+	int ret;
+	size_t len = 5 /* /proc */ + 21 /* /int_as_str */ + 7 /* /ns/mnt */ + 1 /* \0 */;
+	char path[len];
+
+	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
+	if (ret < 0 || (size_t)ret >= len)
+		return -1;
+
+	return open(path, O_RDONLY | O_CLOEXEC);
+}
+
 static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
 	FILE *f;
 	char *line = NULL;
 	size_t len = 0;
+	int i, init_ns = -1;
 
 	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
 		fprintf(stderr, "Error opening /proc/self/cgroup: %s\n", strerror(errno));
@@ -4331,31 +4325,33 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 			goto out;
 	}
 
-	/* Now use clone(CLONE_NEWNS | CLONE_FILES) to mount cgroup hierarchies
-	 * in a private mount namespace to hide them from other processes that
-	 * would otherwise get confused. As fuse needs to be able to perform
-	 * file operations on the cgroup hierarchies. Hence we share open file
-	 * descriptors opened in the private mount namespace referring to those
-	 * hierarchies between child and parent process. */
-	fd_hierarchies = mmap(NULL, sizeof(int *) * num_hierarchies, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	/* Preserve initial namespace. */
+	init_ns = preserve_ns(getpid());
+	if (init_ns < 0)
+		goto out;
+
+	fd_hierarchies = malloc(sizeof(int *) * num_hierarchies);
 	if (!fd_hierarchies)
 		goto out;
 
-	pid_t pid = lxcfs_clone(cgfs_setup_controllers, NULL, CLONE_NEWNS | CLONE_FILES);
-	if (pid < 0) {
-		fprintf(stderr, "%s: Error cloning new mount namespace: %s\n", __func__, strerror(errno));
+	for (i = 0; i < num_hierarchies; i++)
+		fd_hierarchies[i] = -1;
+
+	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
+	 * to privately mount lxcfs cgroups. */
+	if (!cgfs_setup_controllers())
 		goto out;
-	}
-	if (waitpid(pid, NULL, 0) < 0) {
-		fprintf(stderr, "%s: Error waiting on cloned child: %s\n", __func__, strerror(errno));
+
+	if (setns(init_ns, 0) < 0)
 		goto out;
-	}
 
 	print_subsystems();
 
 out:
 	free(line);
 	fclose(f);
+	if (init_ns >= 0)
+		close(init_ns);
 }
 
 static void __attribute__((destructor)) free_subsystems(void)
@@ -4365,10 +4361,9 @@ static void __attribute__((destructor)) free_subsystems(void)
 	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
 			free(hierarchies[i]);
-		if (fd_hierarchies[i] >= 0)
+		if (fd_hierarchies && fd_hierarchies[i] >= 0)
 			close(fd_hierarchies[i]);
 	}
 	free(hierarchies);
-	if (fd_hierarchies)
-		munmap(fd_hierarchies, sizeof(int *) * num_hierarchies);
+	free(fd_hierarchies);
 }
