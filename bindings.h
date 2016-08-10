@@ -1,5 +1,6 @@
 /* directory under which we mount the controllers - /run/lxcfs/controllers */
-#define basedir RUNTIME_PATH "/lxcfs/controllers"
+#define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
+#define ROOTDIR RUNTIME_PATH "/lxcfs/root"
 
 extern int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi);

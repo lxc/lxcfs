@@ -8,28 +8,29 @@
 
 #define FUSE_USE_VERSION 26
 
-#include <stdio.h>
+#include <alloca.h>
 #include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <libgen.h>
-#include <sched.h>
 #include <pthread.h>
-#include <dlfcn.h>
-#include <linux/sched.h>
-#include <sys/socket.h>
-#include <sys/mount.h>
-#include <sys/epoll.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <wait.h>
+#include <linux/sched.h>
+#include <sys/epoll.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
 
-#include "config.h" // for VERSION
 #include "bindings.h"
+#include "config.h" // for VERSION
 
 void *dlopen_handle;
 
@@ -83,7 +84,7 @@ static void do_reload(void)
 
 	dlopen_handle = dlopen("/usr/lib/lxcfs/liblxcfs.so", RTLD_LAZY);
 	if (!dlopen_handle) {
-		fprintf(stderr, "Failed to open liblxcfs\n");
+		fprintf(stderr, "Failed to open liblxcfs: %s.\n", dlerror());
 		_exit(1);
 	}
 
@@ -763,135 +764,6 @@ bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
 	return false;
 }
 
-static bool mkdir_p(const char *dir, mode_t mode)
-{
-	const char *tmp = dir;
-	const char *orig = dir;
-	char *makeme;
-
-	do {
-		dir = tmp + strspn(tmp, "/");
-		tmp = dir + strcspn(dir, "/");
-		makeme = strndup(orig, dir - orig);
-		if (!makeme)
-			return false;
-		if (mkdir(makeme, mode) && errno != EEXIST) {
-			fprintf(stderr, "failed to create directory '%s': %s",
-				makeme, strerror(errno));
-			free(makeme);
-			return false;
-		}
-		free(makeme);
-	} while(tmp != dir);
-
-	return true;
-}
-
-static bool umount_if_mounted(void)
-{
-	if (umount2(basedir, MNT_DETACH) < 0 && errno != EINVAL) {
-		fprintf(stderr, "failed to umount %s: %s\n", basedir,
-			strerror(errno));
-		return false;
-	}
-	return true;
-}
-
-static bool setup_cgfs_dir(void)
-{
-	if (!mkdir_p(basedir, 0700)) {
-		fprintf(stderr, "Failed to create lxcfs cgdir\n");
-		return false;
-	}
-	if (!umount_if_mounted()) {
-		fprintf(stderr, "Failed to clean up old lxcfs cgdir\n");
-		return false;
-	}
-	if (mount("tmpfs", basedir, "tmpfs", 0, "size=100000,mode=700") < 0) {
-		fprintf(stderr, "Failed to mount tmpfs for private controllers\n");
-		return false;
-	}
-	return true;
-}
-
-static bool do_mount_cgroup(char *controller)
-{
-	char *target;
-	size_t len;
-	int ret;
-
-	len = strlen(basedir) + strlen(controller) + 2;
-	target = alloca(len);
-	ret = snprintf(target, len, "%s/%s", basedir, controller);
-	if (ret < 0 || ret >= len)
-		return false;
-	if (mkdir(target, 0755) < 0 && errno != EEXIST)
-		return false;
-	if (mount(controller, target, "cgroup", 0, controller) < 0) {
-		fprintf(stderr, "Failed mounting cgroup %s\n", controller);
-		return false;
-	}
-	return true;
-}
-
-static bool do_mount_cgroups(void)
-{
-	bool ret = false;
-	FILE *f;
-	char *line = NULL;
-	size_t len = 0;
-
-	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
-		fprintf(stderr, "Error opening /proc/self/cgroup: %s\n", strerror(errno));
-		return false;
-	}
-
-	while (getline(&line, &len, f) != -1) {
-		char *p, *p2;
-
-		p = strchr(line, ':');
-		if (!p)
-			goto out;
-		*(p++) = '\0';
-
-		p2 = strrchr(p, ':');
-		if (!p2)
-			goto out;
-		*p2 = '\0';
-
-		/* With cgroupv2 /proc/self/cgroup can contain entries of the
-		 * form: 0::/ This will cause lxcfs to fail the cgroup mounts
-		 * because it parses out the empty string "" and later on passes
-		 * it to mount(). Let's skip such entries.
-		 */
-		if (!strcmp(p, ""))
-			continue;
-
-		if (!do_mount_cgroup(p))
-			goto out;
-	}
-	ret = true;
-
-out:
-	free(line);
-	fclose(f);
-	return ret;
-}
-
-static bool cgfs_setup_controllers(void)
-{
-	if (!setup_cgfs_dir()) {
-		return false;
-	}
-
-	if (!do_mount_cgroups()) {
-		fprintf(stderr, "Failed to set up cgroup mounts\n");
-		return false;
-	}
-
-	return true;
-}
-
 static int set_pidfile(char *pidfile)
 {
 	int fd;
@@ -936,7 +808,8 @@ static int set_pidfile(char *pidfile)
 
 int main(int argc, char *argv[])
 {
-	int ret = -1, pidfd;
+	int ret = EXIT_FAILURE;
+	int pidfd = -1;
 	char *pidfile = NULL, *v = NULL;
 	size_t pidfile_len;
 	/*
@@ -952,7 +825,7 @@ int main(int argc, char *argv[])
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		if (strcmp(v, "allow_other") != 0) {
 			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		free(v);
 		v = NULL;
@@ -962,7 +835,7 @@ int main(int argc, char *argv[])
 
 	if (argc == 2  && strcmp(argv[1], "--version") == 0) {
 		fprintf(stderr, "%s\n", VERSION);
-		exit(0);
+		exit(EXIT_SUCCESS);
 	}
 	if (argc != 2 || is_help(argv[1]))
 		usage(argv[0]);
@@ -970,7 +843,7 @@ int main(int argc, char *argv[])
 	do_reload();
 	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
 		fprintf(stderr, "Error setting USR1 signal handler: %m\n");
-		exit(1);
+		goto out;
 	}
 
 	newargv[cnt++] = argv[0];
@@ -980,9 +853,6 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
-	if (!cgfs_setup_controllers())
-		goto out;
-
 	if (!pidfile) {
 		pidfile_len = strlen(RUNTIME_PATH) + strlen("/lxcfs.pid") + 1;
 		pidfile = alloca(pidfile_len);
@@ -991,12 +861,15 @@ int main(int argc, char *argv[])
 	if ((pidfd = set_pidfile(pidfile)) < 0)
 		goto out;
 
-	ret = fuse_main(nargs, newargv, &lxcfs_ops, NULL);
-
-	dlclose(dlopen_handle);
-	unlink(pidfile);
-	close(pidfd);
+	if (!fuse_main(nargs, newargv, &lxcfs_ops, NULL))
+		ret = EXIT_SUCCESS;
 
 out:
-	return ret;
+	if (dlopen_handle)
+		dlclose(dlopen_handle);
+	if (pidfile)
+		unlink(pidfile);
+	if (pidfd > 0)
+		close(pidfd);
+	exit(ret);
 }

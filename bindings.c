@@ -8,29 +8,45 @@
 
 #define FUSE_USE_VERSION 26
 
-#include <stdio.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <libgen.h>
-#include <sched.h>
 #include <pthread.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <wait.h>
 #include <linux/sched.h>
+#include <sys/epoll.h>
+#include <sys/mman.h>
+#include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <sys/mount.h>
-#include <sys/epoll.h>
-#include <wait.h>
+#include <sys/syscall.h>
 
 #include "bindings.h"
-
 #include "config.h" // for VERSION
+
+/* Define pivot_root() if missing from the C library */
+#ifndef HAVE_PIVOT_ROOT
+static int pivot_root(const char * new_root, const char * put_old)
+{
+#ifdef __NR_pivot_root
+return syscall(__NR_pivot_root, new_root, put_old);
+#else
+errno = ENOSYS;
+return -1;
+#endif
+}
+#else
+extern int pivot_root(const char * new_root, const char * put_old);
+#endif
 
 enum {
 	LXC_TYPE_CGDIR,
@@ -94,6 +110,26 @@ static void lock_mutex(pthread_mutex_t *l)
 		exit(1);
 	}
 }
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Number of hierarchies mounted. */
+static int num_hierarchies;
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Hierachies mounted {cpuset, blkio, ...}:
+ * Initialized via __constructor__ collect_and_mount_subsystems(). */
+static char **hierarchies;
+
+/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
+ * Open file descriptors:
+ * @fd_hierarchies[i] refers to cgroup @hierarchies[i]. They are mounted in a
+ * private mount namespace.
+ * Initialized via __constructor__ collect_and_mount_subsystems().
+ * @fd_hierarchies[i] can be used to perform file operations on the cgroup
+ * mounts and respective files in the private namespace even when located in
+ * another namespace using the *at() family of functions
+ * {openat(), fchownat(), ...}. */
+static int *fd_hierarchies;
 
 static void unlock_mutex(pthread_mutex_t *l)
 {
@@ -256,10 +292,10 @@ static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 	return NULL;
 }
 
-static int is_dir(const char *path)
+static int is_dir(const char *path, int fd)
 {
 	struct stat statbuf;
-	int ret = stat(path, &statbuf);
+	int ret = fstatat(fd, path, &statbuf, fd);
 	if (ret == 0 && S_ISDIR(statbuf.st_mode))
 		return 1;
 	return 0;
@@ -307,11 +343,11 @@ static void append_line(char **contents, size_t *len, char *line, ssize_t linele
 	*len = newlen;
 }
 
-static char *slurp_file(const char *from)
+static char *slurp_file(const char *from, int fd)
 {
 	char *line = NULL;
 	char *contents = NULL;
-	FILE *f = fopen(from, "r");
+	FILE *f = fdopen(fd, "r");
 	size_t len = 0, fulllen = 0;
 	ssize_t linelen;
 
@@ -329,12 +365,12 @@ static char *slurp_file(const char *from)
 	return contents;
 }
 
-static bool write_string(const char *fnam, const char *string)
+static bool write_string(const char *fnam, const char *string, int fd)
 {
 	FILE *f;
 	size_t len, ret;
 
-	if (!(f = fopen(fnam, "w")))
+	if (!(f = fdopen(fd, "w")))
 		return false;
 	len = strlen(string);
 	ret = fwrite(string, 1, len, f);
@@ -349,12 +385,6 @@ static bool write_string(const char *fnam, const char *string)
 	}
 	return true;
 }
-
-/*
- * hierarchies, i.e. 'cpu,cpuacct'
- */
-char **hierarchies;
-int num_hierarchies;
 
 struct cgfs_files {
 	char *name;
@@ -384,7 +414,7 @@ static void print_subsystems(void)
 {
 	int i;
 
-	fprintf(stderr, "hierarchies:");
+	fprintf(stderr, "hierarchies:\n");
 	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
 			fprintf(stderr, " %d: %s\n", i, hierarchies[i]);
@@ -396,7 +426,7 @@ static bool in_comma_list(const char *needle, const char *haystack)
 	const char *s = haystack, *e;
 	size_t nlen = strlen(needle);
 
-	while (*s && (e = index(s, ','))) {
+	while (*s && (e = strchr(s, ','))) {
 		if (nlen != e - s) {
 			s = e + 1;
 			continue;
@@ -411,17 +441,25 @@ static bool in_comma_list(const char *needle, const char *haystack)
 }
 
 /* do we need to do any massaging here?  I'm not sure... */
-static char *find_mounted_controller(const char *controller)
+/* Return the mounted controller and store the corresponding open file descriptor
+ * referring to the controller mountpoint in the private lxcfs namespace in
+ * @cfd.
+ */
+static char *find_mounted_controller(const char *controller, int *cfd)
 {
 	int i;
 
 	for (i = 0; i < num_hierarchies; i++) {
 		if (!hierarchies[i])
 			continue;
-		if (strcmp(hierarchies[i], controller) == 0)
+		if (strcmp(hierarchies[i], controller) == 0) {
+			*cfd = fd_hierarchies[i];
 			return hierarchies[i];
-		if (in_comma_list(controller, hierarchies[i]))
+		}
+		if (in_comma_list(controller, hierarchies[i])) {
+			*cfd = fd_hierarchies[i];
 			return hierarchies[i];
+		}
 	}
 
 	return NULL;
@@ -430,28 +468,39 @@ static char *find_mounted_controller(const char *controller)
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value)
 {
+	int ret, fd, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
-	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
 
-	return write_string(fnam, value);
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	fd = openat(cfd, fnam, O_WRONLY);
+	if (fd < 0)
+		return false;
+
+	return write_string(fnam, value, fd);
 }
 
 // Chown all the files in the cgroup directory.  We do this when we create
 // a cgroup on behalf of a user.
-static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
+static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid, int fd)
 {
-	struct dirent dirent, *direntp;
+	struct dirent *direntp;
 	char path[MAXPATHLEN];
 	size_t len;
 	DIR *d;
-	int ret;
+	int fd1, ret;
 
 	len = strlen(dirname);
 	if (len >= MAXPATHLEN) {
@@ -459,13 +508,17 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 		return;
 	}
 
-	d = opendir(dirname);
+	fd1 = openat(fd, dirname, O_DIRECTORY);
+	if (fd1 < 0)
+		return;
+
+	d = fdopendir(fd1);
 	if (!d) {
 		fprintf(stderr, "chown_all_cgroup_files: failed to open %s\n", dirname);
 		return;
 	}
 
-	while (readdir_r(d, &dirent, &direntp) == 0 && direntp) {
+	while ((direntp = readdir(d))) {
 		if (!strcmp(direntp->d_name, ".") || !strcmp(direntp->d_name, ".."))
 			continue;
 		ret = snprintf(path, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
@@ -473,7 +526,7 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 			fprintf(stderr, "chown_all_cgroup_files: pathname too long under %s\n", dirname);
 			continue;
 		}
-		if (chown(path, uid, gid) < 0)
+		if (fchownat(fd, path, uid, gid, 0) < 0)
 			fprintf(stderr, "Failed to chown file %s to %u:%u", path, uid, gid);
 	}
 	closedir(d);
@@ -481,38 +534,48 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid)
 
 int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
+	int cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller);
+	char *dirnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return -EINVAL;
-	/* basedir / tmpc / cg \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
-	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
 
-	if (mkdir(dirnam, 0755) < 0)
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cg + \0
+	 */
+	len = strlen(cg) + 2;
+	dirnam = alloca(len);
+	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
+
+	if (mkdirat(cfd, dirnam, 0755) < 0)
 		return -errno;
 
 	if (uid == 0 && gid == 0)
 		return 0;
 
-	if (chown(dirnam, uid, gid) < 0)
+	if (fchownat(cfd, dirnam, uid, gid, 0) < 0)
 		return -errno;
 
-	chown_all_cgroup_files(dirnam, uid, gid);
+	chown_all_cgroup_files(dirnam, uid, gid, cfd);
 
 	return 0;
 }
 
-static bool recursive_rmdir(const char *dirname)
+static bool recursive_rmdir(const char *dirname, int fd)
 {
-	struct dirent dirent, *direntp;
+	struct dirent *direntp;
 	DIR *dir;
 	bool ret = false;
 	char pathname[MAXPATHLEN];
+	int dupfd;
 
-	dir = opendir(dirname);
+	dupfd = dup(fd); // fdopendir() does bad things once it uses an fd.
+	if (dupfd < 0)
+		return false;
+
+	dir = fdopendir(dupfd);
 	if (!dir) {
 #if DEBUG
 		fprintf(stderr, "%s: failed to open %s: %s\n", __func__, dirname, strerror(errno));
@@ -520,7 +583,7 @@ static bool recursive_rmdir(const char *dirname)
 		return false;
 	}
 
-	while (!readdir_r(dir, &dirent, &direntp)) {
+	while ((direntp = readdir(dir))) {
 		struct stat mystat;
 		int rc;
 
@@ -537,7 +600,7 @@ static bool recursive_rmdir(const char *dirname)
 			continue;
 		}
 
-		ret = lstat(pathname, &mystat);
+		ret = fstatat(fd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
 		if (ret) {
 #if DEBUG
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
@@ -545,7 +608,7 @@ static bool recursive_rmdir(const char *dirname)
 			continue;
 		}
 		if (S_ISDIR(mystat.st_mode)) {
-			if (!recursive_rmdir(pathname)) {
+			if (!recursive_rmdir(pathname, fd)) {
 #if DEBUG
 				fprintf(stderr, "Error removing %s\n", pathname);
 #endif
@@ -559,47 +622,63 @@ static bool recursive_rmdir(const char *dirname)
 		ret = false;
 	}
 
-	if (rmdir(dirname) < 0) {
+	if (unlinkat(fd, dirname, AT_REMOVEDIR) < 0) {
 #if DEBUG
 		fprintf(stderr, "%s: failed to delete %s: %s\n", __func__, dirname, strerror(errno));
 #endif
 		ret = false;
 	}
+	close(fd);
 
 	return ret;
 }
 
 bool cgfs_remove(const char *controller, const char *cg)
 {
+	int fd, cfd;
 	size_t len;
-	char *dirnam, *tmpc = find_mounted_controller(controller);
+	char *dirnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cg \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cg) + 3;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . +  /cg + \0
+	 */
+	len = strlen(cg) + 2;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s/%s/%s", basedir,tmpc, cg);
-	return recursive_rmdir(dirnam);
+	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
+
+	fd = openat(cfd, dirnam, O_DIRECTORY);
+	if (fd < 0)
+		return false;
+
+	return recursive_rmdir(dirnam, fd);
 }
 
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
+	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(file) + 3;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /file + \0
+	 */
+	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
-	if (chmod(pathname, mode) < 0)
+	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	if (fchmodat(cfd, pathname, mode, 0) < 0)
 		return false;
 	return true;
 }
 
-static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
+static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid, int fd)
 {
 	size_t len;
 	char *fname;
@@ -607,92 +686,112 @@ static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid)
 	len = strlen(dirname) + strlen("/cgroup.procs") + 1;
 	fname = alloca(len);
 	snprintf(fname, len, "%s/tasks", dirname);
-	if (chown(fname, uid, gid) != 0)
+	if (fchownat(fd, fname, uid, gid, 0) != 0)
 		return -errno;
 	snprintf(fname, len, "%s/cgroup.procs", dirname);
-	if (chown(fname, uid, gid) != 0)
+	if (fchownat(fd, fname, uid, gid, 0) != 0)
 		return -errno;
 	return 0;
 }
 
 int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
+	int cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return -EINVAL;
-	/* basedir / tmpc / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(file) + 3;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /file + \0
+	 */
+	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s", basedir, tmpc, file);
-	if (chown(pathname, uid, gid) < 0)
+	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	if (fchownat(cfd, pathname, uid, gid, 0) < 0)
 		return -errno;
 
-	if (is_dir(pathname))
+	if (is_dir(pathname, cfd))
 		// like cgmanager did, we want to chown the tasks file as well
-		return chown_tasks_files(pathname, uid, gid);
+		return chown_tasks_files(pathname, uid, gid, cfd);
 
 	return 0;
 }
 
 FILE *open_pids_file(const char *controller, const char *cgroup)
 {
+	int fd, cfd;
 	size_t len;
-	char *pathname, *tmpc = find_mounted_controller(controller);
+	char *pathname, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return NULL;
-	/* basedir / tmpc / cgroup / "cgroup.procs" \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 4 + strlen("cgroup.procs");
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / "cgroup.procs" + \0
+	 */
+	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s/%s/%s/cgroup.procs", basedir, tmpc, cgroup);
-	return fopen(pathname, "w");
+	snprintf(pathname, len, "%s%s/cgroup.procs", *cgroup == '/' ? "." : "", cgroup);
+
+	fd = openat(cfd, pathname, O_WRONLY);
+	if (fd < 0)
+		return NULL;
+
+	return fdopen(fd, "w");
 }
 
 static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool directories,
                                 void ***list, size_t typesize,
                                 void* (*iterator)(const char*, const char*, const char*))
 {
+	int cfd, fd, ret;
 	size_t len;
-	char *dirname, *tmpc = find_mounted_controller(controller);
+	char *cg, *tmpc;
 	char pathname[MAXPATHLEN];
 	size_t sz = 0, asz = 0;
-	struct dirent dirent, *direntp;
+	struct dirent *dirent;
 	DIR *dir;
-	int ret;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	*list = NULL;
 	if (!tmpc)
 		return false;
 
-	/* basedir / tmpc / cgroup \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
-	dirname = alloca(len);
-	snprintf(dirname, len, "%s/%s/%s", basedir, tmpc, cgroup);
+	/* Make sure we pass a relative path to *at() family of functions. */
+	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
+	cg = alloca(len);
+	ret = snprintf(cg, len, "%s%s", *cgroup == '/' ? "." : "", cgroup);
+	if (ret < 0 || (size_t)ret >= len) {
+		fprintf(stderr, "%s: pathname too long under %s\n", __func__, cgroup);
+		return false;
+	}
 
-	dir = opendir(dirname);
+	fd = openat(cfd, cg, O_DIRECTORY);
+	if (fd < 0)
+		return false;
+
+	dir = fdopendir(fd);
 	if (!dir)
 		return false;
 
-	while (!readdir_r(dir, &dirent, &direntp)) {
+	while ((dirent = readdir(dir))) {
 		struct stat mystat;
-		int rc;
 
-		if (!direntp)
-			break;
-
-		if (!strcmp(direntp->d_name, ".") ||
-		    !strcmp(direntp->d_name, ".."))
+		if (!strcmp(dirent->d_name, ".") ||
+		    !strcmp(dirent->d_name, ".."))
 			continue;
 
-		rc = snprintf(pathname, MAXPATHLEN, "%s/%s", dirname, direntp->d_name);
-		if (rc < 0 || rc >= MAXPATHLEN) {
-			fprintf(stderr, "%s: pathname too long under %s\n", __func__, dirname);
+		ret = snprintf(pathname, MAXPATHLEN, "%s/%s", cg, dirent->d_name);
+		if (ret < 0 || ret >= MAXPATHLEN) {
+			fprintf(stderr, "%s: pathname too long under %s\n", __func__, cg);
 			continue;
 		}
 
-		ret = lstat(pathname, &mystat);
+		ret = fstatat(cfd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
 		if (ret) {
 			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
 			continue;
@@ -709,12 +808,12 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 			} while  (!tmp);
 			*list = tmp;
 		}
-		(*list)[sz] = (*iterator)(controller, cgroup, direntp->d_name);
+		(*list)[sz] = (*iterator)(controller, cg, dirent->d_name);
 		(*list)[sz+1] = NULL;
 		sz++;
 	}
 	if (closedir(dir) < 0) {
-		fprintf(stderr, "%s: failed closedir for %s: %s\n", __func__, dirname, strerror(errno));
+		fprintf(stderr, "%s: failed closedir for %s: %s\n", __func__, cgroup, strerror(errno));
 		return false;
 	}
 	return true;
@@ -756,46 +855,60 @@ void free_keys(struct cgfs_files **keys)
 
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
 {
+	int ret, fd, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(file) + 4;
-	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, file);
 
-	*value = slurp_file(fnam);
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return NULL;
+
+	fd = openat(cfd, fnam, O_RDONLY);
+	if (fd < 0)
+		return NULL;
+
+	*value = slurp_file(fnam, fd);
 	return *value != NULL;
 }
 
 struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, const char *file)
 {
+	int ret, cfd;
 	size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+	char *fnam, *tmpc;
 	struct stat sb;
 	struct cgfs_files *newkey;
-	int ret;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
 
 	if (file && *file == '/')
 		file++;
 
-	if (file && index(file, '/'))
+	if (file && strchr(file, '/'))
 		return NULL;
 
-	/* basedir / tmpc / cgroup / file \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + 3;
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + 3;
 	if (file)
 		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s%s%s", basedir, tmpc, cgroup,
-		file ? "/" : "", file ? file : "");
+	snprintf(fnam, len, "%s%s%s%s", *cgroup == '/' ? "." : "", cgroup,
+		 file ? "/" : "", file ? file : "");
 
-	ret = stat(fnam, &sb);
+	ret = fstatat(cfd, fnam, &sb, 0);
 	if (ret < 0)
 		return NULL;
 
@@ -804,8 +917,8 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	} while (!newkey);
 	if (file)
 		newkey->name = must_copy_string(file);
-	else if (rindex(cgroup, '/'))
-		newkey->name = must_copy_string(rindex(cgroup, '/'));
+	else if (strrchr(cgroup, '/'))
+		newkey->name = must_copy_string(strrchr(cgroup, '/'));
 	else
 		newkey->name = must_copy_string(cgroup);
 	newkey->uid = sb.st_uid;
@@ -831,21 +944,30 @@ bool cgfs_list_keys(const char *controller, const char *cgroup, struct cgfs_file
 }
 
 bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
-{      size_t len;
-	char *fnam, *tmpc = find_mounted_controller(controller);
+{
+	int cfd;
+	size_t len;
+	char *fnam, *tmpc;
 	int ret;
 	struct stat sb;
 
+	tmpc = find_mounted_controller(controller, &cfd);
 	if (!tmpc)
 		return false;
-	/* basedir / tmpc / cgroup / f \0 */
-	len = strlen(basedir) + strlen(tmpc) + strlen(cgroup) + strlen(f) + 4;
-	fnam = alloca(len);
-	snprintf(fnam, len, "%s/%s/%s/%s", basedir, tmpc, cgroup, f);
 
-	ret = stat(fnam, &sb);
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + f + \0
+	 */
+	len = strlen(cgroup) + strlen(f) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, f);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	ret = fstatat(cfd, fnam, &sb, 0);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
 		return false;
+
 	return true;
 }
 
@@ -1158,7 +1280,7 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 		return NULL;
 	}
 
-	if (strcmp(querycg, "/") == 0)
+	if ((strcmp(querycg, "/") == 0) || (strcmp(querycg, "./") == 0))
 		start =  strdup(taskcg + 1);
 	else
 		start = strdup(taskcg + strlen(querycg) + 1);
@@ -1179,13 +1301,14 @@ static void stripnewline(char *x)
 
 static char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
+	int cfd;
 	char fnam[PROCLEN];
 	FILE *f;
 	char *answer = NULL;
 	char *line = NULL;
 	size_t len = 0;
 	int ret;
-	const char *h = find_mounted_controller(contrl);
+	const char *h = find_mounted_controller(contrl, &cfd);
 	if (!h)
 		return NULL;
 
@@ -1298,10 +1421,18 @@ static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg,
 	prune_init_slice(c2);
 
 	/*
-	 * callers pass in '/' for root cgroup, otherwise they pass
-	 * in a cgroup without leading '/'
+	 * callers pass in '/' or './' (openat()) for root cgroup, otherwise
+	 * they pass in a cgroup without leading '/'
+	 *
+	 * The original line here was:
+	 *	linecmp = *cg == '/' ? c2 : c2+1;
+	 * TODO: I'm not sure why you'd want to increment when *cg != '/'?
+	 *       Serge, do you know?
 	 */
-	linecmp = *cg == '/' ? c2 : c2+1;
+	if (*cg == '/' || !strncmp(cg, "./", 2))
+		linecmp = c2;
+	else
+		linecmp = c2 + 1;
 	if (strncmp(linecmp, cg, strlen(linecmp)) != 0) {
 		if (nextcg) {
 			*nextcg = get_next_cgroup_dir(linecmp, cg);
@@ -1324,7 +1455,7 @@ static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 	char *c2, *task_cg;
 	size_t target_len, task_len;
 
-	if (strcmp(cg, "/") == 0)
+	if (strcmp(cg, "/") == 0 || strcmp(cg, "./") == 0)
 		return true;
 
 	c2 = get_pid_cgroup(pid, contrl);
@@ -3928,11 +4059,242 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 }
 
-static void __attribute__((constructor)) collect_subsystems(void)
+/*
+ * Functions needed to setup cgroups in the __constructor__.
+ */
+
+static bool mkdir_p(const char *dir, mode_t mode)
+{
+	const char *tmp = dir;
+	const char *orig = dir;
+	char *makeme;
+
+	do {
+		dir = tmp + strspn(tmp, "/");
+		tmp = dir + strcspn(dir, "/");
+		makeme = strndup(orig, dir - orig);
+		if (!makeme)
+			return false;
+		if (mkdir(makeme, mode) && errno != EEXIST) {
+			fprintf(stderr, "failed to create directory '%s': %s",
+				makeme, strerror(errno));
+			free(makeme);
+			return false;
+		}
+		free(makeme);
+	} while(tmp != dir);
+
+	return true;
+}
+
+static bool umount_if_mounted(void)
+{
+	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
+		fprintf(stderr, "failed to unmount %s: %s.\n", BASEDIR, strerror(errno));
+		return false;
+	}
+	return true;
+}
+
+static int pivot_enter(void)
+{
+	int ret = -1, oldroot = -1, newroot = -1;
+
+	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	if (oldroot < 0) {
+		fprintf(stderr, "%s: Failed to open old root for fchdir.\n", __func__);
+		return ret;
+	}
+
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	if (newroot < 0) {
+		fprintf(stderr, "%s: Failed to open new root for fchdir.\n", __func__);
+		goto err;
+	}
+
+	/* change into new root fs */
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to change directory to new rootfs: %s.\n", __func__, ROOTDIR);
+		goto err;
+	}
+
+	/* pivot_root into our new root fs */
+	if (pivot_root(".", ".") < 0) {
+		fprintf(stderr, "%s: pivot_root() syscall failed: %s.\n", __func__, strerror(errno));
+		goto err;
+	}
+
+	/*
+	 * At this point the old-root is mounted on top of our new-root.
+	 * To unmounted it we must not be chdir'd into it, so escape back
+	 * to the old-root.
+	 */
+	if (fchdir(oldroot) < 0) {
+		fprintf(stderr, "%s: Failed to enter old root.\n", __func__);
+		goto err;
+	}
+	if (umount2(".", MNT_DETACH) < 0) {
+		fprintf(stderr, "%s: Failed to detach old root.\n", __func__);
+		goto err;
+	}
+
+	if (fchdir(newroot) < 0) {
+		fprintf(stderr, "%s: Failed to re-enter new root.\n", __func__);
+		goto err;
+	}
+
+	ret = 0;
+
+err:
+	if (oldroot > 0)
+		close(oldroot);
+	if (newroot > 0)
+		close(newroot);
+	return ret;
+}
+
+/* Prepare our new clean root. */
+static int pivot_prepare(void)
+{
+	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
+		fprintf(stderr, "%s: Failed to create directory for new root.\n", __func__);
+		return -1;
+	}
+
+	if (mount("/", ROOTDIR, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount / for new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(RUNTIME_PATH, ROOTDIR RUNTIME_PATH, NULL, MS_BIND, 0) < 0) {
+		fprintf(stderr, "%s: Failed to bind-mount /run into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	if (mount(BASEDIR, ROOTDIR BASEDIR, NULL, MS_REC | MS_MOVE, 0) < 0) {
+		printf("%s: failed to move " BASEDIR " into new root: %s.\n", __func__, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static bool pivot_new_root(void)
+{
+	/* Prepare new root. */
+	if (pivot_prepare() < 0)
+		return false;
+
+	/* Pivot into new root. */
+	if (pivot_enter() < 0)
+		return false;
+
+	return true;
+}
+
+static bool setup_cgfs_dir(void)
+{
+	if (!mkdir_p(BASEDIR, 0700)) {
+		fprintf(stderr, "Failed to create lxcfs cgroup mountpoint.\n");
+		return false;
+	}
+
+	if (!umount_if_mounted()) {
+		fprintf(stderr, "Failed to clean up old lxcfs cgroup mountpoint.\n");
+		return false;
+	}
+
+	if (unshare(CLONE_NEWNS) < 0) {
+		fprintf(stderr, "%s: Failed to unshare mount namespace: %s.\n", __func__, strerror(errno));
+		return false;
+	}
+
+	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
+		fprintf(stderr, "%s: Failed to remount / private: %s.\n", __func__, strerror(errno));
+		return false;
+	}
+
+	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
+		fprintf(stderr, "Failed to mount tmpfs over lxcfs cgroup mountpoint.\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool do_mount_cgroups(void)
+{
+	char *target;
+	size_t clen, len;
+	int i, ret;
+
+	for (i = 0; i < num_hierarchies; i++) {
+		char *controller = hierarchies[i];
+		clen = strlen(controller);
+		len = strlen(BASEDIR) + clen + 2;
+		target = malloc(len);
+		if (!target)
+			return false;
+		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
+		if (ret < 0 || ret >= len) {
+			free(target);
+			return false;
+		}
+		if (mkdir(target, 0755) < 0 && errno != EEXIST) {
+			free(target);
+			return false;
+		}
+		if (mount(controller, target, "cgroup", 0, controller) < 0) {
+			fprintf(stderr, "Failed mounting cgroup %s\n", controller);
+			free(target);
+			return false;
+		}
+
+		fd_hierarchies[i] = open(target, O_DIRECTORY);
+		if (fd_hierarchies[i] < 0) {
+			free(target);
+			return false;
+		}
+		free(target);
+	}
+	return true;
+}
+
+static bool cgfs_setup_controllers(void)
+{
+	if (!setup_cgfs_dir())
+		return false;
+
+	if (!do_mount_cgroups()) {
+		fprintf(stderr, "Failed to set up private lxcfs cgroup mounts.\n");
+		return false;
+	}
+
+	if (!pivot_new_root())
+		return false;
+
+	return true;
+}
+
+static int preserve_ns(int pid)
+{
+	int ret;
+	size_t len = 5 /* /proc */ + 21 /* /int_as_str */ + 7 /* /ns/mnt */ + 1 /* \0 */;
+	char path[len];
+
+	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
+	if (ret < 0 || (size_t)ret >= len)
+		return -1;
+
+	return open(path, O_RDONLY | O_CLOEXEC);
+}
+
+static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
 	FILE *f;
 	char *line = NULL;
 	size_t len = 0;
+	int i, init_ns = -1;
 
 	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
 		fprintf(stderr, "Error opening /proc/self/cgroup: %s\n", strerror(errno));
@@ -3963,19 +4325,45 @@ static void __attribute__((constructor)) collect_subsystems(void)
 			goto out;
 	}
 
+	/* Preserve initial namespace. */
+	init_ns = preserve_ns(getpid());
+	if (init_ns < 0)
+		goto out;
+
+	fd_hierarchies = malloc(sizeof(int *) * num_hierarchies);
+	if (!fd_hierarchies)
+		goto out;
+
+	for (i = 0; i < num_hierarchies; i++)
+		fd_hierarchies[i] = -1;
+
+	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
+	 * to privately mount lxcfs cgroups. */
+	if (!cgfs_setup_controllers())
+		goto out;
+
+	if (setns(init_ns, 0) < 0)
+		goto out;
+
 	print_subsystems();
 
 out:
 	free(line);
 	fclose(f);
+	if (init_ns >= 0)
+		close(init_ns);
 }
 
 static void __attribute__((destructor)) free_subsystems(void)
 {
 	int i;
 
-	for (i = 0; i < num_hierarchies; i++)
+	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
 			free(hierarchies[i]);
+		if (fd_hierarchies && fd_hierarchies[i] >= 0)
+			close(fd_hierarchies[i]);
+	}
 	free(hierarchies);
+	free(fd_hierarchies);
 }
