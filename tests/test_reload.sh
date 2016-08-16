@@ -26,7 +26,7 @@ cleanup() {
     umount -l ${testdir}
   fi
   rm -rf ${testdir} ${installdir}
-  rm -f iwashere
+  rm -f /tmp/lxcfs-iwashere
   rm -f ${pidfile}
   if [ ${FAILED} -eq 1 ]; then
     echo "liblxcfs.so reload test FAILED"
@@ -50,9 +50,9 @@ while [ ! -d ${testdir}/proc ]; do
   count=$((count+1))
 done
 
-rm -f iwashere
+rm -f /tmp/lxcfs-iwashere
 cat ${testdir}/proc/uptime
-[ ! -f iwashere ]
+[ ! -f /tmp/lxcfs-iwashere ]
 (
   cd ${topdir};
   make liblxcfstest.la
@@ -65,5 +65,5 @@ cp ${libdir}/liblxcfstest.so ${libdir}/liblxcfs.so
 kill -USR1 ${lxcfspid}
 
 cat ${testdir}/proc/uptime
-[ -f iwashere ]
+[ -f /tmp/lxcfs-iwashere ]
 FAILED=0
