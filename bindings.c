@@ -3610,17 +3610,9 @@ out:
 #if RELOADTEST
 void iwashere(void)
 {
-	char *name, *cwd = get_current_dir_name();
-	size_t len;
 	int fd;
 
-	if (!cwd)
-		exit(1);
-	len = strlen(cwd) + strlen("/iwashere") + 1;
-	name = alloca(len);
-	snprintf(name, len, "%s/iwashere", cwd);
-	free(cwd);
-	fd = creat(name, 0755);
+	fd = creat("/tmp/lxcfs-iwashere", 0644);
 	if (fd >= 0)
 		close(fd);
 }
