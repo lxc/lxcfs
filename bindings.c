@@ -2943,16 +2943,32 @@ static bool startswith(const char *line, const char *pref)
 	return false;
 }
 
-static void get_mem_cached(char *memstat, unsigned long *v)
+static void parse_memstat(char *memstat, unsigned long *cached,
+		unsigned long *active_anon, unsigned long *inactive_anon,
+		unsigned long *active_file, unsigned long *inactive_file,
+		unsigned long *unevictable)
 {
 	char *eol;
 
-	*v = 0;
 	while (*memstat) {
-		if (startswith(memstat, "total_cache")) {
-			sscanf(memstat + 11, "%lu", v);
-			*v /= 1024;
-			return;
+		if (startswith(memstat, "cache")) {
+			sscanf(memstat + 11, "%lu", cached);
+			*cached /= 1024;
+		} else if (startswith(memstat, "active_anon")) {
+			sscanf(memstat + 11, "%lu", active_anon);
+			*active_anon /= 1024;
+		} else if (startswith(memstat, "inactive_anon")) {
+			sscanf(memstat + 11, "%lu", inactive_anon);
+			*inactive_anon /= 1024;
+		} else if (startswith(memstat, "active_file")) {
+			sscanf(memstat + 11, "%lu", active_file);
+			*active_file /= 1024;
+		} else if (startswith(memstat, "inactive_file")) {
+			sscanf(memstat + 11, "%lu", inactive_file);
+			*inactive_file /= 1024;
+		} else if (startswith(memstat, "unevictable")) {
+			sscanf(memstat + 11, "%lu", unevictable);
+			*unevictable /= 1024;
 		}
 		eol = strchr(memstat, '\n');
 		if (!eol)
@@ -3069,7 +3085,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		*memswlimit_str = NULL, *memswusage_str = NULL,
 		*memswlimit_default_str = NULL, *memswusage_default_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		cached = 0, hosttotal = 0;
+		cached = 0, hosttotal = 0, active_anon = 0, inactive_anon = 0,
+		active_file = 0, inactive_file = 0, unevictable = 0;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *cache = d->buf;
@@ -3128,7 +3145,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit /= 1024;
 	memusage /= 1024;
 
-	get_mem_cached(memstat_str, &cached);
+	parse_memstat(memstat_str, &cached, &active_anon,
+			&inactive_anon, &active_file, &inactive_file,
+			&unevictable);
 
 	f = fopen("/proc/meminfo", "r");
 	if (!f)
@@ -3169,6 +3188,35 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapCached:")) {
 			snprintf(lbuf, 100, "SwapCached:     %8lu kB\n", 0UL);
+			printme = lbuf;
+		} else if (startswith(line, "Active")) {
+			snprintf(lbuf, 100, "Active:         %8lu kB\n",
+					active_anon + active_file);
+			printme = lbuf;
+		} else if (startswith(line, "Inactive")) {
+			snprintf(lbuf, 100, "Inactive:       %8lu kB\n",
+					inactive_anon + inactive_file);
+			printme = lbuf;
+		} else if (startswith(line, "Active(anon)")) {
+			snprintf(lbuf, 100, "Active(anon):   %8lu kB\n", active_anon);
+			printme = lbuf;
+		} else if (startswith(line, "Inactive(anon)")) {
+			snprintf(lbuf, 100, "Inactive(anon): %8lu kB\n", inactive_anon);
+			printme = lbuf;
+		} else if (startswith(line, "Active(file)")) {
+			snprintf(lbuf, 100, "Active(file):   %8lu kB\n", active_file);
+			printme = lbuf;
+		} else if (startswith(line, "Inactive(file)")) {
+			snprintf(lbuf, 100, "Inactive(file): %8lu kB\n", inactive_file);
+			printme = lbuf;
+		} else if (startswith(line, "Unevictable")) {
+			snprintf(lbuf, 100, "Unevictable:    %8lu kB\n", unevictable);
+			printme = lbuf;
+		} else if (startswith(line, "SReclaimable")) {
+			snprintf(lbuf, 100, "SReclaimable:   %8lu kB\n", 0UL);
+			printme = lbuf;
+		} else if (startswith(line, "SUnreclaim")) {
+			snprintf(lbuf, 100, "SUnreclaim:     %8lu kB\n", 0UL);
 			printme = lbuf;
 		} else
 			printme = line;
