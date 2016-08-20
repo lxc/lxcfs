@@ -4075,6 +4075,9 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 
 int proc_access(const char *path, int mask)
 {
+	if (strcmp(path, "/proc") == 0 && access(path, R_OK) == 0)
+		return 0;
+
 	/* these are all read-only */
 	if ((mask & ~R_OK) != 0)
 		return -EACCES;
