@@ -424,11 +424,19 @@ static int do_cg_releasedir(const char *path, struct fuse_file_info *fi)
 static int lxcfs_getattr(const char *path, struct stat *sb)
 {
 	int ret;
+	struct timespec now;
+
 	if (strcmp(path, "/") == 0) {
+		if (clock_gettime(CLOCK_REALTIME, &now) < 0)
+			return -EINVAL;
+		sb->st_uid = sb->st_gid = 0;
+		sb->st_atim = sb->st_mtim = sb->st_ctim = now;
+		sb->st_size = 0;
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_getattr(path, sb);
@@ -489,6 +497,10 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 static int lxcfs_access(const char *path, int mode)
 {
 	int ret;
+
+	if (strcmp(path, "/") == 0 && access(path, R_OK) == 0)
+		return 0;
+
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_access(path, mode);
