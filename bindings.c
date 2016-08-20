@@ -1909,11 +1909,18 @@ out:
 
 int cg_access(const char *path, int mode)
 {
+	int ret;
 	const char *cgroup;
-	char *last = NULL, *path1, *path2, * cgdir = NULL, *controller;
+	char *path1, *path2, *controller;
+	char *last = NULL, *cgdir = NULL;
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	int ret;
+
+	if (strcmp(path, "/cgroup") == 0) {
+		if ((mode & W_OK) == 0)
+			return -EACCES;
+		return 0;
+	}
 
 	if (!fc)
 		return -EIO;
