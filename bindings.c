@@ -3174,8 +3174,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit - memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0) {
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n",
-				(memswlimit - memlimit) - (memswusage - memusage));
+			unsigned long swaptotal = memswlimit - memlimit,
+					swapusage = memswusage - memusage,
+					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
+			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
 			snprintf(lbuf, 100, "Slab:        %8lu kB\n", 0UL);
@@ -3520,6 +3522,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		char cpu_char[10]; /* That's a lot of cores */
 		char *c;
 
+		if (strlen(line) == 0)
+			continue;
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
 			l = snprintf(cache, cache_size, "%s", line);
