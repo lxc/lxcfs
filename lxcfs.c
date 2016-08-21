@@ -474,8 +474,10 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 {
 	int ret;
 	if (strcmp(path, "/") == 0) {
-		if (filler(buf, "proc", NULL, 0) != 0 ||
-				filler(buf, "cgroup", NULL, 0) != 0)
+		if (filler(buf, ".", NULL, 0) != 0 ||
+		    filler(buf, "..", NULL, 0) != 0 ||
+		    filler(buf, "proc", NULL, 0) != 0 ||
+		    filler(buf, "cgroup", NULL, 0) != 0)
 			return -EINVAL;
 		return 0;
 	}
