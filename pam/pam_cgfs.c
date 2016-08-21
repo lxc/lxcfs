@@ -585,7 +585,7 @@ static bool cgfs_create_forone(struct controller *c, uid_t uid, gid_t gid, const
 #if DEBUG
 			fprintf(stderr, "%s existed\n", path);
 #endif
-			return true;
+			return false;
 		}
 
 		bool pass = mkdir_p(c->mount_path, path);
@@ -794,14 +794,14 @@ static int handle_login(const char *user)
 			return PAM_SESSION_ERR;
 		}
 
+		existed = false;
 		if (!cgfs_create(cg, uid, gid, &existed)) {
+			if (existed) {
+				idx++;
+				continue;
+			}
 			mysyslog(LOG_ERR, "Failed to create a cgroup for user %s\n", user);
 			return PAM_SESSION_ERR;
-		}
-
-		if (existed == 1) {
-			idx++;
-			continue;
 		}
 
 		if (!cgfs_enter(cg, false)) {
