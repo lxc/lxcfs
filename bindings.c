@@ -1506,14 +1506,20 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	const char *p1;
 	char *contr, *slash;
 
-	if (strlen(path) < 9)
+	if (strlen(path) < 9) {
+		errno = EINVAL;
 		return NULL;
-	if (*(path + 7) != '/')
+	}
+	if (*(path + 7) != '/') {
+		errno = EINVAL;
 		return NULL;
+	}
 	p1 = path + 8;
 	contr = strdupa(p1);
-	if (!contr)
+	if (!contr) {
+		errno = ENOMEM;
 		return NULL;
+	}
 	slash = strstr(contr, "/");
 	if (slash)
 		*slash = '\0';
@@ -1523,6 +1529,7 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 		if (hierarchies[i] && strcmp(hierarchies[i], contr) == 0)
 			return hierarchies[i];
 	}
+	errno = ENOENT;
 	return NULL;
 }
 
