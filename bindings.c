@@ -1605,7 +1605,7 @@ int cg_getattr(const char *path, struct stat *sb)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
 		/* this is just /cgroup/controller, return it as a dir */
@@ -1705,7 +1705,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 		// return list of keys for the controller, and list of child cgroups
 		controller = pick_controller_from_path(fc, path);
 		if (!controller)
-			return -EIO;
+			return -errno;
 
 		cgroup = find_cgroup_in_path(path);
 		if (!cgroup) {
@@ -1863,7 +1863,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		return -EINVAL;
@@ -1937,7 +1937,7 @@ int cg_access(const char *path, int mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
 		// access("/sys/fs/cgroup/systemd", mode) - rx allowed, w not
@@ -2724,7 +2724,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -2789,7 +2789,7 @@ int cg_chmod(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -2854,7 +2854,7 @@ int cg_mkdir(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return errno == ENOENT ? -EPERM : -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
@@ -2875,7 +2875,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		else if (last && strcmp(next, last) == 0)
 			ret = -EEXIST;
 		else
-			ret = -ENOENT;
+			ret = -EPERM;
 		goto out;
 	}
 
@@ -2908,7 +2908,7 @@ int cg_rmdir(const char *path)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
