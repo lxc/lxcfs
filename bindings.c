@@ -571,7 +571,7 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	return 0;
 }
 
-static bool recursive_rmdir(const char *dirname, int fd)
+static bool recursive_rmdir(const char *dirname, int fd, int cfd)
 {
 	struct dirent *direntp;
 	DIR *dir;
@@ -593,9 +593,6 @@ static bool recursive_rmdir(const char *dirname, int fd)
 		struct stat mystat;
 		int rc;
 
-		if (!direntp)
-			break;
-
 		if (!strcmp(direntp->d_name, ".") ||
 		    !strcmp(direntp->d_name, ".."))
 			continue;
@@ -606,13 +603,13 @@ static bool recursive_rmdir(const char *dirname, int fd)
 			continue;
 		}
 
-		ret = fstatat(fd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
-		if (ret) {
+		rc = fstatat(cfd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
+		if (rc) {
 			lxcfs_debug("Failed to stat %s: %s.\n", pathname, strerror(errno));
 			continue;
 		}
 		if (S_ISDIR(mystat.st_mode))
-			if (!recursive_rmdir(pathname, fd))
+			if (!recursive_rmdir(pathname, fd, cfd))
 				lxcfs_debug("Error removing %s.\n", pathname);
 	}
 
@@ -622,7 +619,7 @@ static bool recursive_rmdir(const char *dirname, int fd)
 		ret = false;
 	}
 
-	if (unlinkat(fd, dirname, AT_REMOVEDIR) < 0) {
+	if (unlinkat(cfd, dirname, AT_REMOVEDIR) < 0) {
 		lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		ret = false;
 	}
@@ -652,7 +649,7 @@ bool cgfs_remove(const char *controller, const char *cg)
 	if (fd < 0)
 		return false;
 
-	return recursive_rmdir(dirnam, fd);
+	return recursive_rmdir(dirnam, fd, cfd);
 }
 
 bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
