@@ -48,6 +48,16 @@ return -1;
 extern int pivot_root(const char * new_root, const char * put_old);
 #endif
 
+#ifdef DEBUG
+#define lxcfs_debug(format, ...)                                               \
+	do {                                                                   \
+		fprintf(stderr, "%s: %d: %s: " format, __FILE__, __LINE__,     \
+			__func__, __VA_ARGS__);                                \
+	} while (false)
+#else
+#define lxcfs_debug(format, ...)
+#endif /* DEBUG */
+
 enum {
 	LXC_TYPE_CGDIR,
 	LXC_TYPE_CGFILE,
@@ -160,10 +170,10 @@ static bool initpid_still_valid(struct pidns_init_store *e, struct stat *nsfdsb)
 	snprintf(fnam, 100, "/proc/%d", e->initpid);
 	if (stat(fnam, &initsb) < 0)
 		return false;
-#if DEBUG
-	fprintf(stderr, "comparing ctime %ld %ld for pid %d\n",
-		e->ctime, initsb.st_ctime, e->initpid);
-#endif
+
+	lxcfs_debug("Comparing ctime %ld == %ld for pid %d.\n", e->ctime,
+		    initsb.st_ctime, e->initpid);
+
 	if (e->ctime != initsb.st_ctime)
 		return false;
 	return true;
@@ -175,9 +185,8 @@ static void remove_initpid(struct pidns_init_store *e)
 	struct pidns_init_store *tmp;
 	int h;
 
-#if DEBUG
-	fprintf(stderr, "remove_initpid: removing entry for %d\n", e->initpid);
-#endif
+	lxcfs_debug("Remove_initpid: removing entry for %d.\n", e->initpid);
+
 	h = HASH(e->ino);
 	if (pidns_hash_table[h] == e) {
 		pidns_hash_table[h] = e->next;
@@ -212,18 +221,18 @@ static void prune_initpid_store(void)
 	now = time(NULL);
 	if (now < last_prune + PURGE_SECS)
 		return;
-#if DEBUG
-	fprintf(stderr, "pruning\n");
-#endif
+
+	lxcfs_debug("%s\n", "Pruning.");
+
 	last_prune = now;
 	threshold = now - 2 * PURGE_SECS;
 
 	for (i = 0; i < PIDNS_HASH_SIZE; i++) {
 		for (prev = NULL, e = pidns_hash_table[i]; e; ) {
 			if (e->lastcheck < threshold) {
-#if DEBUG
-				fprintf(stderr, "Removing cached entry for %d\n", e->initpid);
-#endif
+
+				lxcfs_debug("Removing cached entry for %d.\n", e->initpid);
+
 				delme = e;
 				if (prev)
 					prev->next = e->next;
@@ -247,9 +256,8 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	struct stat procsb;
 	int h;
 
-#if DEBUG
-	fprintf(stderr, "save_initpid: adding entry for %d\n", pid);
-#endif
+	lxcfs_debug("Save_initpid: adding entry for %d.\n", pid);
+
 	snprintf(fpath, 100, "/proc/%d", pid);
 	if (stat(fpath, &procsb) < 0)
 		return;
@@ -577,9 +585,7 @@ static bool recursive_rmdir(const char *dirname, int fd)
 
 	dir = fdopendir(dupfd);
 	if (!dir) {
-#if DEBUG
-		fprintf(stderr, "%s: failed to open %s: %s\n", __func__, dirname, strerror(errno));
-#endif
+		lxcfs_debug("Failed to open %s: %s.\n", dirname, strerror(errno));
 		return false;
 	}
 
@@ -602,18 +608,12 @@ static bool recursive_rmdir(const char *dirname, int fd)
 
 		ret = fstatat(fd, pathname, &mystat, AT_SYMLINK_NOFOLLOW);
 		if (ret) {
-#if DEBUG
-			fprintf(stderr, "%s: failed to stat %s: %s\n", __func__, pathname, strerror(errno));
-#endif
+			lxcfs_debug("Failed to stat %s: %s.\n", pathname, strerror(errno));
 			continue;
 		}
-		if (S_ISDIR(mystat.st_mode)) {
-			if (!recursive_rmdir(pathname, fd)) {
-#if DEBUG
-				fprintf(stderr, "Error removing %s\n", pathname);
-#endif
-			}
-		}
+		if (S_ISDIR(mystat.st_mode))
+			if (!recursive_rmdir(pathname, fd))
+				lxcfs_debug("Error removing %s.\n", pathname);
 	}
 
 	ret = true;
@@ -623,9 +623,7 @@ static bool recursive_rmdir(const char *dirname, int fd)
 	}
 
 	if (unlinkat(fd, dirname, AT_REMOVEDIR) < 0) {
-#if DEBUG
-		fprintf(stderr, "%s: failed to delete %s: %s\n", __func__, dirname, strerror(errno));
-#endif
+		lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		ret = false;
 	}
 	close(fd);
