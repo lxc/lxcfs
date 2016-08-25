@@ -1926,11 +1926,8 @@ int cg_access(const char *path, int mode)
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
-	if (strcmp(path, "/cgroup") == 0) {
-		if ((mode & W_OK) == 0)
-			return -EACCES;
+	if (strcmp(path, "/cgroup") == 0)
 		return 0;
-	}
 
 	if (!fc)
 		return -EIO;
