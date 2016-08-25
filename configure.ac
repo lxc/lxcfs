@@ -66,6 +66,7 @@ if test "z$with_distro" = "z"; then
 	AC_CHECK_FILE(/etc/mandrakelinux-release, with_distro="openmandriva")
 	AC_CHECK_FILE(/etc/mandriva-release,with_distro="openmandriva")
 	AC_CHECK_FILE(/etc/pardus-release,with_distro="pardus")
+	AC_CHECK_FILE(/etc/pld-release,with_distro="pld")
 fi
 with_distro=`echo ${with_distro} | tr '[[:upper:]]' '[[:lower:]]'`
 
@@ -76,7 +77,7 @@ case $with_distro in
 	ubuntu)
 		distroconf=default.conf.ubuntu
 		;;
-	redhat|centos|fedora|oracle|oracleserver)
+	redhat|centos|fedora|oracle|oracleserver|pld)
 		distroconf=default.conf.libvirt
 		;;
 	*)
@@ -107,6 +108,9 @@ case "$with_init_script" in
 				;;
 			ubuntu)
 				init_script=upstart,systemd,sysvinit
+				;;
+			pld)
+				init_script=systemd,sysvinit
 				;;
 			slackware)
 				echo -n "Warning: bsd init job not yet implemented"
