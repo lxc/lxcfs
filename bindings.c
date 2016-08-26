@@ -1507,7 +1507,7 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	char *contr, *slash;
 
 	if (strlen(path) < 9) {
-		errno = EINVAL;
+		errno = EACCES;
 		return NULL;
 	}
 	if (*(path + 7) != '/') {
@@ -1542,7 +1542,7 @@ static const char *find_cgroup_in_path(const char *path)
 	const char *p1;
 
 	if (strlen(path) < 9) {
-		errno = EINVAL;
+		errno = EACCES;
 		return NULL;
 	}
 	p1 = strstr(path + 8, "/");
@@ -2910,16 +2910,20 @@ int cg_rmdir(const char *path)
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -errno;
+	if (!controller) /* Someone's trying to delete "/cgroup". */
+		return -EPERM;
 
 	cgroup = find_cgroup_in_path(path);
-	if (!cgroup)
-		return -errno;
+	if (!cgroup) /* Someone's trying to delete a controller e.g. "/blkio". */
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
-		ret = -EINVAL;
+		/* Someone's trying to delete a cgroup on the same level as the
+		 * "/lxc" cgroup e.g. rmdir "/cgroup/blkio/lxc" or
+		 * rmdir "/cgroup/blkio/init.slice".
+		 */
+		ret = -EPERM;
 		goto out;
 	}
 
