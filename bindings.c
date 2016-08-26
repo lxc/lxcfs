@@ -1506,23 +1506,30 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	const char *p1;
 	char *contr, *slash;
 
-	if (strlen(path) < 9)
+	if (strlen(path) < 9) {
+		errno = EINVAL;
 		return NULL;
-	if (*(path+7) != '/')
+	}
+	if (*(path + 7) != '/') {
+		errno = EINVAL;
 		return NULL;
-	p1 = path+8;
+	}
+	p1 = path + 8;
 	contr = strdupa(p1);
-	if (!contr)
+	if (!contr) {
+		errno = ENOMEM;
 		return NULL;
+	}
 	slash = strstr(contr, "/");
 	if (slash)
 		*slash = '\0';
 
 	int i;
-	for (i = 0;  i < num_hierarchies;  i++) {
+	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i] && strcmp(hierarchies[i], contr) == 0)
 			return hierarchies[i];
 	}
+	errno = ENOENT;
 	return NULL;
 }
 
@@ -1598,7 +1605,7 @@ int cg_getattr(const char *path, struct stat *sb)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
 		/* this is just /cgroup/controller, return it as a dir */
@@ -1698,7 +1705,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 		// return list of keys for the controller, and list of child cgroups
 		controller = pick_controller_from_path(fc, path);
 		if (!controller)
-			return -EIO;
+			return -errno;
 
 		cgroup = find_cgroup_in_path(path);
 		if (!cgroup) {
@@ -1741,6 +1748,9 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	char **clist = NULL;
+
+	if (filler(buf, ".", NULL, 0) != 0 || filler(buf, "..", NULL, 0) != 0)
+		return -EIO;
 
 	if (d->type != LXC_TYPE_CGDIR) {
 		fprintf(stderr, "Internal error: file cache info used in readdir\n");
@@ -1853,7 +1863,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		return -EINVAL;
@@ -1909,18 +1919,25 @@ out:
 
 int cg_access(const char *path, int mode)
 {
+	int ret;
 	const char *cgroup;
-	char *last = NULL, *path1, *path2, * cgdir = NULL, *controller;
+	char *path1, *path2, *controller;
+	char *last = NULL, *cgdir = NULL;
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	int ret;
+
+	if (strcmp(path, "/cgroup") == 0) {
+		if ((mode & W_OK) == 0)
+			return -EACCES;
+		return 0;
+	}
 
 	if (!fc)
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EIO;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup) {
 		// access("/sys/fs/cgroup/systemd", mode) - rx allowed, w not
@@ -2707,7 +2724,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -2772,7 +2789,7 @@ int cg_chmod(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
@@ -2837,7 +2854,7 @@ int cg_mkdir(const char *path, mode_t mode)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return errno == ENOENT ? -EPERM : -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
@@ -2858,7 +2875,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		else if (last && strcmp(next, last) == 0)
 			ret = -EEXIST;
 		else
-			ret = -ENOENT;
+			ret = -EPERM;
 		goto out;
 	}
 
@@ -2891,7 +2908,7 @@ int cg_rmdir(const char *path)
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -EINVAL;
+		return -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
@@ -4017,12 +4034,14 @@ int proc_getattr(const char *path, struct stat *sb)
 int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi)
 {
-	if (filler(buf, "cpuinfo", NULL, 0) != 0 ||
-				filler(buf, "meminfo", NULL, 0) != 0 ||
-				filler(buf, "stat", NULL, 0) != 0 ||
-				filler(buf, "uptime", NULL, 0) != 0 ||
-				filler(buf, "diskstats", NULL, 0) != 0 ||
-				filler(buf, "swaps", NULL, 0) != 0)
+	if (filler(buf, ".", NULL, 0) != 0 ||
+	    filler(buf, "..", NULL, 0) != 0 ||
+	    filler(buf, "cpuinfo", NULL, 0) != 0 ||
+	    filler(buf, "meminfo", NULL, 0) != 0 ||
+	    filler(buf, "stat", NULL, 0) != 0 ||
+	    filler(buf, "uptime", NULL, 0) != 0 ||
+	    filler(buf, "diskstats", NULL, 0) != 0 ||
+	    filler(buf, "swaps", NULL, 0) != 0)
 		return -EINVAL;
 	return 0;
 }
@@ -4068,6 +4087,9 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 
 int proc_access(const char *path, int mask)
 {
+	if (strcmp(path, "/proc") == 0 && access(path, R_OK) == 0)
+		return 0;
+
 	/* these are all read-only */
 	if ((mask & ~R_OK) != 0)
 		return -EACCES;

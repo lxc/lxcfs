@@ -424,11 +424,19 @@ static int do_cg_releasedir(const char *path, struct fuse_file_info *fi)
 static int lxcfs_getattr(const char *path, struct stat *sb)
 {
 	int ret;
+	struct timespec now;
+
 	if (strcmp(path, "/") == 0) {
+		if (clock_gettime(CLOCK_REALTIME, &now) < 0)
+			return -EINVAL;
+		sb->st_uid = sb->st_gid = 0;
+		sb->st_atim = sb->st_mtim = sb->st_ctim = now;
+		sb->st_size = 0;
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_getattr(path, sb);
@@ -441,7 +449,7 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 		down_users();
 		return ret;
 	}
-	return -EINVAL;
+	return -ENOENT;
 }
 
 static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
@@ -466,9 +474,11 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 {
 	int ret;
 	if (strcmp(path, "/") == 0) {
-		if (filler(buf, "proc", NULL, 0) != 0 ||
-				filler(buf, "cgroup", NULL, 0) != 0)
-			return -EINVAL;
+		if (filler(buf, ".", NULL, 0) != 0 ||
+		    filler(buf, "..", NULL, 0) != 0 ||
+		    filler(buf, "proc", NULL, 0) != 0 ||
+		    filler(buf, "cgroup", NULL, 0) != 0)
+			return -ENOMEM;
 		return 0;
 	}
 	if (strncmp(path, "/cgroup", 7) == 0) {
@@ -483,12 +493,16 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 		down_users();
 		return ret;
 	}
-	return -EINVAL;
+	return -ENOENT;
 }
 
 static int lxcfs_access(const char *path, int mode)
 {
 	int ret;
+
+	if (strcmp(path, "/") == 0 && (mode & W_OK) == 0)
+		return 0;
+
 	if (strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_access(path, mode);
@@ -502,7 +516,7 @@ static int lxcfs_access(const char *path, int mode)
 		return ret;
 	}
 
-	return -EINVAL;
+	return -EACCES;
 }
 
 static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
@@ -537,7 +551,7 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
-	return -EINVAL;
+	return -EACCES;
 }
 
 static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
@@ -613,7 +627,7 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 		return ret;
 	}
 
-	return -EINVAL;
+	return -EPERM;
 }
 
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
@@ -626,7 +640,10 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 		return ret;
 	}
 
-	return -EINVAL;
+	if (strncmp(path, "/proc", 5) == 0)
+		return -EPERM;
+
+	return -ENOENT;
 }
 
 /*
@@ -638,7 +655,7 @@ int lxcfs_truncate(const char *path, off_t newsize)
 {
 	if (strncmp(path, "/cgroup", 7) == 0)
 		return 0;
-	return -EINVAL;
+	return -EPERM;
 }
 
 int lxcfs_rmdir(const char *path)
@@ -650,7 +667,7 @@ int lxcfs_rmdir(const char *path)
 		down_users();
 		return ret;
 	}
-	return -EINVAL;
+	return -EPERM;
 }
 
 int lxcfs_chmod(const char *path, mode_t mode)
@@ -662,7 +679,11 @@ int lxcfs_chmod(const char *path, mode_t mode)
 		down_users();
 		return ret;
 	}
-	return -EINVAL;
+
+	if (strncmp(path, "/proc", 5) == 0)
+		return -EPERM;
+
+	return -ENOENT;
 }
 
 const struct fuse_operations lxcfs_ops = {
