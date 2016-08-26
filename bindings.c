@@ -1541,12 +1541,17 @@ static const char *find_cgroup_in_path(const char *path)
 {
 	const char *p1;
 
-	if (strlen(path) < 9)
+	if (strlen(path) < 9) {
+		errno = EINVAL;
 		return NULL;
-	p1 = strstr(path+8, "/");
-	if (!p1)
+	}
+	p1 = strstr(path + 8, "/");
+	if (!p1) {
+		errno = EINVAL;
 		return NULL;
-	return p1+1;
+	}
+	errno = 0;
+	return p1 + 1;
 }
 
 /*
@@ -1866,7 +1871,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EINVAL;
+		return -errno;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
@@ -2717,15 +2722,16 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
-		return -EINVAL;
+		return -EPERM;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -errno;
+		return errno == ENOENT ? -EPERM : -errno;
+
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
-		return -EINVAL;
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 
@@ -2782,15 +2788,16 @@ int cg_chmod(const char *path, mode_t mode)
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
-		return -EINVAL;
+		return -EPERM;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -errno;
+		return errno == ENOENT ? -EPERM : -errno;
+
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
-		return -EINVAL;
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 
@@ -2848,14 +2855,13 @@ int cg_mkdir(const char *path, mode_t mode)
 	if (!fc)
 		return -EIO;
 
-
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
 		return errno == ENOENT ? -EPERM : -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EINVAL;
+		return -errno;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last)
@@ -2909,7 +2915,7 @@ int cg_rmdir(const char *path)
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EINVAL;
+		return -errno;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
