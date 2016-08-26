@@ -1507,7 +1507,7 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	char *contr, *slash;
 
 	if (strlen(path) < 9) {
-		errno = EINVAL;
+		errno = EACCES;
 		return NULL;
 	}
 	if (*(path + 7) != '/') {
@@ -1541,12 +1541,17 @@ static const char *find_cgroup_in_path(const char *path)
 {
 	const char *p1;
 
-	if (strlen(path) < 9)
+	if (strlen(path) < 9) {
+		errno = EACCES;
 		return NULL;
-	p1 = strstr(path+8, "/");
-	if (!p1)
+	}
+	p1 = strstr(path + 8, "/");
+	if (!p1) {
+		errno = EINVAL;
 		return NULL;
-	return p1+1;
+	}
+	errno = 0;
+	return p1 + 1;
 }
 
 /*
@@ -1866,7 +1871,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 		return -errno;
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EINVAL;
+		return -errno;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
@@ -1926,11 +1931,8 @@ int cg_access(const char *path, int mode)
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
-	if (strcmp(path, "/cgroup") == 0) {
-		if ((mode & W_OK) == 0)
-			return -EACCES;
+	if (strcmp(path, "/cgroup") == 0)
 		return 0;
-	}
 
 	if (!fc)
 		return -EIO;
@@ -2720,15 +2722,16 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
-		return -EINVAL;
+		return -EPERM;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -errno;
+		return errno == ENOENT ? -EPERM : -errno;
+
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
-		return -EINVAL;
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 
@@ -2785,15 +2788,16 @@ int cg_chmod(const char *path, mode_t mode)
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
-		return -EINVAL;
+		return -EPERM;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
-		return -errno;
+		return errno == ENOENT ? -EPERM : -errno;
+
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
 		/* this is just /cgroup/controller */
-		return -EINVAL;
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 
@@ -2851,14 +2855,13 @@ int cg_mkdir(const char *path, mode_t mode)
 	if (!fc)
 		return -EIO;
 
-
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
 		return errno == ENOENT ? -EPERM : -errno;
 
 	cgroup = find_cgroup_in_path(path);
 	if (!cgroup)
-		return -EINVAL;
+		return -errno;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last)
@@ -2907,16 +2910,20 @@ int cg_rmdir(const char *path)
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
-	if (!controller)
-		return -errno;
+	if (!controller) /* Someone's trying to delete "/cgroup". */
+		return -EPERM;
 
 	cgroup = find_cgroup_in_path(path);
-	if (!cgroup)
-		return -EINVAL;
+	if (!cgroup) /* Someone's trying to delete a controller e.g. "/blkio". */
+		return -EPERM;
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 	if (!last) {
-		ret = -EINVAL;
+		/* Someone's trying to delete a cgroup on the same level as the
+		 * "/lxc" cgroup e.g. rmdir "/cgroup/blkio/lxc" or
+		 * rmdir "/cgroup/blkio/init.slice".
+		 */
+		ret = -EPERM;
 		goto out;
 	}
 
