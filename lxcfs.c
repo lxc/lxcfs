@@ -729,13 +729,13 @@ const struct fuse_operations lxcfs_ops = {
 	.fgetattr = NULL,
 };
 
-static void usage(const char *me)
+static void usage()
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "%s [-p pidfile] mountpoint\n", me);
+	fprintf(stderr, "lxcfs [-p pidfile] mountpoint\n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
-	fprintf(stderr, "%s -h\n", me);
+	fprintf(stderr, "lxcfs -h\n");
 	exit(1);
 }
 
@@ -859,7 +859,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_SUCCESS);
 	}
 	if (argc != 2 || is_help(argv[1]))
-		usage(argv[0]);
+		usage();
 
 	do_reload();
 	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
