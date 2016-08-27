@@ -966,12 +966,31 @@ static int preserve_ns(int pid)
 	return open(path, O_RDONLY | O_CLOEXEC);
 }
 
+static void free_hierarchies(struct hierarchies **h)
+{
+	ssize_t i;
+
+	if (!*h)
+		return;
+
+	for (i = 0; i < (*h)->nctrl; i++) {
+		if ((*h)->ctrl[i])
+			free((*h)->ctrl[i]);
+		if ((*h)->ctrlfd && (*h)->ctrlfd[i] >= 0)
+			close((*h)->ctrlfd[i]);
+	}
+	free((*h)->ctrlfd);
+	free((*h)->ctrl);
+	free((*h));
+	*h = NULL;
+}
+
 static void *lxcfs_init(struct fuse_conn_info *conn)
 {
 	FILE *f;
 	char *line = NULL;
 	size_t len = 0;
-	int init_ns = -1;
+	int ret = -1, init_ns = -1;
 	ssize_t i;
 	struct hierarchies *hierarchies;
 
@@ -1036,29 +1055,22 @@ static void *lxcfs_init(struct fuse_conn_info *conn)
 	}
 
 	print_subsystems(hierarchies);
+	ret = 0;
 
 out:
 	free(line);
 	fclose(f);
 	if (init_ns >= 0)
 		close(init_ns);
+	if (ret < 0)
+		free_hierarchies(&hierarchies);
 	return hierarchies;
 }
 
-static void lxcfs_destroy(void* private_data)
+static void lxcfs_destroy(void *private_data)
 {
-	int i;
 	struct hierarchies *h = private_data;
-
-	for (i = 0; i < h->nctrl; i++) {
-		if (h->ctrl[i])
-			free(h->ctrl[i]);
-		if (h->ctrlfd && h->ctrlfd[i] >= 0)
-			close(h->ctrlfd[i]);
-	}
-	free(h->ctrlfd);
-	free(h->ctrl);
-	free(h);
+	free_hierarchies(&h);
 }
 
 const struct fuse_operations lxcfs_ops = {

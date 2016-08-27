@@ -381,8 +381,18 @@ static bool in_comma_list(const char *needle, const char *haystack)
 static char *find_mounted_controller(const char *controller, int *cfd)
 {
 	ssize_t i;
-	struct fuse_context *fc = fuse_get_context();
-	struct hierarchies *h = fc->private_data;
+	struct fuse_context *fc;
+	struct hierarchies *h;
+
+	fc = fuse_get_context();
+	if (!fc)
+		return NULL;
+
+	h = fc->private_data;
+	if (!h) {
+		lxcfs_debug("%s\n", "Fuse private_data field was empty! This implies that the init function failed.");
+		return NULL;
+	}
 
 	for (i = 0; i < h->nctrl; i++) {
 		if (!h->ctrl[i])
@@ -1433,7 +1443,14 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	const char *p1;
 	char *contr, *slash;
 	ssize_t i;
-	struct hierarchies *h = fc->private_data;
+	struct hierarchies *h;
+
+	h = fc->private_data;
+	if (!h) {
+		lxcfs_debug("%s\n", "Fuse private_data field was empty! This implies that the init function failed.");
+		errno = EIO;
+		return NULL;
+	}
 
 	if (strlen(path) < 9) {
 		errno = EACCES;
@@ -1679,9 +1696,19 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	struct cgfs_files **list = NULL;
 	int i, ret;
 	char *nextcg = NULL;
-	struct fuse_context *fc = fuse_get_context();
 	char **clist = NULL;
-	struct hierarchies *h = fc->private_data;
+	struct fuse_context *fc;
+	struct hierarchies *h;
+
+	fc = fuse_get_context();
+	if (!fc)
+		return -EIO;
+
+	h = fc->private_data;
+	if (!h) {
+		lxcfs_debug("%s\n", "Fuse private_data field was empty! This implies that the init function failed.");
+		return -EIO;
+	}
 
 	if (filler(buf, ".", NULL, 0) != 0 || filler(buf, "..", NULL, 0) != 0)
 		return -EIO;
