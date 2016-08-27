@@ -32,16 +32,6 @@
 #include "bindings.h"
 #include "config.h" // for VERSION
 
-#ifdef DEBUG
-#define lxcfs_debug(format, ...)                                               \
-	do {                                                                   \
-		fprintf(stderr, "%s: %d: %s: " format, __FILE__, __LINE__,     \
-			__func__, __VA_ARGS__);                                \
-	} while (false)
-#else
-#define lxcfs_debug(format, ...)
-#endif /* DEBUG */
-
 enum {
 	LXC_TYPE_CGDIR,
 	LXC_TYPE_CGFILE,

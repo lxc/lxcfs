@@ -729,12 +729,12 @@ static bool store_hierarchy(struct hierarchies **h, char *stridx, char *c)
 
 static void print_subsystems(const struct hierarchies *h)
 {
-	int i;
+	ssize_t i;
 
 	fprintf(stderr, "hierarchies:\n");
 	for (i = 0; i < h->nctrl; i++) {
 		if (h->ctrl[i])
-			fprintf(stderr, " %d: %s: fd: %d\n", i, h->ctrl[i], h->ctrlfd[i]);
+			fprintf(stderr, " %2zd: fd: %3d: %s\n", i, h->ctrlfd[i], h->ctrl[i]);
 	}
 }
 
@@ -901,7 +901,7 @@ static bool do_mount_cgroups(struct hierarchies **h)
 {
 	char *target;
 	size_t clen, len;
-	int i, ret;
+	ssize_t i, ret;
 
 	for (i = 0; i < (*h)->nctrl; i++) {
 		char *controller = (*h)->ctrl[i];
@@ -958,18 +958,21 @@ static int preserve_ns(int pid)
 	char path[len];
 
 	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
-	if (ret < 0 || (size_t)ret >= len)
+	if (ret < 0 || (size_t)ret >= len) {
+		errno = ENAMETOOLONG;
 		return -1;
+	}
 
 	return open(path, O_RDONLY | O_CLOEXEC);
 }
 
-void *lxcfs_init(struct fuse_conn_info *conn)
+static void *lxcfs_init(struct fuse_conn_info *conn)
 {
 	FILE *f;
 	char *line = NULL;
 	size_t len = 0;
-	int i, init_ns = -1;
+	int init_ns = -1;
+	ssize_t i;
 	struct hierarchies *hierarchies;
 
 	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
@@ -1008,12 +1011,16 @@ void *lxcfs_init(struct fuse_conn_info *conn)
 
 	/* Preserve initial namespace. */
 	init_ns = preserve_ns(getpid());
-	if (init_ns < 0)
+	if (init_ns < 0) {
+		lxcfs_debug("%s: %s\n", "Failed to preserve initial mount namespace", strerror(errno));
 		goto out;
+	}
 
 	hierarchies->ctrlfd = malloc(sizeof(int *) * hierarchies->nctrl);
-	if (!hierarchies->ctrlfd)
+	if (!hierarchies->ctrlfd) {
+		lxcfs_debug("%s\n", strerror(errno));
 		goto out;
+	}
 
 	for (i = 0; i < hierarchies->nctrl; i++)
 		hierarchies->ctrlfd[i] = -1;
@@ -1023,8 +1030,10 @@ void *lxcfs_init(struct fuse_conn_info *conn)
 	if (!cgfs_setup_controllers(&hierarchies))
 		goto out;
 
-	if (setns(init_ns, 0) < 0)
+	if (setns(init_ns, 0) < 0) {
+		lxcfs_debug("%s: %s\n", "Failed to switch back to initial mount namespace", strerror(errno));
 		goto out;
+	}
 
 	print_subsystems(hierarchies);
 
@@ -1035,7 +1044,8 @@ out:
 		close(init_ns);
 	return hierarchies;
 }
-void lxcfs_destroy(void* private_data)
+
+static void lxcfs_destroy(void* private_data)
 {
 	int i;
 	struct hierarchies *h = private_data;
