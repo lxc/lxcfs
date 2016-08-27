@@ -28,25 +28,9 @@
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <sys/syscall.h>
 
 #include "bindings.h"
 #include "config.h" // for VERSION
-
-/* Define pivot_root() if missing from the C library */
-#ifndef HAVE_PIVOT_ROOT
-static int pivot_root(const char * new_root, const char * put_old)
-{
-#ifdef __NR_pivot_root
-return syscall(__NR_pivot_root, new_root, put_old);
-#else
-errno = ENOSYS;
-return -1;
-#endif
-}
-#else
-extern int pivot_root(const char * new_root, const char * put_old);
-#endif
 
 #ifdef DEBUG
 #define lxcfs_debug(format, ...)                                               \
@@ -120,26 +104,6 @@ static void lock_mutex(pthread_mutex_t *l)
 		exit(1);
 	}
 }
-
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Number of hierarchies mounted. */
-static int num_hierarchies;
-
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Hierachies mounted {cpuset, blkio, ...}:
- * Initialized via __constructor__ collect_and_mount_subsystems(). */
-static char **hierarchies;
-
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Open file descriptors:
- * @fd_hierarchies[i] refers to cgroup @hierarchies[i]. They are mounted in a
- * private mount namespace.
- * Initialized via __constructor__ collect_and_mount_subsystems().
- * @fd_hierarchies[i] can be used to perform file operations on the cgroup
- * mounts and respective files in the private namespace even when located in
- * another namespace using the *at() family of functions
- * {openat(), fchownat(), ...}. */
-static int *fd_hierarchies;
 
 static void unlock_mutex(pthread_mutex_t *l)
 {
@@ -400,35 +364,6 @@ struct cgfs_files {
 	uint32_t mode;
 };
 
-#define ALLOC_NUM 20
-static bool store_hierarchy(char *stridx, char *h)
-{
-	if (num_hierarchies % ALLOC_NUM == 0) {
-		size_t n = (num_hierarchies / ALLOC_NUM) + 1;
-		n *= ALLOC_NUM;
-		char **tmp = realloc(hierarchies, n * sizeof(char *));
-		if (!tmp) {
-			fprintf(stderr, "Out of memory\n");
-			exit(1);
-		}
-		hierarchies = tmp;
-	}
-
-	hierarchies[num_hierarchies++] = must_copy_string(h);
-	return true;
-}
-
-static void print_subsystems(void)
-{
-	int i;
-
-	fprintf(stderr, "hierarchies:\n");
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i])
-			fprintf(stderr, " %d: %s\n", i, hierarchies[i]);
-	}
-}
-
 static bool in_comma_list(const char *needle, const char *haystack)
 {
 	const char *s = haystack, *e;
@@ -455,18 +390,20 @@ static bool in_comma_list(const char *needle, const char *haystack)
  */
 static char *find_mounted_controller(const char *controller, int *cfd)
 {
-	int i;
+	ssize_t i;
+	struct fuse_context *fc = fuse_get_context();
+	struct hierarchies *h = fc->private_data;
 
-	for (i = 0; i < num_hierarchies; i++) {
-		if (!hierarchies[i])
+	for (i = 0; i < h->nctrl; i++) {
+		if (!h->ctrl[i])
 			continue;
-		if (strcmp(hierarchies[i], controller) == 0) {
-			*cfd = fd_hierarchies[i];
-			return hierarchies[i];
+		if (strcmp(h->ctrl[i], controller) == 0) {
+			*cfd = h->ctrlfd[i];
+			return h->ctrl[i];
 		}
-		if (in_comma_list(controller, hierarchies[i])) {
-			*cfd = fd_hierarchies[i];
-			return hierarchies[i];
+		if (in_comma_list(controller, h->ctrl[i])) {
+			*cfd = h->ctrlfd[i];
+			return h->ctrl[i];
 		}
 	}
 
@@ -1505,6 +1442,8 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 {
 	const char *p1;
 	char *contr, *slash;
+	ssize_t i;
+	struct hierarchies *h = fc->private_data;
 
 	if (strlen(path) < 9) {
 		errno = EACCES;
@@ -1524,10 +1463,9 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	if (slash)
 		*slash = '\0';
 
-	int i;
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i] && strcmp(hierarchies[i], contr) == 0)
-			return hierarchies[i];
+	for (i = 0; i < h->nctrl; i++) {
+		if (h->ctrl[i] && strcmp(h->ctrl[i], contr) == 0)
+			return h->ctrl[i];
 	}
 	errno = ENOENT;
 	return NULL;
@@ -1753,6 +1691,7 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	char *nextcg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	char **clist = NULL;
+	struct hierarchies *h = fc->private_data;
 
 	if (filler(buf, ".", NULL, 0) != 0 || filler(buf, "..", NULL, 0) != 0)
 		return -EIO;
@@ -1763,10 +1702,9 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	}
 	if (!d->cgroup && !d->controller) {
 		// ls /var/lib/lxcfs/cgroup - just show list of controllers
-		int i;
-
-		for (i = 0;  i < num_hierarchies; i++) {
-			if (hierarchies[i] && filler(buf, hierarchies[i], NULL, 0) != 0) {
+		ssize_t i;
+		for (i = 0;  i < h->nctrl; i++) {
+			if (h->ctrl[i] && filler(buf, h->ctrl[i], NULL, 0) != 0) {
 				return -EIO;
 			}
 		}
@@ -4130,313 +4068,4 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 	default:
 		return -EINVAL;
 	}
-}
-
-/*
- * Functions needed to setup cgroups in the __constructor__.
- */
-
-static bool mkdir_p(const char *dir, mode_t mode)
-{
-	const char *tmp = dir;
-	const char *orig = dir;
-	char *makeme;
-
-	do {
-		dir = tmp + strspn(tmp, "/");
-		tmp = dir + strcspn(dir, "/");
-		makeme = strndup(orig, dir - orig);
-		if (!makeme)
-			return false;
-		if (mkdir(makeme, mode) && errno != EEXIST) {
-			fprintf(stderr, "failed to create directory '%s': %s",
-				makeme, strerror(errno));
-			free(makeme);
-			return false;
-		}
-		free(makeme);
-	} while(tmp != dir);
-
-	return true;
-}
-
-static bool umount_if_mounted(void)
-{
-	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
-		fprintf(stderr, "failed to unmount %s: %s.\n", BASEDIR, strerror(errno));
-		return false;
-	}
-	return true;
-}
-
-static int pivot_enter(void)
-{
-	int ret = -1, oldroot = -1, newroot = -1;
-
-	oldroot = open("/", O_DIRECTORY | O_RDONLY);
-	if (oldroot < 0) {
-		fprintf(stderr, "%s: Failed to open old root for fchdir.\n", __func__);
-		return ret;
-	}
-
-	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
-	if (newroot < 0) {
-		fprintf(stderr, "%s: Failed to open new root for fchdir.\n", __func__);
-		goto err;
-	}
-
-	/* change into new root fs */
-	if (fchdir(newroot) < 0) {
-		fprintf(stderr, "%s: Failed to change directory to new rootfs: %s.\n", __func__, ROOTDIR);
-		goto err;
-	}
-
-	/* pivot_root into our new root fs */
-	if (pivot_root(".", ".") < 0) {
-		fprintf(stderr, "%s: pivot_root() syscall failed: %s.\n", __func__, strerror(errno));
-		goto err;
-	}
-
-	/*
-	 * At this point the old-root is mounted on top of our new-root.
-	 * To unmounted it we must not be chdir'd into it, so escape back
-	 * to the old-root.
-	 */
-	if (fchdir(oldroot) < 0) {
-		fprintf(stderr, "%s: Failed to enter old root.\n", __func__);
-		goto err;
-	}
-	if (umount2(".", MNT_DETACH) < 0) {
-		fprintf(stderr, "%s: Failed to detach old root.\n", __func__);
-		goto err;
-	}
-
-	if (fchdir(newroot) < 0) {
-		fprintf(stderr, "%s: Failed to re-enter new root.\n", __func__);
-		goto err;
-	}
-
-	ret = 0;
-
-err:
-	if (oldroot > 0)
-		close(oldroot);
-	if (newroot > 0)
-		close(newroot);
-	return ret;
-}
-
-/* Prepare our new clean root. */
-static int pivot_prepare(void)
-{
-	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
-		fprintf(stderr, "%s: Failed to create directory for new root.\n", __func__);
-		return -1;
-	}
-
-	if (mount("/", ROOTDIR, NULL, MS_BIND, 0) < 0) {
-		fprintf(stderr, "%s: Failed to bind-mount / for new root: %s.\n", __func__, strerror(errno));
-		return -1;
-	}
-
-	if (mount(RUNTIME_PATH, ROOTDIR RUNTIME_PATH, NULL, MS_BIND, 0) < 0) {
-		fprintf(stderr, "%s: Failed to bind-mount /run into new root: %s.\n", __func__, strerror(errno));
-		return -1;
-	}
-
-	if (mount(BASEDIR, ROOTDIR BASEDIR, NULL, MS_REC | MS_MOVE, 0) < 0) {
-		printf("%s: failed to move " BASEDIR " into new root: %s.\n", __func__, strerror(errno));
-		return -1;
-	}
-
-	return 0;
-}
-
-static bool pivot_new_root(void)
-{
-	/* Prepare new root. */
-	if (pivot_prepare() < 0)
-		return false;
-
-	/* Pivot into new root. */
-	if (pivot_enter() < 0)
-		return false;
-
-	return true;
-}
-
-static bool setup_cgfs_dir(void)
-{
-	if (!mkdir_p(BASEDIR, 0700)) {
-		fprintf(stderr, "Failed to create lxcfs cgroup mountpoint.\n");
-		return false;
-	}
-
-	if (!umount_if_mounted()) {
-		fprintf(stderr, "Failed to clean up old lxcfs cgroup mountpoint.\n");
-		return false;
-	}
-
-	if (unshare(CLONE_NEWNS) < 0) {
-		fprintf(stderr, "%s: Failed to unshare mount namespace: %s.\n", __func__, strerror(errno));
-		return false;
-	}
-
-	if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, 0) < 0) {
-		fprintf(stderr, "%s: Failed to remount / private: %s.\n", __func__, strerror(errno));
-		return false;
-	}
-
-	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
-		fprintf(stderr, "Failed to mount tmpfs over lxcfs cgroup mountpoint.\n");
-		return false;
-	}
-
-	return true;
-}
-
-static bool do_mount_cgroups(void)
-{
-	char *target;
-	size_t clen, len;
-	int i, ret;
-
-	for (i = 0; i < num_hierarchies; i++) {
-		char *controller = hierarchies[i];
-		clen = strlen(controller);
-		len = strlen(BASEDIR) + clen + 2;
-		target = malloc(len);
-		if (!target)
-			return false;
-		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
-		if (ret < 0 || ret >= len) {
-			free(target);
-			return false;
-		}
-		if (mkdir(target, 0755) < 0 && errno != EEXIST) {
-			free(target);
-			return false;
-		}
-		if (mount(controller, target, "cgroup", 0, controller) < 0) {
-			fprintf(stderr, "Failed mounting cgroup %s\n", controller);
-			free(target);
-			return false;
-		}
-
-		fd_hierarchies[i] = open(target, O_DIRECTORY);
-		if (fd_hierarchies[i] < 0) {
-			free(target);
-			return false;
-		}
-		free(target);
-	}
-	return true;
-}
-
-static bool cgfs_setup_controllers(void)
-{
-	if (!setup_cgfs_dir())
-		return false;
-
-	if (!do_mount_cgroups()) {
-		fprintf(stderr, "Failed to set up private lxcfs cgroup mounts.\n");
-		return false;
-	}
-
-	if (!pivot_new_root())
-		return false;
-
-	return true;
-}
-
-static int preserve_ns(int pid)
-{
-	int ret;
-	size_t len = 5 /* /proc */ + 21 /* /int_as_str */ + 7 /* /ns/mnt */ + 1 /* \0 */;
-	char path[len];
-
-	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
-	if (ret < 0 || (size_t)ret >= len)
-		return -1;
-
-	return open(path, O_RDONLY | O_CLOEXEC);
-}
-
-static void __attribute__((constructor)) collect_and_mount_subsystems(void)
-{
-	FILE *f;
-	char *line = NULL;
-	size_t len = 0;
-	int i, init_ns = -1;
-
-	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
-		fprintf(stderr, "Error opening /proc/self/cgroup: %s\n", strerror(errno));
-		return;
-	}
-	while (getline(&line, &len, f) != -1) {
-		char *p, *p2;
-
-		p = strchr(line, ':');
-		if (!p)
-			goto out;
-		*(p++) = '\0';
-
-		p2 = strrchr(p, ':');
-		if (!p2)
-			goto out;
-		*p2 = '\0';
-
-		/* With cgroupv2 /proc/self/cgroup can contain entries of the
-		 * form: 0::/ This will cause lxcfs to fail the cgroup mounts
-		 * because it parses out the empty string "" and later on passes
-		 * it to mount(). Let's skip such entries.
-		 */
-		if (!strcmp(p, ""))
-			continue;
-
-		if (!store_hierarchy(line, p))
-			goto out;
-	}
-
-	/* Preserve initial namespace. */
-	init_ns = preserve_ns(getpid());
-	if (init_ns < 0)
-		goto out;
-
-	fd_hierarchies = malloc(sizeof(int *) * num_hierarchies);
-	if (!fd_hierarchies)
-		goto out;
-
-	for (i = 0; i < num_hierarchies; i++)
-		fd_hierarchies[i] = -1;
-
-	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
-	 * to privately mount lxcfs cgroups. */
-	if (!cgfs_setup_controllers())
-		goto out;
-
-	if (setns(init_ns, 0) < 0)
-		goto out;
-
-	print_subsystems();
-
-out:
-	free(line);
-	fclose(f);
-	if (init_ns >= 0)
-		close(init_ns);
-}
-
-static void __attribute__((destructor)) free_subsystems(void)
-{
-	int i;
-
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i])
-			free(hierarchies[i]);
-		if (fd_hierarchies && fd_hierarchies[i] >= 0)
-			close(fd_hierarchies[i]);
-	}
-	free(hierarchies);
-	free(fd_hierarchies);
 }

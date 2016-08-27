@@ -2,6 +2,22 @@
 #define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
 #define ROOTDIR RUNTIME_PATH "/lxcfs/root"
 
+struct hierarchies {
+	/* List of mounted v1 controllers. */
+	char **ctrl;
+	/* Array of open file descriptors refering to mounted v1 controllers.
+	 * @ctrlfd[i] refers to cgroup @ctrl[i]. They are mounted in a private
+	 * mount namespace.
+	 * @ctrlfd[i] can be used to perform file operations on the cgroup
+	 * mounts and respective files in the private namespace even when
+	 * located in another namespace using the *at() family of functions
+	 * {openat(), fchownat(), ...}.
+	 */
+	int *ctrlfd;
+	/* Number of mounted v1 controllers. */
+	ssize_t nctrl;
+};
+
 extern int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi);
 extern int cg_mkdir(const char *path, mode_t mode);
