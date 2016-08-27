@@ -1,6 +1,37 @@
+#ifndef __LXCFS_BINDINGS_H
+#define __LXCFS_BINDINGS_H
+
+#include <sys/types.h>
+
 /* directory under which we mount the controllers - /run/lxcfs/controllers */
 #define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
 #define ROOTDIR RUNTIME_PATH "/lxcfs/root"
+
+#ifdef DEBUG
+#define lxcfs_debug(format, ...)                                               \
+	do {                                                                   \
+		fprintf(stderr, "%s: %d: %s: " format, __FILE__, __LINE__,     \
+			__func__, __VA_ARGS__);                                \
+	} while (false)
+#else
+#define lxcfs_debug(format, ...)
+#endif /* DEBUG */
+
+struct hierarchies {
+	/* List of mounted v1 controllers. */
+	char **ctrl;
+	/* Array of open file descriptors refering to mounted v1 controllers.
+	 * @ctrlfd[i] refers to cgroup @ctrl[i]. They are mounted in a private
+	 * mount namespace.
+	 * @ctrlfd[i] can be used to perform file operations on the cgroup
+	 * mounts and respective files in the private namespace even when
+	 * located in another namespace using the *at() family of functions
+	 * {openat(), fchownat(), ...}.
+	 */
+	int *ctrlfd;
+	/* Number of mounted v1 controllers. */
+	ssize_t nctrl;
+};
 
 extern int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi);
@@ -27,3 +58,5 @@ extern int proc_open(const char *path, struct fuse_file_info *fi);
 extern int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi);
 extern int proc_access(const char *path, int mask);
+
+#endif /* __LXCFS__BINDINGS_H */
