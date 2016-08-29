@@ -43,7 +43,7 @@ static void lock_mutex(pthread_mutex_t *l)
 	int ret;
 
 	if ((ret = pthread_mutex_lock(l)) != 0) {
-		fprintf(stderr, "pthread_mutex_lock returned:%d %s\n", ret, strerror(ret));
+		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
 		exit(1);
 	}
 }
@@ -53,7 +53,7 @@ static void unlock_mutex(pthread_mutex_t *l)
 	int ret;
 
 	if ((ret = pthread_mutex_unlock(l)) != 0) {
-		fprintf(stderr, "pthread_mutex_unlock returned:%d %s\n", ret, strerror(ret));
+		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
 		exit(1);
 	}
 }
@@ -74,23 +74,27 @@ static volatile sig_atomic_t need_reload;
  * lock and when we know the user_count was 0 */
 static void do_reload(void)
 {
-	if (dlopen_handle)
+	if (dlopen_handle) {
+		lxcfs_debug("%s\n", "Closing liblxcfs.so handle.");
 		dlclose(dlopen_handle);
+	}
 
 	/* First try loading using ld.so */
 	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
-	if (dlopen_handle)
+	if (dlopen_handle) {
+		lxcfs_debug("%s\n", "Successfully called dlopen() on liblxcfs.so.");
 		goto good;
+	}
 
 	dlopen_handle = dlopen("/usr/lib/lxcfs/liblxcfs.so", RTLD_LAZY);
 	if (!dlopen_handle) {
-		fprintf(stderr, "Failed to open liblxcfs: %s.\n", dlerror());
+		lxcfs_error("Failed to open liblxcfs.so: %s.\n", dlerror());
 		_exit(1);
 	}
 
 good:
 	if (need_reload)
-		fprintf(stderr, "lxcfs: reloaded\n");
+		lxcfs_error("%s\n", "lxcfs: reloaded");
 	need_reload = 0;
 }
 
@@ -124,7 +128,7 @@ static int do_cg_getattr(const char *path, struct stat *sb)
 	cg_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "cg_getattr");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_getattr: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -139,7 +143,7 @@ static int do_proc_getattr(const char *path, struct stat *sb)
 	proc_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "proc_getattr");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_getattr: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -157,7 +161,7 @@ static int do_cg_read(const char *path, char *buf, size_t size, off_t offset,
 	cg_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_read");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_read: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -175,7 +179,7 @@ static int do_proc_read(const char *path, char *buf, size_t size, off_t offset,
 	proc_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_read");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_read: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -192,7 +196,7 @@ static int do_cg_write(const char *path, const char *buf, size_t size, off_t off
 	cg_write = (int (*)(const char *, const char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_write");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_write: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -207,7 +211,7 @@ static int do_cg_mkdir(const char *path, mode_t mode)
 	cg_mkdir = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_mkdir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_mkdir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -222,7 +226,7 @@ static int do_cg_chown(const char *path, uid_t uid, gid_t gid)
 	cg_chown = (int (*)(const char *, uid_t, gid_t)) dlsym(dlopen_handle, "cg_chown");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_chown: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -237,7 +241,7 @@ static int do_cg_rmdir(const char *path)
 	cg_rmdir = (int (*)(const char *path)) dlsym(dlopen_handle, "cg_rmdir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_rmdir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -252,7 +256,7 @@ static int do_cg_chmod(const char *path, mode_t mode)
 	cg_chmod = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_chmod");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_chmod: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -270,7 +274,7 @@ static int do_cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 	cg_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_readdir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_readdir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -288,7 +292,7 @@ static int do_proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
 	proc_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_readdir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_readdir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -303,7 +307,7 @@ static int do_cg_open(const char *path, struct fuse_file_info *fi)
 	cg_open = (int (*)(const char *, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_open");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_open: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -318,7 +322,7 @@ static int do_cg_access(const char *path, int mode)
 	cg_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "cg_access");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_access: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -333,7 +337,7 @@ static int do_proc_open(const char *path, struct fuse_file_info *fi)
 	proc_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "proc_open");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_open: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -348,7 +352,7 @@ static int do_proc_access(const char *path, int mode)
 	proc_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "proc_access");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_access: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -363,7 +367,7 @@ static int do_cg_release(const char *path, struct fuse_file_info *fi)
 	cg_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_release");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_release: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -378,7 +382,7 @@ static int do_proc_release(const char *path, struct fuse_file_info *fi)
 	proc_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_release");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "proc_release: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -393,7 +397,7 @@ static int do_cg_opendir(const char *path, struct fuse_file_info *fi)
 	cg_opendir = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "cg_opendir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_opendir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -408,7 +412,7 @@ static int do_cg_releasedir(const char *path, struct fuse_file_info *fi)
 	cg_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_releasedir");
 	error = dlerror();
 	if (error != NULL) {
-		fprintf(stderr, "cg_releasedir: %s\n", error);
+		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
@@ -798,7 +802,7 @@ static int set_pidfile(char *pidfile)
 
 	fd = open(pidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
-		fprintf(stderr, "Could not open pidfile %s: %m", pidfile);
+		fprintf(stderr, "Could not open pidfile %s: %m\n", pidfile);
 		return -1;
 	}
 
