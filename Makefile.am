@@ -9,15 +9,15 @@ AM_CFLAGS += -DLIBDIR=\"$(LIBDIR)\"
 AM_LDFLAGS = $(FUSE_LIBS) -pthread
 #AM_CFLAGS += -DDEBUG
 
-AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\" 
+AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c cpuset.c bindings.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
-liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -shared
+liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -shared
 
 liblxcfstest_la_SOURCES = bindings.c cpuset.c bindings.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
-liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -shared
+liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -shared
 
 noinst_HEADERS = bindings.h
 
@@ -26,7 +26,7 @@ lib_LTLIBRARIES = liblxcfs.la
 EXTRA_LTLIBRARIES = liblxcfstest.la
 
 lxcfs_SOURCES = lxcfs.c
-lxcfs_LDADD = liblxcfs.la -ldl
+lxcfs_LDADD = -ldl
 lxcfs_CFLAGS = $(AM_CFLAGS)
 lxcfs_LDFLAGS = $(AM_LDFLAGS)
 bin_PROGRAMS = lxcfs
