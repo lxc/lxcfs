@@ -4345,7 +4345,8 @@ static int preserve_ns(int pid)
 static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
 	FILE *f;
-	char *line = NULL;
+	char *cret, *line = NULL;
+	char cwd[MAXPATHLEN];
 	size_t len = 0;
 	int i, init_ns = -1;
 
@@ -4353,6 +4354,7 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 		lxcfs_error("Error opening /proc/self/cgroup: %s\n", strerror(errno));
 		return;
 	}
+
 	while (getline(&line, &len, f) != -1) {
 		char *p, *p2;
 
@@ -4394,6 +4396,10 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	for (i = 0; i < num_hierarchies; i++)
 		fd_hierarchies[i] = -1;
 
+	cret = getcwd(cwd, MAXPATHLEN);
+	if (!cret)
+		lxcfs_debug("Could not retrieve current working directory: %s.\n", strerror(errno));
+
 	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
 	 * to privately mount lxcfs cgroups. */
 	if (!cgfs_setup_controllers()) {
@@ -4405,6 +4411,9 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 		lxcfs_error("Failed to switch back to initial mount namespace: %s.\n", strerror(errno));
 		goto out;
 	}
+
+	if (!cret || chdir(cwd) < 0)
+		lxcfs_debug("Could not change back to original working directory: %s.\n", strerror(errno));
 
 	print_subsystems();
 
