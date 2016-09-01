@@ -22,6 +22,11 @@ AC_CONFIG_FILES([
 	share/lxc.reboot.hook
 	tests/Makefile ])
 
+AC_CONFIG_LINKS([
+	config/init/sysvinit/lxcfs:config/init/sysvinit/lxcfs
+	config/init/systemd/lxcfs.service:config/init/systemd/lxcfs.service
+	config/init/upstart/lxcfs.conf:config/init/upstart/lxcfs.conf ])
+
 LT_INIT
 AC_PROG_CC
 
