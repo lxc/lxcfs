@@ -4156,7 +4156,7 @@ bool has_fs_type(const struct statfs *fs, __fsword_t magic_val)
 	return (fs->f_type == (__fsword_t)magic_val);
 }
 
-static int pivot_enter(void)
+static int permute_and_enter(void)
 {
 	int ret = -1, oldroot = -1, newroot = -1;
 
@@ -4214,7 +4214,7 @@ err:
 }
 
 /* Prepare our new clean root. */
-static int pivot_prepare(void)
+static int permute_prepare(void)
 {
 	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
 		lxcfs_error("%s\n", "Failed to create directory for new root.");
@@ -4239,14 +4239,15 @@ static int pivot_prepare(void)
 	return 0;
 }
 
-static bool pivot_new_root(void)
+/* Calls chroot() on ramfs, pivot_root() in all other cases. */
+static bool permute_root(void)
 {
 	/* Prepare new root. */
-	if (pivot_prepare() < 0)
+	if (permute_prepare() < 0)
 		return false;
 
 	/* Pivot into new root. */
-	if (pivot_enter() < 0)
+	if (permute_and_enter() < 0)
 		return false;
 
 	return true;
@@ -4330,7 +4331,7 @@ static bool cgfs_setup_controllers(void)
 		return false;
 	}
 
-	if (!pivot_new_root())
+	if (!permute_root())
 		return false;
 
 	return true;
