@@ -4151,6 +4151,13 @@ static bool umount_if_mounted(void)
 	return true;
 }
 
+/* __typeof__ should be safe to use with all compilers. */
+typedef __typeof__(((struct statfs *)NULL)->f_type) fs_type_magic;
+static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val)
+{
+	return (fs->f_type == (fs_type_magic)magic_val);
+}
+
 /*
  * looking at fs/proc_namespace.c, it appears we can
  * actually expect the rootfs entry to very specifically contain
@@ -4192,11 +4199,6 @@ static bool is_on_ramfs(void)
 	free(line);
 	fclose(f);
 	return false;
-}
-
-static bool has_fs_type(const struct statfs *fs, __fsword_t magic_val)
-{
-	return (fs->f_type == (__fsword_t)magic_val);
 }
 
 static int pivot_enter(const int oldroot, const int newroot)
