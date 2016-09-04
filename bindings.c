@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <wait.h>
+#include <linux/magic.h>
 #include <linux/sched.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
@@ -29,6 +30,7 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/vfs.h>
 
 #include "bindings.h"
 #include "config.h" // for VERSION
@@ -4147,6 +4149,11 @@ static bool umount_if_mounted(void)
 		return false;
 	}
 	return true;
+}
+
+bool has_fs_type(const struct statfs *fs, __fsword_t magic_val)
+{
+	return (fs->f_type == (__fsword_t)magic_val);
 }
 
 static int pivot_enter(void)
