@@ -4151,14 +4151,120 @@ static bool umount_if_mounted(void)
 	return true;
 }
 
-bool has_fs_type(const struct statfs *fs, __fsword_t magic_val)
+/*
+ * looking at fs/proc_namespace.c, it appears we can
+ * actually expect the rootfs entry to very specifically contain
+ * " - rootfs rootfs "
+ * IIUC, so long as we've chrooted so that rootfs is not our root,
+ * the rootfs entry should always be skipped in mountinfo contents.
+ */
+static bool is_on_ramfs(void)
+{
+	FILE *f;
+	char *p, *p2;
+	char *line = NULL;
+	size_t len = 0;
+	int i;
+
+	f = fopen("/proc/self/mountinfo", "r");
+	if (!f)
+		return false;
+
+	while (getline(&line, &len, f) != -1) {
+		for (p = line, i = 0; p && i < 4; i++)
+			p = strchr(p + 1, ' ');
+		if (!p)
+			continue;
+		p2 = strchr(p + 1, ' ');
+		if (!p2)
+			continue;
+		*p2 = '\0';
+		if (strcmp(p + 1, "/") == 0) {
+			// this is '/'.  is it the ramfs?
+			p = strchr(p2 + 1, '-');
+			if (p && strncmp(p, "- rootfs rootfs ", 16) == 0) {
+				free(line);
+				fclose(f);
+				return true;
+			}
+		}
+	}
+	free(line);
+	fclose(f);
+	return false;
+}
+
+static bool has_fs_type(const struct statfs *fs, __fsword_t magic_val)
 {
 	return (fs->f_type == (__fsword_t)magic_val);
+}
+
+static int pivot_enter(const int oldroot, const int newroot)
+{
+	/* pivot_root into our new root fs */
+	if (pivot_root(".", ".") < 0) {
+		lxcfs_error("pivot_root() syscall failed: %s.\n", strerror(errno));
+		return -1;
+	}
+
+	/*
+	 * At this point the old-root is mounted on top of our new-root.
+	 * To unmounted it we must not be chdir'd into it, so escape back
+	 * to the old-root.
+	 */
+	if (fchdir(oldroot) < 0) {
+		lxcfs_error("%s\n", "Failed to enter old root.");
+		return -1;
+	}
+
+	if (umount2(".", MNT_DETACH) < 0) {
+		lxcfs_error("%s\n", "Failed to detach old root.");
+		return -1;
+	}
+
+	if (fchdir(newroot) < 0) {
+		lxcfs_error("%s\n", "Failed to re-enter new root.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int chroot_enter()
+{
+	if (mount(ROOTDIR, "/", NULL, MS_REC | MS_BIND, NULL)) {
+		lxcfs_error("Failed to recursively bind-mount %s into /.", ROOTDIR);
+		return -1;
+	}
+
+	if (chroot(".") < 0) {
+		lxcfs_error("Call to chroot() failed: %s.\n", strerror(errno));
+		return -1;
+	}
+
+	if (chdir("/") < 0) {
+		lxcfs_error("Failed to change directory: %s.\n", strerror(errno));
+		return -1;
+	}
+
+	return 0;
 }
 
 static int permute_and_enter(void)
 {
 	int ret = -1, oldroot = -1, newroot = -1;
+	struct statfs sb;
+
+	if (statfs("/", &sb) < 0) {
+		lxcfs_error("%s\n", "Could not stat / mountpoint.");
+		return ret;
+	}
+
+	/* has_fs_type() is not reliable. When the ramfs is a tmpfs it will
+	 * likely report TMPFS_MAGIC. Hence, when it reports no we still check
+	 * /proc/1/mountinfo. */
+	if (has_fs_type(&sb, RAMFS_MAGIC) || is_on_ramfs())
+		return chroot_enter();
 
 	oldroot = open("/", O_DIRECTORY | O_RDONLY);
 	if (oldroot < 0) {
@@ -4178,28 +4284,8 @@ static int permute_and_enter(void)
 		goto err;
 	}
 
-	/* pivot_root into our new root fs */
-	if (pivot_root(".", ".") < 0) {
-		lxcfs_error("pivot_root() syscall failed: %s.\n", strerror(errno));
-		goto err;
-	}
-
-	/*
-	 * At this point the old-root is mounted on top of our new-root.
-	 * To unmounted it we must not be chdir'd into it, so escape back
-	 * to the old-root.
-	 */
-	if (fchdir(oldroot) < 0) {
-		lxcfs_error("%s\n", "Failed to enter old root.");
-		goto err;
-	}
-	if (umount2(".", MNT_DETACH) < 0) {
-		lxcfs_error("%s\n", "Failed to detach old root.");
-		goto err;
-	}
-
-	if (fchdir(newroot) < 0) {
-		lxcfs_error("%s\n", "Failed to re-enter new root.");
+	if (pivot_enter(oldroot, newroot) < 0) {
+		lxcfs_error("%s\n", "Could not perform pivot root.");
 		goto err;
 	}
 
@@ -4253,7 +4339,7 @@ static bool permute_root(void)
 	return true;
 }
 
-static bool setup_cgfs_dir(void)
+static bool cgfs_prepare_mounts(void)
 {
 	if (!mkdir_p(BASEDIR, 0700)) {
 		lxcfs_error("%s\n", "Failed to create lxcfs cgroup mountpoint.");
@@ -4283,7 +4369,7 @@ static bool setup_cgfs_dir(void)
 	return true;
 }
 
-static bool do_mount_cgroups(void)
+static bool cgfs_mount_hierarchies(void)
 {
 	char *target;
 	size_t clen, len;
@@ -4323,10 +4409,10 @@ static bool do_mount_cgroups(void)
 
 static bool cgfs_setup_controllers(void)
 {
-	if (!setup_cgfs_dir())
+	if (!cgfs_prepare_mounts())
 		return false;
 
-	if (!do_mount_cgroups()) {
+	if (!cgfs_mount_hierarchies()) {
 		lxcfs_error("%s\n", "Failed to set up private lxcfs cgroup mounts.");
 		return false;
 	}
