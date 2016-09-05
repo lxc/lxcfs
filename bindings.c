@@ -4201,12 +4201,32 @@ static bool is_on_ramfs(void)
 	return false;
 }
 
-static int pivot_enter(const int oldroot, const int newroot)
+static int pivot_enter()
 {
+	int ret = -1, oldroot = -1, newroot = -1;
+
+	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	if (oldroot < 0) {
+		lxcfs_error("%s\n", "Failed to open old root for fchdir.");
+		return ret;
+	}
+
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	if (newroot < 0) {
+		lxcfs_error("%s\n", "Failed to open new root for fchdir.");
+		goto err;
+	}
+
+	/* change into new root fs */
+	if (fchdir(newroot) < 0) {
+		lxcfs_error("Failed to change directory to new rootfs: %s.\n", ROOTDIR);
+		goto err;
+	}
+
 	/* pivot_root into our new root fs */
 	if (pivot_root(".", ".") < 0) {
 		lxcfs_error("pivot_root() syscall failed: %s.\n", strerror(errno));
-		return -1;
+		goto err;
 	}
 
 	/*
@@ -4216,20 +4236,28 @@ static int pivot_enter(const int oldroot, const int newroot)
 	 */
 	if (fchdir(oldroot) < 0) {
 		lxcfs_error("%s\n", "Failed to enter old root.");
-		return -1;
+		goto err;
 	}
 
 	if (umount2(".", MNT_DETACH) < 0) {
 		lxcfs_error("%s\n", "Failed to detach old root.");
-		return -1;
+		goto err;
 	}
 
 	if (fchdir(newroot) < 0) {
 		lxcfs_error("%s\n", "Failed to re-enter new root.");
-		return -1;
+		goto err;
 	}
 
-	return 0;
+	ret = 0;
+
+err:
+	if (oldroot > 0)
+		close(oldroot);
+	if (newroot > 0)
+		close(newroot);
+
+	return ret;
 }
 
 static int chroot_enter()
@@ -4254,12 +4282,11 @@ static int chroot_enter()
 
 static int permute_and_enter(void)
 {
-	int ret = -1, oldroot = -1, newroot = -1;
 	struct statfs sb;
 
 	if (statfs("/", &sb) < 0) {
 		lxcfs_error("%s\n", "Could not stat / mountpoint.");
-		return ret;
+		return -1;
 	}
 
 	/* has_fs_type() is not reliable. When the ramfs is a tmpfs it will
@@ -4268,37 +4295,12 @@ static int permute_and_enter(void)
 	if (has_fs_type(&sb, RAMFS_MAGIC) || is_on_ramfs())
 		return chroot_enter();
 
-	oldroot = open("/", O_DIRECTORY | O_RDONLY);
-	if (oldroot < 0) {
-		lxcfs_error("%s\n", "Failed to open old root for fchdir.");
-		return ret;
-	}
-
-	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
-	if (newroot < 0) {
-		lxcfs_error("%s\n", "Failed to open new root for fchdir.");
-		goto err;
-	}
-
-	/* change into new root fs */
-	if (fchdir(newroot) < 0) {
-		lxcfs_error("Failed to change directory to new rootfs: %s.\n", ROOTDIR);
-		goto err;
-	}
-
-	if (pivot_enter(oldroot, newroot) < 0) {
+	if (pivot_enter() < 0) {
 		lxcfs_error("%s\n", "Could not perform pivot root.");
-		goto err;
+		return -1;
 	}
 
-	ret = 0;
-
-err:
-	if (oldroot > 0)
-		close(oldroot);
-	if (newroot > 0)
-		close(newroot);
-	return ret;
+	return 0;
 }
 
 /* Prepare our new clean root. */
