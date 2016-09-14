@@ -5,7 +5,7 @@ SYSTEMD_UNIT_DIR = /lib/systemd/system
 
 install-systemd: lxcfs.service
 	$(MKDIR_P) $(DESTDIR)$(SYSTEMD_UNIT_DIR)
-	$(INSTALL_DATA) lxcfs.service $(DESTDIR)$(SYSTEMD_UNIT_DIR)/
+	$(INSTALL_DATA) $(abs_srcdir)/lxcfs.service $(DESTDIR)$(SYSTEMD_UNIT_DIR)/
 
 uninstall-systemd:
 	rm -f $(DESTDIR)$(SYSTEMD_UNIT_DIR)/lxcfs.service

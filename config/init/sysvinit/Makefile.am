@@ -3,7 +3,7 @@ EXTRA_DIST = lxcfs
 if INIT_SCRIPT_SYSV
 install-sysvinit: lxcfs
 	$(MKDIR_P) $(DESTDIR)$(sysconfdir)/rc.d/init.d
-	$(INSTALL_SCRIPT) lxcfs $(DESTDIR)$(sysconfdir)/rc.d/init.d/lxcfs
+	$(INSTALL_SCRIPT) $(abs_srcdir)/lxcfs $(DESTDIR)$(sysconfdir)/rc.d/init.d/lxcfs
 
 uninstall-sysvinit:
 	rm -f $(DESTDIR)$(sysconfdir)/rc.d/init.d/lxcfs
