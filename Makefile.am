@@ -66,30 +66,29 @@ endif
 
 tests: TEST_READ TEST_CPUSET TEST_SYSCALLS
 
-distclean:
-	rm -rf .deps/ \
-		INSTALL \
-		Makefile \
-		Makefile.in \
-		aclocal.m4 \
-		autom4te.cache/ \
-		compile \
-		config.guess \
-		config.h \
-		config.h.in \
-		config.log \
-		config.status \
-		config.sub \
-		configure \
-		depcomp \
-		install-sh \
-		libtool \
-		ltmain.sh \
-		lxcfs \
-		lxcfs.1 \
-		lxcfs.o \
-		m4/ \
-		missing \
-		stamp-h1 \
-		tests/test_syscalls \
-		*.lo *.la
+DISTCLEANFILES = INSTALL \
+	            Makefile.in \
+	            aclocal.m4 \
+	            compile \
+	            config.guess \
+	            config.h.in \
+	            config.sub \
+	            config/Makefile.in \
+	            config/init/Makefile.in \
+	            config/init/systemd/Makefile.in \
+	            config/init/sysvinit/Makefile.in \
+	            config/init/upstart/Makefile.in \
+	            configure \
+	            depcomp \
+	            install-sh \
+	            ltmain.sh \
+	            m4/libtool.m4 \
+	            m4/ltoptions.m4 \
+	            m4/ltsugar.m4 \
+	            m4/ltversion.m4 \
+	            m4/lt~obsolete.m4 \
+	            missing \
+	            share/Makefile.in \
+	            tests/Makefile.in \
+				lxcfs.1
+

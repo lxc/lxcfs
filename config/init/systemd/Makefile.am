@@ -1,7 +1,7 @@
 EXTRA_DIST = lxcfs.service
 
 if INIT_SCRIPT_SYSTEMD
-SYSTEMD_UNIT_DIR = /lib/systemd/system
+SYSTEMD_UNIT_DIR = $(libdir)/systemd/system
 
 install-systemd: lxcfs.service
 	$(MKDIR_P) $(DESTDIR)$(SYSTEMD_UNIT_DIR)
