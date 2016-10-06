@@ -1673,7 +1673,13 @@ int cg_getattr(const char *path, struct stat *sb)
 			ret = -ENOENT;
 			goto out;
 		}
-		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY)) {
+		/* We should only deny getting the attributes of a file if it
+		 * neither contains O_RDONLY permission nor O_WRONLY
+		 * permissions. Otherwise we ls -al will not show attributes on
+		 * O_WRONLY files. Such files are quite common under /proc or
+		 * /sys. */
+		if (!fc_may_access(fc, controller, path1, path2, O_RDONLY) &&
+		    !fc_may_access(fc, controller, path1, path2, O_WRONLY)) {
 			ret = -EACCES;
 			goto out;
 		}
