@@ -2953,22 +2953,22 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 
 	while (*memstat) {
 		if (startswith(memstat, "cache")) {
-			sscanf(memstat + 11, "%lu", cached);
+			sscanf(memstat + sizeof("cache"), "%lu", cached);
 			*cached /= 1024;
 		} else if (startswith(memstat, "active_anon")) {
-			sscanf(memstat + 11, "%lu", active_anon);
+			sscanf(memstat + sizeof("active_anon"), "%lu", active_anon);
 			*active_anon /= 1024;
 		} else if (startswith(memstat, "inactive_anon")) {
-			sscanf(memstat + 11, "%lu", inactive_anon);
+			sscanf(memstat + sizeof("inactive_anon"), "%lu", inactive_anon);
 			*inactive_anon /= 1024;
 		} else if (startswith(memstat, "active_file")) {
-			sscanf(memstat + 11, "%lu", active_file);
+			sscanf(memstat + sizeof("active_file"), "%lu", active_file);
 			*active_file /= 1024;
 		} else if (startswith(memstat, "inactive_file")) {
-			sscanf(memstat + 11, "%lu", inactive_file);
+			sscanf(memstat + sizeof("inactive_file"), "%lu", inactive_file);
 			*inactive_file /= 1024;
 		} else if (startswith(memstat, "unevictable")) {
-			sscanf(memstat + 11, "%lu", unevictable);
+			sscanf(memstat + sizeof("unevictable"), "%lu", unevictable);
 			*unevictable /= 1024;
 		}
 		eol = strchr(memstat, '\n');
