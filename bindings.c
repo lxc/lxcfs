@@ -3192,11 +3192,11 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "SwapCached:")) {
 			snprintf(lbuf, 100, "SwapCached:     %8lu kB\n", 0UL);
 			printme = lbuf;
-		} else if (startswith(line, "Active")) {
+		} else if (startswith(line, "Active:")) {
 			snprintf(lbuf, 100, "Active:         %8lu kB\n",
 					active_anon + active_file);
 			printme = lbuf;
-		} else if (startswith(line, "Inactive")) {
+		} else if (startswith(line, "Inactive:")) {
 			snprintf(lbuf, 100, "Inactive:       %8lu kB\n",
 					inactive_anon + inactive_file);
 			printme = lbuf;
