@@ -22,19 +22,20 @@
  * See COPYING file for details.
  */
 
+#include <dirent.h>
+#include <errno.h>
+#include <pwd.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <string.h>
 #include <syslog.h>
-#include <stdarg.h>
-#include <errno.h>
+#include <unistd.h>
 #include <sys/mount.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/param.h>
-#include <pwd.h>
-#include <stdbool.h>
-#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define PAM_SM_SESSION
 #include <security/_pam_macros.h>
@@ -82,6 +83,13 @@ static char *must_strcat(const char *first, ...)
 	va_end(args);
 
 	return dest;
+}
+
+static void trim(char *s)
+{
+	size_t len = strlen(s);
+	while (s[len-1] == '\n')
+		s[--len] = '\0';
 }
 
 static bool exists(const char *path)
@@ -308,28 +316,55 @@ static bool fill_in_init_paths(void)
 	if (!f)
 		return false;
 	while (getline(&line, &len, f) != -1) {
-		int id;
-		char *subsystems, *ip;
-		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &ip) != 3) {
-			mysyslog(LOG_ERR, "Corrupt /proc/1/cgroup\n");
-			goto out;
-		}
-		free(subsystems);
+		int id = -1;
+		char *p, *p2;
+		if (sscanf(line, "%d:", &id) != 1)
+			continue;
+
 		if (id < 0 || id > 20) {
 			mysyslog(LOG_ERR, "Too many subsystems\n");
-			free(ip);
+			fclose(f);
+			free(line);
+			return false;
+		}
+
+		p = strchr(line, ':');
+		if (!p) {
+			mysyslog(LOG_ERR, "Corrupt /proc/1/cgroup\n");
+			continue;
+		}
+		p++;
+		p2 = strchr(p, ':');
+		if (!p2) {
+			mysyslog(LOG_ERR, "Corrupt /proc/1/cgroup\n");
+			continue;
+		}
+		*p2 = '\0';
+
+		/* If we have a mixture between cgroup v1 and cgroup v2
+		 * hierarchies, then /proc/self/cgroup contains entries of the
+		 * form:
+		 *
+		 *	0::/some/path
+		 *
+		 * We need to skip those.
+		 */
+		if ((p2 - p) == 0)
+			continue;
+
+		p2++;
+		trim(p2);
+		if (*p2 != '/') {
+			mysyslog(LOG_ERR, "ERROR: init cgroup path is not absolute: %c.\n", *p2);
 			goto out;
 		}
-		if (ip[0] != '/') {
-			free(ip);
-			mysyslog(LOG_ERR, "ERROR: init cgroup path is not absolute!\n");
-			goto out;
-		}
-		prune_init_scope(ip);
+		prune_init_scope(p2);
 		for (c = controllers[id]; c; c = c->next) {
 			if (strcmp(c->name, "name=systemd") == 0)
-				c->systemd_created = strcmp(ip, c->cur_path) != 0;
-			c->init_path = ip;
+				c->systemd_created = strcmp(p2, c->cur_path) != 0;
+			c->init_path = strdup(p2);
+			if (!c->init_path)
+				goto out;
 		}
 	}
 	ret = true;
@@ -371,33 +406,48 @@ static inline void print_found_controllers(void) { };
 static bool get_active_controllers(void)
 {
 	FILE *f;
-	char *line = NULL, *tok, *cur_path;
+	char *line = NULL;
 	size_t len = 0;
 
 	f = fopen("/proc/self/cgroup", "r");
 	if (!f)
 		return false;
 	while (getline(&line, &len, f) != -1) {
-		int id;
-		char *subsystems;
-		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &cur_path) != 3) {
-			mysyslog(LOG_ERR, "Corrupt /proc/self/cgroup\n");
-			fclose(f);
-			free(line);
-			return false;
-		}
+		int id = -1;
+		char *p, *p2, *tok, *saveptr = NULL;
+		if (sscanf(line, "%d:", &id) != 1)
+			continue;
+
 		if (id < 0 || id > 20) {
 			mysyslog(LOG_ERR, "Too many subsystems\n");
-			free(subsystems);
-			free(cur_path);
 			fclose(f);
 			free(line);
 			return false;
 		}
-		for (tok = strtok(subsystems, ","); tok; tok = strtok(NULL, ","))
-			add_controller(id, tok, cur_path);
-		free(subsystems);
-		free(cur_path);
+
+		p = strchr(line, ':');
+		if (!p)
+			continue;
+		p++;
+		p2 = strchr(p, ':');
+		if (!p2)
+			continue;
+		*p2 = '\0';
+
+		/* If we have a mixture between cgroup v1 and cgroup v2
+		 * hierarchies, then /proc/self/cgroup contains entries of the
+		 * form:
+		 *
+		 *	0::/some/path
+		 *
+		 * We need to skip those.
+		 */
+		if ((p2 - p) == 0)
+			continue;
+
+		for (tok = strtok_r(p, ",", &saveptr); tok;
+		     tok = strtok_r(NULL, ",", &saveptr))
+			add_controller(id, tok, p);
 	}
 	fclose(f);
 	free(line);
