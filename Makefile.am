@@ -11,15 +11,15 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
-liblxcfs_la_SOURCES = bindings.c cpuset.c bindings.h
+liblxcfs_la_SOURCES = macro.h bindings.c cpuset.c bindings.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-liblxcfstest_la_SOURCES = bindings.c cpuset.c bindings.h
+liblxcfstest_la_SOURCES = bindings.c cpuset.c bindings.h macro.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h
+noinst_HEADERS = bindings.h macro.h
 
 sodir=$(libdir)
 lib_LTLIBRARIES = liblxcfs.la
@@ -50,11 +50,11 @@ TEST_SYSCALLS: tests/test_syscalls.c
 
 if HAVE_PAM
 pam_LTLIBRARIES = pam_cgfs.la
-pam_cgfs_la_SOURCES = pam/pam_cgfs.c
+pam_cgfs_la_SOURCES = pam/pam_cgfs.c macro.h
 pam_cgfs_la_CFLAGS = $(AM_CFLAGS)
 pam_cgfs_la_LIBADD = $(AM_LIBS) $(PAM_LIBS) -L$(top_srcdir)
 pam_cgfs_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version -shared
-#pam_cgfs_la_CFLAGS += -DDEBUG
+# pam_cgfs_la_CFLAGS += -DDEBUG
 
 install-data-hook:     install-pamLTLIBRARIES
 	rm -f "$(DESTDIR)$(pamdir)/pam_cgfs.la"
