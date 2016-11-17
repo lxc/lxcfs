@@ -123,6 +123,7 @@ static bool cg_init(uid_t uid, gid_t gid);
 static void cg_systemd_prune_init_scope(char *cg);
 static void cg_prune_empty_cgroups(const char *user);
 static bool is_lxcfs(const char *line);
+static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid);
 
 /* cgroupfs v1 prototypes. */
 struct cgv1_hierarchy {
@@ -1543,6 +1544,20 @@ static bool get_uid_gid(const char *user, uid_t *uid, gid_t *gid)
 	return true;
 }
 
+/* Check if cgroup belongs to our uid and gid. If so, reuse it. */
+static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid)
+{
+	struct stat statbuf;
+
+	if (stat(path, &statbuf) < 0)
+		return false;
+
+	if (!(statbuf.st_uid == uid) || !(statbuf.st_gid == gid))
+		return false;
+
+	return true;
+}
+
 /* Create and chown @cgroup for all given controllers in a cgroupfs v1 hierarchy
  * (For example, create @cgroup for the cpu and cpuacct controller mounted into
  * /sys/fs/cgroup/cpu,cpuacct). Check if the path already exists and report back
@@ -1593,10 +1608,14 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 		path = must_make_path(it->mountpoint, it->init_cgroup, cgroup, NULL);
 		lxcfs_debug("Constructing path: %s.\n", path);
 		if (file_exists(path)) {
-			*existed = true;
-			lxcfs_debug("%s existed.\n", path);
+			bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
+			lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
 			free(path);
-			return false;
+			if (our_cg)
+				*existed = false;
+			else
+				*existed = true;
+			return our_cg;
 		}
 		created = mkdir_p(it->mountpoint, path);
 		if (!created) {
@@ -1739,10 +1758,14 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, NULL);
 	lxcfs_debug("Constructing path \"%s\".\n", path);
 	if (file_exists(path)) {
-		*existed = true;
-		lxcfs_debug("%s existed.\n", path);
+		bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
+		lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
 		free(path);
-		return false;
+		if (our_cg)
+			*existed = false;
+		else
+			*existed = true;
+		return our_cg;
 	}
 
 	created = mkdir_p(v2->mountpoint, path);
