@@ -1161,8 +1161,10 @@ static bool cgv1_init(uid_t uid, gid_t gid)
 		return false;
 
 	f = fopen("/proc/self/mountinfo", "r");
-	if (!f)
+	if (!f) {
+		free(basecginfo);
 		return false;
+	}
 
 	cgv1_get_controllers(&klist, &nlist);
 
@@ -1170,7 +1172,7 @@ static bool cgv1_init(uid_t uid, gid_t gid)
 		char **controller_list = NULL;
 		char *mountpoint, *base_cgroup;
 
-		if (!is_lxcfs(line) && !is_cgv1(line))
+		if (is_lxcfs(line) || !is_cgv1(line))
 			continue;
 
 		controller_list = cgv1_get_proc_mountinfo_controllers(klist, nlist, line);
@@ -1216,7 +1218,15 @@ static bool cgv1_init(uid_t uid, gid_t gid)
 	for (it = cgv1_hierarchies; it && *it; it++) {
 		if ((*it)->controllers) {
 			char *init_cgroup, *user_slice;
+			/* We've already stored the controller and received its
+			 * current cgroup. If we now fail to retrieve its init
+			 * cgroup, we should probably fail.
+			 */
 			init_cgroup = cgv1_get_current_cgroup(basecginfo, (*it)->controllers[0]);
+			if (!init_cgroup) {
+				free(basecginfo);
+				return false;
+			}
 			cg_systemd_prune_init_scope(init_cgroup);
 			(*it)->init_cgroup = init_cgroup;
 			lxcfs_debug("cgroupfs v1 controller \"%s\" has init "
@@ -1400,7 +1410,6 @@ static bool cgv1_enter(const char *cgroup)
 	struct cgv1_hierarchy **it;
 
 	for (it = cgv1_hierarchies; it && *it; it++) {
-		char *path;
 		char **controller;
 		bool entered = false;
 
@@ -1410,6 +1419,7 @@ static bool cgv1_enter(const char *cgroup)
 
 		for (controller = (*it)->controllers; controller && *controller;
 		     controller++) {
+			char *path;
 
 			if ((*it)->systemd_user_slice)
 				continue;
@@ -1429,10 +1439,12 @@ static bool cgv1_enter(const char *cgroup)
 			}
 			lxcfs_debug("Attempting to enter cgroupfs v1 hierarchy in \"%s\" cgroup.\n", path);
 			entered = write_int(path, (int)getpid());
-			free(path);
-			if (entered)
+			if (entered) {
+				free(path);
 				break;
+			}
 			lxcfs_debug("Failed to enter cgroupfs v1 hierarchy in \"%s\" cgroup.\n", path);
+			free(path);
 		}
 		if (!entered)
 			return false;
