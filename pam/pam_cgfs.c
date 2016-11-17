@@ -1421,8 +1421,13 @@ static bool cgv1_enter(const char *cgroup)
 		     controller++) {
 			char *path;
 
-			if ((*it)->systemd_user_slice)
-				continue;
+			/* We've already been placed in a user slice, so we
+			 * don't need to enter the cgroup again.
+			 */
+			if ((*it)->systemd_user_slice) {
+				entered = true;
+				break;
+			}
 
 			path = must_make_path((*it)->mountpoint,
 					      (*it)->init_cgroup,
@@ -1552,6 +1557,7 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 	struct cgv1_hierarchy *it;
 	bool created = false;
 
+	*existed = false;
 	it = h;
 	for (controller = it->controllers; controller && *controller;
 	     controller++) {
@@ -1700,6 +1706,8 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	char *path;
 	struct cgv2_hierarchy *v2;
 	bool created = false;
+
+	*existed = false;
 
 	if (!cgv2_hierarchies || !(*cgv2_hierarchies)->create_rw_cgroup)
 		return true;
