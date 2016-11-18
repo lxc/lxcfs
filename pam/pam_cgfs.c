@@ -2,19 +2,30 @@
  *
  * Copyright © 2016 Canonical, Inc
  * Author: Serge Hallyn <serge.hallyn@ubuntu.com>
+ * Author: Christian Brauner <christian.brauner@ubuntu.com>
  *
- * When a user logs in, this pam module will create cgroups which the user
- * may administer, either for all controllers or for any controllers listed
- * on the command line (if any are listed).
- *
+ * When a user logs in, this pam module will create cgroups which the user may
+ * administer. It handles both pure cgroupfs v1 and pure cgroupfs v2, as well as
+ * mixed mounts, where some controllers are mounted in a standard cgroupfs v1
+ * hierarchy location (/sys/fs/cgroup/<controller>) and others are in the
+ * cgroupfs v2 hierarchy.
+ * Writeable cgroups are either created for all controllers or, if specified,
+ * for any controllers listed on the command line.
  * The cgroup created will be "user/$user/0" for the first session,
  * "user/$user/1" for the second, etc.
  *
- * name=systemd is handled specially.  If the host is an upstart system
- * or the login is noninteractive, then the logged in user does not get
- * a cgroup created.  On a systemd interactive login, one is created but
- * not chowned to the user.  In the former case, we create one as usual,
- * in the latter case we simply chown whatever cgroup the user is in.
+ * Systems with a systemd init system are treated specially, both with respect
+ * to cgroupfs v1 and cgroupfs v2. For both, cgroupfs v1 and cgroupfs v2, We
+ * check whether systemd already placed us in a cgroup it created:
+ *
+ *	user.slice/user-uid.slice/session-n.scope
+ *
+ * by checking whether uid == our uid. If it did, we simply chown the last
+ * part (session-n.scope). If it did not we create a cgroup as outlined above
+ * (user/$user/n) and chown it to our uid.
+ * The same holds for cgroupfs v2 where this assumptions becomes crucial:
+ * We __have to__ be placed in our under the cgroup systemd created for us on
+ * login, otherwise things like starting an xserver or similar will not work.
  *
  * All requested cgroups must be mounted under /sys/fs/cgroup/$controller,
  * no messing around with finding mountpoints.
@@ -22,28 +33,166 @@
  * See COPYING file for details.
  */
 
+#include <dirent.h>
+#include <errno.h>
+#include <pwd.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <string.h>
 #include <syslog.h>
-#include <stdarg.h>
-#include <errno.h>
+#include <unistd.h>
+#include <linux/unistd.h>
 #include <sys/mount.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/param.h>
-#include <pwd.h>
-#include <stdbool.h>
-#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/vfs.h>
 
 #define PAM_SM_SESSION
 #include <security/_pam_macros.h>
 #include <security/pam_modules.h>
 
-#include <linux/unistd.h>
+#include "macro.h"
 
-static bool initialized;
+#ifndef CGROUP_SUPER_MAGIC
+#define CGROUP_SUPER_MAGIC 0x27e0eb
+#endif
 
+#ifndef CGROUP2_SUPER_MAGIC
+#define CGROUP2_SUPER_MAGIC 0x63677270
+#endif
+
+static enum cg_mount_mode {
+	CGROUP_UNKNOWN = -1,
+	CGROUP_MIXED = 0,
+	CGROUP_PURE_V1 = 1,
+	CGROUP_PURE_V2 = 2,
+	CGROUP_UNINITIALIZED = 3,
+} cg_mount_mode = CGROUP_UNINITIALIZED;
+
+/* Common helper prototypes. */
+static void append_line(char **dest, size_t oldlen, char *new, size_t newlen);
+static int append_null_to_list(void ***list);
+static void batch_realloc(char **mem, size_t oldlen, size_t newlen);
+static char *copy_to_eol(char *s);
+static bool file_exists(const char *f);
+static void free_string_list(char **list);
+static char *get_mountpoint(char *line);
+static bool get_uid_gid(const char *user, uid_t *uid, gid_t *gid);
+static int handle_login(const char *user, uid_t uid, gid_t gid);
+/* __typeof__ should be safe to use with all compilers. */
+typedef __typeof__(((struct statfs *)NULL)->f_type) fs_type_magic;
+static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val);
+static bool is_lxcfs(const char *line);
+static bool is_cgv1(char *line);
+static bool is_cgv2(char *line);
+static bool mkdir_p(const char *root, char *path);
+static void *must_alloc(size_t sz);
+static void must_add_to_list(char ***clist, char *entry);
+static void must_append_controller(char **klist, char **nlist, char ***clist,
+				   char *entry);
+static void must_append_string(char ***list, char *entry);
+static char *must_copy_string(const char *entry);
+static char *must_make_path(const char *first, ...) __attribute__((sentinel));
+static void *must_realloc(void *orig, size_t sz);
+static void mysyslog(int err, const char *format, ...) __attribute__((sentinel));
+static char *read_file(char *fnam);
+static int recursive_rmdir(char *dirname);
+static bool string_in_list(char **list, const char *entry);
+static void trim(char *s);
+static bool write_int(char *path, int v);
+
+/* cgroupfs prototypes. */
+static void cg_mark_to_make_rw(const char *cstring);
+static bool cg_systemd_under_user_slice_1(const char *in, uid_t uid);
+static bool cg_systemd_under_user_slice_2(const char *base_cgroup,
+					  const char *init_cgroup, uid_t uid);
+static bool cg_systemd_created_user_slice(const char *base_cgroup,
+					  const char *init_cgroup,
+					  const char *in, uid_t uid);
+static bool cg_systemd_chown_existing_cgroup(const char *mountpoint,
+					     const char *base_cgroup, uid_t uid,
+					     gid_t gid,
+					     bool systemd_user_slice);
+static int cg_get_version_of_mntpt(const char *path);
+static bool cg_enter(const char *cgroup);
+static void cg_escape(void);
+static bool cg_init(uid_t uid, gid_t gid);
+static void cg_systemd_prune_init_scope(char *cg);
+static void cg_prune_empty_cgroups(const char *user);
+static bool is_lxcfs(const char *line);
+static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid);
+
+/* cgroupfs v1 prototypes. */
+struct cgv1_hierarchy {
+	char **controllers;
+	char *mountpoint;
+	char *base_cgroup;
+	char *fullcgpath;
+	char *init_cgroup;
+	bool create_rw_cgroup;
+	bool systemd_user_slice;
+};
+
+static struct cgv1_hierarchy **cgv1_hierarchies;
+
+static void cgv1_add_controller(char **clist, char *mountpoint,
+				char *base_cgroup, char *init_cgroup);
+static bool cgv1_controller_in_clist(char *cgline, char *c);
+static bool cgv1_controller_lists_intersect(char **l1, char **l2);
+static bool cgv1_controller_list_is_dup(struct cgv1_hierarchy **hlist,
+					char **clist);
+static bool cgv1_create(const char *cgroup, uid_t uid, gid_t gid,
+			bool *existed);
+static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup,
+			    uid_t uid, gid_t gid, bool *existed);
+static bool cgv1_enter(const char *cgroup);
+static void cgv1_escape(void);
+static bool cgv1_get_controllers(char ***klist, char ***nlist);
+static char *cgv1_get_current_cgroup(char *basecginfo, char *controller);
+static char **cgv1_get_proc_mountinfo_controllers(char **klist, char **nlist,
+						  char *line);
+static bool cgv1_init(uid_t uid, gid_t gid);
+static void cgv1_mark_to_make_rw(char **clist);
+static char *cgv1_must_prefix_named(char *entry);
+static bool cgv1_prune_empty_cgroups(const char *user);
+static bool cgv1_remove_one(struct cgv1_hierarchy *h, const char *cgroup);
+static bool is_cgv1(char *line);
+
+/* cgroupfs v2 prototypes. */
+struct cgv2_hierarchy {
+	char **controllers;
+	char *mountpoint;
+	char *base_cgroup;
+	char *fullcgpath;
+	char *init_cgroup;
+	bool create_rw_cgroup;
+	bool systemd_user_slice;
+};
+
+/* Actually this should only be a single hierarchy. But for the sake of
+ * parallelism and because the layout of the cgroupfs v2 is still somewhat
+ * changing, we'll leave it as an array of structs.
+ */
+static struct cgv2_hierarchy **cgv2_hierarchies;
+
+static void cgv2_add_controller(char **clist, char *mountpoint,
+				char *base_cgroup, char *init_cgroup,
+				bool systemd_user_slice);
+static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid,
+			bool *existed);
+static bool cgv2_enter(const char *cgroup);
+static void cgv2_escape(void);
+static char *cgv2_get_current_cgroup(int pid);
+static bool cgv2_init(uid_t uid, gid_t gid);
+static void cgv2_mark_to_make_rw(char **clist);
+static bool cgv2_prune_empty_cgroups(const char *user);
+static bool cgv2_remove(const char *cgroup);
+static bool is_cgv2(char *line);
+
+/* Common helper functions. */
 static void mysyslog(int err, const char *format, ...)
 {
 	va_list args;
@@ -55,709 +204,1332 @@ static void mysyslog(int err, const char *format, ...)
 	closelog();
 }
 
-static char *must_strcat(const char *first, ...) __attribute__((sentinel));
-
-static char *must_strcat(const char *first, ...)
+/* realloc() pointer; do not fail. */
+static void *must_realloc(void *orig, size_t sz)
 {
-	va_list args;
-	char *dest, *cur, *new;
-	size_t len;
+	void *ret;
 
 	do {
-		dest = strdup(first);
-	} while (!dest);
-	len = strlen(dest);
+		ret = realloc(orig, sz);
+	} while (!ret);
+
+	return ret;
+}
+
+/* realloc() pointer in batch sizes; do not fail. */
+#define BATCH_SIZE 50
+static void batch_realloc(char **mem, size_t oldlen, size_t newlen)
+{
+	int newbatches = (newlen / BATCH_SIZE) + 1;
+	int oldbatches = (oldlen / BATCH_SIZE) + 1;
+
+	if (!*mem || newbatches > oldbatches)
+		*mem = must_realloc(*mem, newbatches * BATCH_SIZE);
+}
+
+/* Append lines as is to pointer; do not fail. */
+static void append_line(char **dest, size_t oldlen, char *new, size_t newlen)
+{
+	size_t full = oldlen + newlen;
+
+	batch_realloc(dest, oldlen, full + 1);
+
+	memcpy(*dest + oldlen, new, newlen + 1);
+}
+
+/* Read in whole file and return allocated pointer. */
+static char *read_file(char *fnam)
+{
+	FILE *f;
+	int linelen;
+	char *line = NULL, *buf = NULL;
+	size_t len = 0, fulllen = 0;
+
+	f = fopen(fnam, "r");
+	if (!f)
+		return NULL;
+
+	while ((linelen = getline(&line, &len, f)) != -1) {
+		append_line(&buf, fulllen, line, linelen);
+		fulllen += linelen;
+	}
+
+	fclose(f);
+	free(line);
+
+	return buf;
+}
+
+/* Given a pointer to a null-terminated array of pointers, realloc to add one
+ * entry, and point the new entry to NULL. Do not fail. Return the index to the
+ * second-to-last entry - that is, the one which is now available for use
+ * (keeping the list null-terminated).
+ */
+static int append_null_to_list(void ***list)
+{
+	int newentry = 0;
+
+	if (*list)
+		for (; (*list)[newentry]; newentry++) {
+			;
+		}
+
+	*list = must_realloc(*list, (newentry + 2) * sizeof(void **));
+	(*list)[newentry + 1] = NULL;
+
+	return newentry;
+}
+
+/* Make allocated copy of string; do not fail. */
+static char *must_copy_string(const char *entry)
+{
+	char *ret;
+
+	if (!entry)
+		return NULL;
+
+	do {
+		ret = strdup(entry);
+	} while (!ret);
+
+	return ret;
+}
+
+/* Append new entry to null-terminated array of pointer; make sure that array of
+ * pointers will still be null-terminated.
+ */
+static void must_append_string(char ***list, char *entry)
+{
+	int newentry;
+	char *copy;
+
+	newentry = append_null_to_list((void ***)list);
+	copy = must_copy_string(entry);
+	(*list)[newentry] = copy;
+}
+
+/* Remove newlines from string. */
+static void trim(char *s)
+{
+	size_t len = strlen(s);
+
+	while (s[len - 1] == '\n')
+		s[--len] = '\0';
+}
+
+/* Allocate pointer; do not fail. */
+static void *must_alloc(size_t sz)
+{
+	return must_realloc(NULL, sz);
+}
+
+/* Make allocated copy of string. End of string is taken to be '\n'. */
+static char *copy_to_eol(char *s)
+{
+	char *newline, *sret;
+	size_t len;
+
+	newline = strchr(s, '\n');
+	if (!newline)
+		return NULL;
+
+	len = newline - s;
+	sret = must_alloc(len + 1);
+	memcpy(sret, s, len);
+	sret[len] = '\0';
+
+	return sret;
+}
+
+/* Check if given entry under /proc/<pid>/mountinfo is a fuse.lxcfs mount. */
+static bool is_lxcfs(const char *line)
+{
+	char *p = strstr(line, " - ");
+	if (!p)
+		return false;
+
+	return strncmp(p, " - fuse.lxcfs ", 14) == 0;
+}
+
+/* Check if given entry under /proc/<pid>/mountinfo is a cgroupfs v1 mount. */
+static bool is_cgv1(char *line)
+{
+	char *p = strstr(line, " - ");
+	if (!p)
+		return false;
+
+	return strncmp(p, " - cgroup ", 10) == 0;
+}
+
+/* Check if given entry under /proc/<pid>/mountinfo is a cgroupfs v2 mount. */
+static bool is_cgv2(char *line)
+{
+	char *p = strstr(line, " - ");
+	if (!p)
+		return false;
+
+	return strncmp(p, " - cgroup2 ", 11) == 0;
+}
+
+/* Given a null-terminated array of strings, check whether @entry is one of the
+ * strings
+ */
+static bool string_in_list(char **list, const char *entry)
+{
+	char **it;
+
+	for (it = list; it && *it; it++)
+		if (strcmp(*it, entry) == 0)
+			return true;
+
+	return false;
+}
+
+/* Free null-terminated array of strings. */
+static void free_string_list(char **list)
+{
+	char **it;
+
+	for (it = list; it && *it; it++)
+		free(*it);
+	free(list);
+}
+
+/* Concatenate all passed-in strings into one path. Do not fail. If any piece
+ * is not prefixed with '/', add a '/'. Does not remove duplicate '///' from the
+ * created path.
+ */
+static char *must_make_path(const char *first, ...)
+{
+	va_list args;
+	char *cur, *dest;
+	size_t full_len;
+
+	full_len = strlen(first);
+
+	dest = must_copy_string(first);
 
 	va_start(args, first);
-
 	while ((cur = va_arg(args, char *)) != NULL) {
-		size_t newlen = len + strlen(cur);
-		do {
-			new = realloc(dest, newlen + 1);
-		} while (!new);
-		dest = new;
+		full_len += strlen(cur);
+
+		if (cur[0] != '/')
+			full_len++;
+
+		dest = must_realloc(dest, full_len + 1);
+
+		if (cur[0] != '/')
+			strcat(dest, "/");
+
 		strcat(dest, cur);
-		len = newlen;
 	}
 	va_end(args);
 
 	return dest;
 }
 
-static bool exists(const char *path)
+/* Write single integer to file. */
+static bool write_int(char *path, int v)
 {
-	struct stat sb;
-	int ret;
+	FILE *f;
+	bool ret = true;
 
-	ret = stat(path, &sb);
-	return ret == 0;
-}
-
-static bool is_dir(const char *path)
-{
-	struct stat sb;
-
-	if (stat(path, &sb) < 0)
+	f = fopen(path, "w");
+	if (!f)
 		return false;
-	if (S_ISDIR(sb.st_mode))
-		return true;
-	return false;
+
+	if (fprintf(f, "%d\n", v) < 0)
+		ret = false;
+
+	if (fclose(f) != 0)
+		ret = false;
+
+	return ret;
 }
 
+/* Check if a given file exists. */
+static bool file_exists(const char *f)
+{
+	struct stat statbuf;
+
+	return stat(f, &statbuf) == 0;
+}
+
+/* Create directory and (if necessary) its parents. */
 static bool mkdir_p(const char *root, char *path)
 {
 	char *b, orig, *e;
 
 	if (strlen(path) < strlen(root))
 		return false;
+
 	if (strlen(path) == strlen(root))
 		return true;
 
 	b = path + strlen(root) + 1;
-	while (1) {
-		while (*b && *b == '/')
+	while (true) {
+		while (*b && (*b == '/'))
 			b++;
 		if (!*b)
 			return true;
+
 		e = b + 1;
 		while (*e && *e != '/')
 			e++;
+
 		orig = *e;
 		if (orig)
 			*e = '\0';
-		if (exists(path))
+
+		if (file_exists(path))
 			goto next;
+
 		if (mkdir(path, 0755) < 0) {
-#if DEBUG
-			fprintf(stderr, "Failed to create %s: %m\n", path);
-#endif
+			lxcfs_debug("Failed to create %s: %m.\n", path);
 			return false;
 		}
-next:
+
+	next:
 		if (!orig)
 			return true;
+
 		*e = orig;
 		b = e + 1;
 	}
 
-}
-
-struct controller {
-	struct controller *next;
-	int id;
-	bool systemd_created;
-	char *name;
-	char *mount_path;
-	char *init_path;
-	char *cur_path;
-};
-
-#define MAXCONTROLLERS 20
-static struct controller *controllers[MAXCONTROLLERS];
-
-/*
- * if cpu and cpuacct are comounted, it's possible a mount
- * exists for only one.  Find it.
- */
-static char *find_controller_path(struct controller *c)
-{
-	while (c) {
-		char *path = must_strcat("/sys/fs/cgroup/", c->name, NULL);
-		if (exists(path))
-			return path;
-		free(path);
-		if (strncmp(c->name, "name=", 5) == 0) {
-			path = must_strcat("/sys/fs/cgroup/", c->name + 5, NULL);
-			if (exists(path))
-				return path;
-			free(path);
-		}
-		c = c->next;
-	}
-	return NULL;
-}
-
-/* Find the path at which each controller is mounted. */
-static void get_mounted_paths(void)
-{
-	int i;
-	struct controller *c;
-	char *path;
-
-	for (i = 0; i < MAXCONTROLLERS; i++) {
-		c = controllers[i];
-		if (!c || c->mount_path)
-			continue;
-		path = find_controller_path(c);
-		if (!path)
-			continue;
-		while (c) {
-			c->mount_path = path;
-			c = c->next;
-		}
-	}
-}
-
-static void add_controller(int id, char *tok, char *cur_path)
-{
-	struct controller *c;
-
-	do {
-		c = malloc(sizeof(struct controller));
-	} while (!c);
-	do {
-		c->name = strdup(tok);
-	} while (!c->name);
-	do {
-		c->cur_path = strdup(cur_path);
-	} while (!c->cur_path);
-	c->id = id;
-	c->next = controllers[id];
-	c->mount_path = NULL;
-	c->init_path = NULL;
-	controllers[id] = c;
-}
-
-static void drop_controller(int which)
-{
-	struct controller *c = controllers[which];
-
-	if (c) {
-		free(c->init_path); // all comounts share this
-		free(c->mount_path);
-	}
-	while (c) {
-		struct controller *tmp = c->next;
-		free(c->name);
-		free(c->cur_path);
-		free(c);
-		c = tmp;
-	}
-	controllers[which] = NULL;
-}
-
-static bool single_in_filter(char *c, const char *filter)
-{
-	char *dup = strdupa(filter), *tok;
-	for (tok = strtok(dup, ","); tok; tok = strtok(NULL, ",")) {
-		if (strcmp(c, tok) == 0)
-			return true;
-	}
 	return false;
 }
 
-static bool controller_in_filter(struct controller *controller, const char *filter)
+/* Recursively remove directory and its parents. */
+static int recursive_rmdir(char *dirname)
 {
-	struct controller *c;
+	struct dirent *direntp;
+	DIR *dir;
+	int r = 0;
 
-	for (c = controller; c; c = c->next) {
-		if (single_in_filter(c->name, filter))
-			return true;
+	dir = opendir(dirname);
+	if (!dir)
+		return -ENOENT;
+
+	while ((direntp = readdir(dir))) {
+		struct stat st;
+		char *pathname;
+
+		if (!direntp)
+			break;
+
+		if (!strcmp(direntp->d_name, ".") ||
+		    !strcmp(direntp->d_name, ".."))
+			continue;
+
+		pathname = must_make_path(dirname, direntp->d_name, NULL);
+
+		if (lstat(pathname, &st)) {
+			if (!r)
+				lxcfs_debug("Failed to stat %s.\n", pathname);
+			r = -1;
+			goto next;
+		}
+
+		if (!S_ISDIR(st.st_mode))
+			goto next;
+
+		if (recursive_rmdir(pathname) < 0)
+			r = -1;
+next:
+		free(pathname);
 	}
-	return false;
+
+	if (rmdir(dirname) < 0) {
+		if (!r)
+			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+		r = -1;
+	}
+
+	if (closedir(dir) < 0) {
+		if (!r)
+			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+		r = -1;
+	}
+
+	return r;
 }
 
-/*
- * Passed a comma-delimited list of requested controllers.
- * Pulls any controllers not in the list out of the
- * list of controllers
+/* Add new entry to null-terminated array of pointers. Make sure array is still
+ * null-terminated.
  */
-static void filter_controllers(const char *filter)
+static void must_add_to_list(char ***clist, char *entry)
+{
+	int newentry;
+
+	newentry = append_null_to_list((void ***)clist);
+	(*clist)[newentry] = must_copy_string(entry);
+}
+
+/* Get mountpoint from a /proc/<pid>/mountinfo line. */
+static char *get_mountpoint(char *line)
 {
 	int i;
-	for (i = 0; i < MAXCONTROLLERS; i++) {
-		if (!controllers[i])
-			continue;
-		if (filter && !controller_in_filter(controllers[i], filter))
-			drop_controller(i);
+	char *p, *sret, *p2;
+	size_t len;
+
+	p = line;
+
+	for (i = 0; i < 4; i++) {
+		p = strchr(p, ' ');
+		if (!p)
+			return NULL;
+		p++;
 	}
+
+	p2 = strchr(p, ' ');
+	if (p2)
+		*p2 = '\0';
+
+	len = strlen(p);
+	sret = must_alloc(len + 1);
+	memcpy(sret, p, len);
+	sret[len] = '\0';
+
+	return sret;
 }
 
-#define INIT_SCOPE "/init.scope"
-static void prune_init_scope(char *cg)
-{
-	char *point;
-	size_t cg_len, initscope_len;
-
-	if (!cg)
-		return;
-
-	cg_len = strlen(cg);
-	initscope_len = strlen(INIT_SCOPE);
-	if (cg_len < initscope_len)
-		return;
-
-	point = cg + cg_len - initscope_len;
-	if (strcmp(point, INIT_SCOPE) == 0) {
-		if (point == cg)
-			*(point+1) = '\0';
-		else
-			*point = '\0';
-	}
-}
-
-static bool fill_in_init_paths(void)
+/* Create list of cgroupfs v1 controller found under /proc/self/cgroup. Skips
+ * the 0::/some/path cgroupfs v2 hierarchy listed. Splits controllers into
+ * kernel controllers (@klist) and named controllers (@nlist).
+ */
+static bool cgv1_get_controllers(char ***klist, char ***nlist)
 {
 	FILE *f;
 	char *line = NULL;
-	size_t len = 0;
-	struct controller *c;
-	bool ret = false;
-
-	f = fopen("/proc/1/cgroup", "r");
-	if (!f)
-		return false;
-	while (getline(&line, &len, f) != -1) {
-		int id;
-		char *subsystems, *ip;
-		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &ip) != 3) {
-			mysyslog(LOG_ERR, "Corrupt /proc/1/cgroup\n");
-			goto out;
-		}
-		free(subsystems);
-		if (id < 0 || id > 20) {
-			mysyslog(LOG_ERR, "Too many subsystems\n");
-			free(ip);
-			goto out;
-		}
-		if (ip[0] != '/') {
-			free(ip);
-			mysyslog(LOG_ERR, "ERROR: init cgroup path is not absolute!\n");
-			goto out;
-		}
-		prune_init_scope(ip);
-		for (c = controllers[id]; c; c = c->next) {
-			if (strcmp(c->name, "name=systemd") == 0)
-				c->systemd_created = strcmp(ip, c->cur_path) != 0;
-			c->init_path = ip;
-		}
-	}
-	ret = true;
-out:
-	fclose(f);
-	free(line);
-	return ret;
-}
-
-#if DEBUG
-static void print_found_controllers(void) {
-	struct controller *c;
-	int i;
-
-	for (i = 0; i < MAXCONTROLLERS; i++) {
-		c = controllers[i];
-		if (!c) {
-			fprintf(stderr, "Nothing in controller %d\n", i);
-			continue;
-		}
-		fprintf(stderr, "Controller %d:\n", i);
-		while (c) {
-			fprintf(stderr, " Next mount: index %d name %s\n", c->id, c->name);
-			fprintf(stderr, "             mount path %s\n", c->mount_path ? c->mount_path : "(none)");
-			fprintf(stderr, "             init task path %s\n", c->init_path);
-			fprintf(stderr, "             login task path %s\n", c->cur_path);
-			c = c->next;
-		}
-	}
-}
-#else
-static inline void print_found_controllers(void) { };
-#endif
-/*
- * Get the list of cgroup controllers currently mounted.
- * This includes both kernel and named subsystems, so get the list from
- * /proc/self/cgroup rather than /proc/cgroups.
- */
-static bool get_active_controllers(void)
-{
-	FILE *f;
-	char *line = NULL, *tok, *cur_path;
 	size_t len = 0;
 
 	f = fopen("/proc/self/cgroup", "r");
 	if (!f)
 		return false;
+
 	while (getline(&line, &len, f) != -1) {
-		int id;
-		char *subsystems;
-		if (sscanf(line, "%d:%m[^:]:%ms", &id, &subsystems, &cur_path) != 3) {
-			mysyslog(LOG_ERR, "Corrupt /proc/self/cgroup\n");
-			fclose(f);
-			free(line);
-			return false;
+		char *p, *p2, *tok;
+		char *saveptr = NULL;
+
+		p = strchr(line, ':');
+		if (!p)
+			continue;
+		p++;
+
+		p2 = strchr(p, ':');
+		if (!p2)
+			continue;
+		*p2 = '\0';
+
+		/* Skip the v2 hierarchy. */
+		if ((p2 - p) == 0)
+			continue;
+
+		for (tok = strtok_r(p, ",", &saveptr); tok;
+				tok = strtok_r(NULL, ",", &saveptr)) {
+			if (strncmp(tok, "name=", 5) == 0)
+				must_append_string(nlist, tok);
+			else
+				must_append_string(klist, tok);
 		}
-		if (id < 0 || id > 20) {
-			mysyslog(LOG_ERR, "Too many subsystems\n");
-			free(subsystems);
-			free(cur_path);
-			fclose(f);
-			free(line);
-			return false;
-		}
-		for (tok = strtok(subsystems, ","); tok; tok = strtok(NULL, ","))
-			add_controller(id, tok, cur_path);
-		free(subsystems);
-		free(cur_path);
 	}
-	fclose(f);
+
 	free(line);
-
-	get_mounted_paths();
-
-	if (!fill_in_init_paths()) {
-		mysyslog(LOG_ERR, "Failed finding cgroups for init task\n");
-		return false;
-	}
-
-	print_found_controllers();
-
-	initialized = true;
+	fclose(f);
 
 	return true;
 }
 
-/*
- * In Ubuntu 14.04, the paths created for us were
- * '/user/$uid.user/$something.session'
- * This can be merged better with systemd_created_slice_for_us(), but keeping
- * it separate makes it easier to reason about the correctness.
- */
-static bool systemd_v1_created_slice(struct controller *c, const char *in, uid_t uid)
+/* Get list of controllers for cgroupfs v2 hierarchy by looking at
+ * cgroup.controllers and/or cgroup.subtree_control of a given (parent) cgroup.
+static bool cgv2_get_controllers(char ***klist)
 {
-	char *p, *copy = strdupa(in);
+	return -ENOSYS;
+}
+*/
+
+/* Get current cgroup from /proc/self/cgroup for the cgroupfs v2 hierarchy. */
+static char *cgv2_get_current_cgroup(int pid)
+{
+	int ret;
+	char *cgroups_v2;
+	char *current_cgroup;
+	char *copy = NULL;
+	/* The largest integer that can fit into long int is 2^64. This is a
+	 * 20-digit number. */
+#define __PIDLEN /* /proc */ 5 + /* /pid-to-str */ 21 + /* /cgroup */ 7 + /* \0 */ 1
+	char path[__PIDLEN];
+
+	ret = snprintf(path, __PIDLEN, "/proc/%d/cgroup", pid);
+	if (ret < 0 || ret >= __PIDLEN)
+		return NULL;
+
+	cgroups_v2 = read_file(path);
+	if (!cgroups_v2)
+		return NULL;
+
+	current_cgroup = strstr(cgroups_v2, "0::/");
+	if (!current_cgroup)
+		goto cleanup_on_err;
+
+	current_cgroup = current_cgroup + 3;
+	copy = copy_to_eol(current_cgroup);
+	if (!copy)
+		goto cleanup_on_err;
+
+cleanup_on_err:
+	free(cgroups_v2);
+	if (copy)
+		trim(copy);
+
+	return copy;
+}
+
+/* Given two null-terminated lists of strings, return true if any string is in
+ * both.
+ */
+static bool cgv1_controller_lists_intersect(char **l1, char **l2)
+{
+	char **it;
+
+	if (!l2)
+		return false;
+
+	for (it = l1; it && *it; it++)
+		if (string_in_list(l2, *it))
+			return true;
+
+	return false;
+}
+
+/* For a null-terminated list of controllers @clist, return true if any of those
+ * controllers is already listed the null-terminated list of hierarchies @hlist.
+ * Realistically, if one is present, all must be present.
+ */
+static bool cgv1_controller_list_is_dup(struct cgv1_hierarchy **hlist, char **clist)
+{
+	struct cgv1_hierarchy **it;
+
+	for (it = hlist; it && *it; it++)
+		if ((*it)->controllers)
+			if (cgv1_controller_lists_intersect((*it)->controllers, clist))
+				return true;
+	return false;
+
+}
+
+/* Set boolean to mark controllers under which we are supposed create a
+ * writeable cgroup.
+ */
+static void cgv1_mark_to_make_rw(char **clist)
+{
+	struct cgv1_hierarchy **it;
+
+	for (it = cgv1_hierarchies; it && *it; it++)
+		if ((*it)->controllers)
+			if (cgv1_controller_lists_intersect((*it)->controllers, clist))
+				(*it)->create_rw_cgroup = true;
+}
+
+/* Set boolean to mark whether we are supposed to create a writeable cgroup in
+ * the cgroupfs v2 hierarchy.
+ */
+static void cgv2_mark_to_make_rw(char **clist)
+{
+	if (string_in_list(clist, "unified"))
+		if (cgv2_hierarchies)
+			(*cgv2_hierarchies)->create_rw_cgroup = true;
+}
+
+/* Wrapper around cgv{1,2}_mark_to_make_rw(). */
+static void cg_mark_to_make_rw(const char *cstring)
+{
+	char *copy, *tok;
+	char *saveptr = NULL;
+	char **clist = NULL;
+
+	copy = must_copy_string(cstring);
+
+	for (tok = strtok_r(copy, ",", &saveptr); tok;
+	     tok = strtok_r(NULL, ",", &saveptr))
+		must_add_to_list(&clist, tok);
+
+	free(copy);
+
+	cgv1_mark_to_make_rw(clist);
+	cgv2_mark_to_make_rw(clist);
+
+	free_string_list(clist);
+}
+
+/* Prefix any named controllers with "name=", e.g. "name=systemd". */
+static char *cgv1_must_prefix_named(char *entry)
+{
+	char *s;
+	int ret;
+	size_t len;
+
+	len = strlen(entry);
+	s = must_alloc(len + 6);
+
+	ret = snprintf(s, len + 6, "name=%s", entry);
+	if (ret < 0 || (size_t)ret >= (len + 6))
+		return NULL;
+
+	return s;
+}
+
+/* Append kernel controller in @klist or named controller in @nlist to @clist */
+static void must_append_controller(char **klist, char **nlist, char ***clist, char *entry)
+{
+	int newentry;
+	char *copy;
+
+	if (string_in_list(klist, entry) && string_in_list(nlist, entry))
+		return;
+
+	newentry = append_null_to_list((void ***)clist);
+
+	if (strncmp(entry, "name=", 5) == 0)
+		copy = must_copy_string(entry);
+	else if (string_in_list(klist, entry))
+		copy = must_copy_string(entry);
+	else
+		copy = cgv1_must_prefix_named(entry);
+
+	(*clist)[newentry] = copy;
+}
+
+/* Get the controllers from a mountinfo line. There are other ways we could get
+ * this info. For lxcfs, field 3 is /cgroup/controller-list. For cgroupfs, we
+ * could parse the mount options. But we simply assume that the mountpoint must
+ * be /sys/fs/cgroup/controller-list
+ */
+static char **cgv1_get_proc_mountinfo_controllers(char **klist, char **nlist, char *line)
+{
+	int i;
+	char *p, *p2, *tok;
+	char *saveptr = NULL;
+	char **aret = NULL;
+
+	p = line;
+
+	for (i = 0; i < 4; i++) {
+		p = strchr(p, ' ');
+		if (!p)
+			return NULL;
+		p++;
+	}
+	if (!p)
+		return NULL;
+
+	if (strncmp(p, "/sys/fs/cgroup/", 15) != 0)
+		return NULL;
+
+	p += 15;
+
+	p2 = strchr(p, ' ');
+	if (!p2)
+		return NULL;
+	*p2 = '\0';
+
+	for (tok = strtok_r(p, ",", &saveptr); tok;
+	     tok = strtok_r(NULL, ",", &saveptr))
+		must_append_controller(klist, nlist, &aret, tok);
+
+	return aret;
+}
+
+/* Check if a cgroupfs v2 controller is present in the string @cgline. */
+static bool cgv1_controller_in_clist(char *cgline, char *c)
+{
+	size_t len;
+	char *tok, *eol, *tmp;
+	char *saveptr = NULL;
+
+	eol = strchr(cgline, ':');
+	if (!eol)
+		return false;
+
+	len = eol - cgline;
+	tmp = alloca(len + 1);
+	memcpy(tmp, cgline, len);
+	tmp[len] = '\0';
+
+	for (tok = strtok_r(tmp, ",", &saveptr); tok;
+	     tok = strtok_r(NULL, ",", &saveptr)) {
+		if (strcmp(tok, c) == 0)
+			return true;
+	}
+	return false;
+}
+
+/* Get current cgroup from the /proc/<pid>/cgroup file passed in via @basecginfo
+ * of a given cgv1 controller passed in via @controller.
+ */
+static char *cgv1_get_current_cgroup(char *basecginfo, char *controller)
+{
+	char *p;
+
+	p = basecginfo;
+
+	while (true) {
+		p = strchr(p, ':');
+		if (!p)
+			return NULL;
+		p++;
+
+		if (cgv1_controller_in_clist(p, controller)) {
+			p = strchr(p, ':');
+			if (!p)
+				return NULL;
+			p++;
+
+			return copy_to_eol(p);
+		}
+
+		p = strchr(p, '\n');
+		if (!p)
+			return NULL;
+		p++;
+	}
+
+	return NULL;
+}
+
+/* Remove /init.scope from string @cg. This will mostly affect systemd-based
+ * systems.
+ */
+#define INIT_SCOPE "/init.scope"
+static void cg_systemd_prune_init_scope(char *cg)
+{
+	char *point;
+
+	if (!cg)
+		return;
+
+	point = cg + strlen(cg) - strlen(INIT_SCOPE);
+	if (point < cg)
+		return;
+
+	if (strcmp(point, INIT_SCOPE) == 0) {
+		if (point == cg)
+			*(point + 1) = '\0';
+		else
+			*point = '\0';
+	}
+}
+
+/* Add new info about a mounted cgroupfs v1 hierarchy. Includes the controllers
+ * mounted into that hierarchy (e.g. cpu,cpuacct), the mountpoint of that
+ * hierarchy (/sys/fs/cgroup/<controller>, the base cgroup of the current
+ * process gathered from /proc/self/cgroup, and the init cgroup of PID1 gathered
+ * from /proc/1/cgroup.
+ */
+static void cgv1_add_controller(char **clist, char *mountpoint, char *base_cgroup, char *init_cgroup)
+{
+	struct cgv1_hierarchy *new;
+	int newentry;
+
+	new = must_alloc(sizeof(*new));
+	new->controllers = clist;
+	new->mountpoint = mountpoint;
+	new->base_cgroup = base_cgroup;
+	new->fullcgpath = NULL;
+	new->create_rw_cgroup = false;
+	new->init_cgroup = init_cgroup;
+	new->systemd_user_slice = false;
+
+	newentry = append_null_to_list((void ***)&cgv1_hierarchies);
+	cgv1_hierarchies[newentry] = new;
+}
+
+/* Add new info about the mounted cgroupfs v2 hierarchy. Can (but doesn't
+ * currently) include the controllers mounted into the hierarchy (e.g.  memory,
+ * pids, blkio), the mountpoint of that hierarchy (Should usually be
+ * /sys/fs/cgroup but some init systems seems to think it might be a good idea
+ * to also mount empty cgroupfs v2 hierarchies at /sys/fs/cgroup/systemd.), the
+ * base cgroup of the current process gathered from /proc/self/cgroup, and the
+ * init cgroup of PID1 gathered from /proc/1/cgroup.
+ */
+static void cgv2_add_controller(char **clist, char *mountpoint, char *base_cgroup, char *init_cgroup, bool systemd_user_slice)
+{
+	struct cgv2_hierarchy *new;
+	int newentry;
+
+	new = must_alloc(sizeof(*new));
+	new->controllers = clist;
+	new->mountpoint = mountpoint;
+	new->base_cgroup = base_cgroup;
+	new->fullcgpath = NULL;
+	new->create_rw_cgroup = false;
+	new->init_cgroup = init_cgroup;
+	new->systemd_user_slice = systemd_user_slice;
+
+	newentry = append_null_to_list((void ***)&cgv2_hierarchies);
+	cgv2_hierarchies[newentry] = new;
+}
+
+/* In Ubuntu 14.04, the paths created for us were
+ * '/user/$uid.user/$something.session' This can be merged better with
+ * systemd_created_slice_for_us(), but keeping it separate makes it easier to
+ * reason about the correctness.
+ */
+static bool cg_systemd_under_user_slice_1(const char *in, uid_t uid)
+{
+	char *p;
 	size_t len;
 	int id;
+	char *copy = NULL;
+	bool bret = false;
 
+	copy = must_copy_string(in);
 	if (strlen(copy) < strlen("/user/1.user/1.session"))
-		return false;
+		goto cleanup;
 	p = copy + strlen(copy) - 1;
 
 	/* skip any trailing '/' (shouldn't be any, but be sure) */
 	while (p >= copy && *p == '/')
 		*(p--) = '\0';
 	if (p < copy)
-		return false;
+		goto cleanup;
 
 	/* Get last path element */
 	while (p >= copy && *p != '/')
 		p--;
 	if (p < copy)
-		return false;
+		goto cleanup;
 	/* make sure it is something.session */
-	len = strlen(p+1);
+	len = strlen(p + 1);
 	if (len < strlen("1.session") ||
-			strncmp(p+1 + len - 8, ".session", 8) != 0)
-		return false;
+	    strncmp(p + 1 + len - 8, ".session", 8) != 0)
+		goto cleanup;
 
 	/* ok last path piece checks out, now check the second to last */
-	*(p+1) = '\0';
-	while (p >= copy && *(--p) != '/');
-	if (sscanf(p+1, "%d.user/", &id) != 1)
-		return false;
+	*(p + 1) = '\0';
+	while (p >= copy && *(--p) != '/')
+		;
+	if (sscanf(p + 1, "%d.user/", &id) != 1)
+		goto cleanup;
 
 	if (id != (int)uid)
-		return false;
+		goto cleanup;
 
-	return true;
+	bret = true;
+
+cleanup:
+	free(copy);
+	return bret;
 }
 
-/*
- * So long as our path relative to init starts with /user.slice/user-$uid.slice,
- * assumem it belongs to $uid and chown it
+/* So long as our path relative to init starts with /user.slice/user-$uid.slice,
+ * assume it belongs to $uid and chown it
  */
-static bool under_systemd_user_slice(struct controller *c, uid_t uid)
+static bool cg_systemd_under_user_slice_2(const char *base_cgroup,
+					  const char *init_cgroup, uid_t uid)
 {
+	int ret;
 	char buf[100];
 	size_t curlen, initlen;
 
-	curlen = strlen(c->cur_path);
-	initlen = strlen(c->init_path);
+	curlen = strlen(base_cgroup);
+	initlen = strlen(init_cgroup);
 	if (curlen <= initlen)
 		return false;
-	if (strncmp(c->cur_path, c->init_path, initlen) != 0)
+
+	if (strncmp(base_cgroup, init_cgroup, initlen) != 0)
 		return false;
-	snprintf(buf, 100, "/user.slice/user-%d.slice/", (int)uid);
+
+	ret = snprintf(buf, 100, "/user.slice/user-%d.slice/", (int)uid);
+	if (ret < 0 || ret >= 100)
+		return false;
+
 	if (initlen == 1)
 		initlen = 0; // skip the '/'
-	return strncmp(c->cur_path + initlen, buf, strlen(buf)) == 0;
+
+	return strncmp(base_cgroup + initlen, buf, strlen(buf)) == 0;
 }
 
-/*
- * the systemd-created path is: user-$uid.slice/session-c$session.scope
- * If that is not the end of our systemd path, then we're not part of
- * the PAM call that created that path.
+/* The systemd-created path is: user-$uid.slice/session-c$session.scope. If that
+ * is not the end of our systemd path, then we're not part of the PAM call that
+ * created that path.
  *
  * The last piece is chowned to $uid, the user- part not.
- * Note - if the user creates paths that look like what we're looking for
- * to 'fool' us, either
- *   . they fool us, we create new cgroups, and they get auto-logged-out.
- *   . they fool a root sudo, systemd cgroup is not changed but chowned,
- *     and they lose ownership of their cgroups
+ * Note: If the user creates paths that look like what we're looking for to
+ * 'fool' us, either
+ *  - they fool us, we create new cgroups, and they get auto-logged-out.
+ *  - they fool a root sudo, systemd cgroup is not changed but chowned, and they
+ *    lose ownership of their cgroups
  */
-static bool systemd_created_slice_for_us(struct controller *c, const char *in, uid_t uid)
+static bool cg_systemd_created_user_slice(const char *base_cgroup,
+					  const char *init_cgroup,
+					  const char *in, uid_t uid)
 {
-	char *p, *copy = strdupa(in);
+	char *p;
 	size_t len;
 	int id;
+	char *copy = NULL;
+	bool bret = false;
 
-	if (systemd_v1_created_slice(c, in, uid))
-		return true;
+	copy = must_copy_string(in);
 
-	if (under_systemd_user_slice(c, uid))
-		return true;
+	/* An old version of systemd has already created a cgroup for us. */
+	if (cg_systemd_under_user_slice_1(in, uid))
+		goto succeed;
+
+	/* A new version of systemd has already created a cgroup for us. */
+	if (cg_systemd_under_user_slice_2(base_cgroup, init_cgroup, uid))
+		goto succeed;
 
 	if (strlen(copy) < strlen("/user-0.slice/session-0.scope"))
-		return false;
+		goto cleanup;
+
 	p = copy + strlen(copy) - 1;
-	/* skip any trailing '/' (shouldn't be any, but be sure) */
+	/* Skip any trailing '/' (shouldn't be any, but be sure). */
 	while (p >= copy && *p == '/')
 		*(p--) = '\0';
+
 	if (p < copy)
-		return false;
+		goto cleanup;
 
 	/* Get last path element */
 	while (p >= copy && *p != '/')
 		p--;
-	if (p < copy)
-		return false;
-	/* make sure it is session-something.scope */
-	len = strlen(p+1);
-	if (strncmp(p+1, "session-", strlen("session-")) != 0 ||
-			strncmp(p+1 + len - 6, ".scope", 6) != 0)
-		return false;
 
-	/* ok last path piece checks out, now check the second to last */
-	*(p+1) = '\0';
-	while (p >= copy && *(--p) != '/');
-	if (sscanf(p+1, "user-%d.slice/", &id) != 1)
-		return false;
+	if (p < copy)
+		goto cleanup;
+
+	/* Make sure it is session-something.scope. */
+	len = strlen(p + 1);
+	if (strncmp(p + 1, "session-", strlen("session-")) != 0 ||
+	    strncmp(p + 1 + len - 6, ".scope", 6) != 0)
+		goto cleanup;
+
+	/* Ok last path piece checks out, now check the second to last. */
+	*(p + 1) = '\0';
+	while (p >= copy && *(--p) != '/')
+		;
+
+	if (sscanf(p + 1, "user-%d.slice/", &id) != 1)
+		goto cleanup;
 
 	if (id != (int)uid)
-		return false;
+		goto cleanup;
 
-	return true;
-}
-/*
- * Handle systemd creation.  Return true if all's done.  Returns false if
- * the caller needs to create=chown a cgroup
- */
-static bool handle_systemd_create(struct controller *c, uid_t uid, gid_t gid)
-{
-	char *user_path;
-
-	if (!c->systemd_created)
-		return false;
-
-	user_path = must_strcat(c->mount_path, c->cur_path, NULL);
-
-	// Is this actually our cgroup, or was it created for someone
-	// else?
-	if (!systemd_created_slice_for_us(c, user_path, uid)) {
-		c->systemd_created = false;
-		free(user_path);
-		return false;
-	}
-
-	// a name=systemd cgroup has already been created, just chown it
-	if (chown(user_path, uid, gid) < 0)
-		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m\n",
-				user_path, (int)uid, (int)gid);
-	free(user_path);
-	return true;
+succeed:
+	bret = true;
+cleanup:
+	free(copy);
+	return bret;
 }
 
-static bool cgfs_create_forone(struct controller *c, uid_t uid, gid_t gid, const char *cg, bool *existed)
+/* Chown existing cgroup that systemd has already created for us. */
+static bool cg_systemd_chown_existing_cgroup(const char *mountpoint,
+					     const char *base_cgroup, uid_t uid,
+					     gid_t gid, bool systemd_user_slice)
 {
-	while (c) {
-		if (!c->mount_path || !c->init_path)
-			goto next;
-
-		if (strcmp(c->name, "name=systemd") == 0 && handle_systemd_create(c, uid, gid))
-			return true;
-
-		char *path = must_strcat(c->mount_path, c->init_path, cg, NULL);
-#if DEBUG
-		fprintf(stderr, "Creating %s for %s\n", path, c->name);
-#endif
-		if (exists(path)) {
-			free(path);
-			*existed = true;
-#if DEBUG
-			fprintf(stderr, "%s existed\n", path);
-#endif
-			return false;
-		}
-
-		bool pass = mkdir_p(c->mount_path, path);
-#if DEBUG
-		fprintf(stderr, "Creating %s %s\n", path, pass ? "succeeded" : "failed");
-#endif
-		if (pass) {
-			if (chown(path, uid, gid) < 0)
-				mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m\n",
-					path, (int)uid, (int)gid);
-		}
-		free(path);
-		if (pass)
-			return true;
-next:
-		c = c->next;
-	}
-	return false;
-}
-
-static void recursive_rmdir(const char *path)
-{
-	struct dirent *direntp;
-	DIR *dir;
-
-	dir = opendir(path);
-	if (!dir)
-		return;
-	while ((direntp = readdir(dir))!= NULL) {
-		if (!strcmp(direntp->d_name, ".") ||
-				!strcmp(direntp->d_name, ".."))
-			continue;
-
-		char *dpath = must_strcat(path, "/", direntp->d_name, NULL);
-		if (is_dir(dpath)) {
-			recursive_rmdir(dpath);
-#if DEBUG
-			fprintf(stderr, "attempting to remove %s\n", dpath);
-#endif
-			if (rmdir(dpath) < 0) {
-#if DEBUG
-				fprintf(stderr, "Failed removing %s: %m\n", dpath);
-#endif
-			}
-		}
-		free(dpath);
-	}
-
-	closedir(dir);
-}
-
-/*
- * Try to remove a cgroup in a controller to cleanup during failure.
- * All mounts of comounted controllers are the same, so we just look
- * for the first mount which exists, try to remove the directory, and
- * return.
- */
-static void cgfs_remove_forone(int idx, const char *cg)
-{
-	struct controller *c = controllers[idx];
 	char *path;
 
-	while (c) {
-		if (c->mount_path) {
-			path = must_strcat(c->mount_path, cg, NULL);
-			recursive_rmdir(path);
-			free(path);
-		}
-		c = c->next;
-	}
+	if (!systemd_user_slice)
+		return false;
+
+	path = must_make_path(mountpoint, base_cgroup, NULL);
+
+	/* A cgroup within name=systemd has already been created. So we only
+	 * need to chown it.
+	 */
+	if (chown(path, uid, gid) < 0)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
+			 path, (int)uid, (int)gid, NULL);
+
+	free(path);
+	return true;
 }
 
-static bool cgfs_create(const char *cg, uid_t uid, gid_t gid, bool *existed)
+/* Detect and store information about cgroupfs v1 hierarchies. */
+static bool cgv1_init(uid_t uid, gid_t gid)
 {
-	*existed = false;
-	int i, j;
+	FILE *f;
+	struct cgv1_hierarchy **it;
+	char *basecginfo;
+	char *line = NULL;
+	char **klist = NULL, **nlist = NULL;
+	size_t len = 0;
 
-#if DEBUG
-	fprintf(stderr, "creating %s\n", cg);
-#endif
-	for (i = 0; i < MAXCONTROLLERS; i++) {
-		struct controller *c = controllers[i];
+	basecginfo = read_file("/proc/self/cgroup");
+	if (!basecginfo)
+		return false;
 
-		if (!c)
+	f = fopen("/proc/self/mountinfo", "r");
+	if (!f) {
+		free(basecginfo);
+		return false;
+	}
+
+	cgv1_get_controllers(&klist, &nlist);
+
+	while (getline(&line, &len, f) != -1) {
+		char **controller_list = NULL;
+		char *mountpoint, *base_cgroup;
+
+		if (is_lxcfs(line) || !is_cgv1(line))
 			continue;
 
-		if (!cgfs_create_forone(c, uid, gid, cg, existed)) {
-			for (j = 0; j < i; j++)
-				cgfs_remove_forone(j, cg);
-			return false;
+		controller_list = cgv1_get_proc_mountinfo_controllers(klist, nlist, line);
+		if (!controller_list)
+			continue;
+
+		if (cgv1_controller_list_is_dup(cgv1_hierarchies,
+						controller_list)) {
+			free(controller_list);
+			continue;
+		}
+
+		mountpoint = get_mountpoint(line);
+		if (!mountpoint) {
+			free_string_list(controller_list);
+			continue;
+		}
+
+		base_cgroup = cgv1_get_current_cgroup(basecginfo, controller_list[0]);
+		if (!base_cgroup) {
+			free_string_list(controller_list);
+			free(mountpoint);
+			continue;
+		}
+		trim(base_cgroup);
+		lxcfs_debug("Detected cgroupfs v1 controller \"%s\" with "
+			    "mountpoint \"%s\" and cgroup \"%s\".\n",
+			    controller_list[0], mountpoint, base_cgroup);
+		cgv1_add_controller(controller_list, mountpoint, base_cgroup,
+				    NULL);
+	}
+	free_string_list(klist);
+	free_string_list(nlist);
+	free(basecginfo);
+	fclose(f);
+	free(line);
+
+	/* Retrieve init cgroup path for all controllers. */
+	basecginfo = read_file("/proc/1/cgroup");
+	if (!basecginfo)
+		return false;
+
+	for (it = cgv1_hierarchies; it && *it; it++) {
+		if ((*it)->controllers) {
+			char *init_cgroup, *user_slice;
+			/* We've already stored the controller and received its
+			 * current cgroup. If we now fail to retrieve its init
+			 * cgroup, we should probably fail.
+			 */
+			init_cgroup = cgv1_get_current_cgroup(basecginfo, (*it)->controllers[0]);
+			if (!init_cgroup) {
+				free(basecginfo);
+				return false;
+			}
+			cg_systemd_prune_init_scope(init_cgroup);
+			(*it)->init_cgroup = init_cgroup;
+			lxcfs_debug("cgroupfs v1 controller \"%s\" has init "
+				    "cgroup \"%s\".\n",
+				    (*(*it)->controllers), init_cgroup);
+			/* Check whether systemd has already created a cgroup
+			 * for us.
+			 */
+			user_slice = must_make_path((*it)->mountpoint, (*it)->base_cgroup, NULL);
+			if (cg_systemd_created_user_slice((*it)->base_cgroup, (*it)->init_cgroup, user_slice, uid))
+				(*it)->systemd_user_slice = true;
 		}
 	}
+	free(basecginfo);
 
 	return true;
 }
 
-static bool write_int(char *path, int v)
+/* __typeof__ should be safe to use with all compilers. */
+typedef __typeof__(((struct statfs *)NULL)->f_type) fs_type_magic;
+/* Check whether given mountpoint has mount type specified via @magic_val. */
+static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val)
 {
-	FILE *f = fopen(path, "w");
-	bool ret = true;
+	return (fs->f_type == (fs_type_magic)magic_val);
+}
 
+/* Check whether @path is a cgroupfs v1 or cgroupfs v2 mount. Returns -1 if
+ * statfs fails. If @path is null /sys/fs/cgroup is checked.
+ */
+static int cg_get_version_of_mntpt(const char *path)
+{
+	int ret;
+	struct statfs sb;
+
+	if (path)
+		ret = statfs(path, &sb);
+	else
+		ret = statfs("/sys/fs/cgroup", &sb);
+
+	if (ret < 0)
+		return -1;
+
+	if (has_fs_type(&sb, CGROUP_SUPER_MAGIC))
+		return 1;
+	else if (has_fs_type(&sb, CGROUP2_SUPER_MAGIC))
+		return 2;
+
+	return 0;
+}
+
+/* Detect and store information about the cgroupfs v2 hierarchy. Currently only
+ * deals with the empty v2 hierachy as we do not retrieve enabled controllers.
+ */
+static bool cgv2_init(uid_t uid, gid_t gid)
+{
+	char *mountpoint;
+	bool ret = false;
+	FILE *f = NULL;
+	char *current_cgroup = NULL, *init_cgroup = NULL;
+	char * line = NULL;
+	size_t len = 0;
+
+	current_cgroup = cgv2_get_current_cgroup(getpid());
+	if (!current_cgroup) {
+		/* No v2 hierarchy present. We're done. */
+		ret = true;
+		goto cleanup;
+	}
+
+	init_cgroup = cgv2_get_current_cgroup(1);
+	if (!init_cgroup) {
+		/* If we're here and didn't fail already above, then something's
+		 * certainly wrong, so error this time.
+		 */
+		goto cleanup;
+	}
+	cg_systemd_prune_init_scope(init_cgroup);
+
+	/* Check if the v2 hierarchy is mounted at its standard location.
+	 * If so we can skip the rest of the work here. Although the unified
+	 * hierarchy can be mounted multiple times, each of those mountpoints
+	 * will expose identical information.
+	 */
+	if (cg_get_version_of_mntpt("/sys/fs/cgroup") == 2) {
+		char *user_slice;
+		bool has_user_slice = false;
+
+		mountpoint = must_copy_string("/sys/fs/cgroup");
+		if (!mountpoint)
+			goto cleanup;
+
+		user_slice = must_make_path(mountpoint, current_cgroup, NULL);
+		if (cg_systemd_created_user_slice(current_cgroup, init_cgroup, user_slice, uid))
+			has_user_slice = true;
+		free(user_slice);
+
+		cgv2_add_controller(NULL, mountpoint, current_cgroup, init_cgroup, has_user_slice);
+
+		ret = true;
+		goto cleanup;
+	}
+
+	f = fopen("/proc/self/mountinfo", "r");
 	if (!f)
 		return false;
-	if (fprintf(f, "%d\n", v) < 0)
-		ret = false;
-	if (fclose(f) != 0)
-		ret = false;
-	return ret;
-}
 
-static bool do_enter(struct controller *c, const char *cg)
-{
-	char *path;
-	bool pass;
-
-	while (c) {
-		if (!c->mount_path || !c->init_path)
-			goto next;
-		path = must_strcat(c->mount_path, c->init_path, cg, "/cgroup.procs", NULL);
-		if (!exists(path)) {
-			free(path);
-			path = must_strcat(c->mount_path, c->init_path, cg, "/tasks", NULL);
-		}
-#if DEBUG
-		fprintf(stderr, "Attempting to enter %s:%s using %s\n", c->name, cg, path);
-#endif
-		pass = write_int(path, (int)getpid());
-		free(path);
-		if (pass) /* only have to enter one of the comounts */
-			return true;
-#if DEBUG
-		if (!pass)
-			fprintf(stderr, "Failed to enter %s:%s\n", c->name, cg);
-#endif
-next:
-		c = c->next;
-	}
-
-	return false;
-}
-
-static bool cgfs_enter(const char *cg, bool skip_systemd)
-{
-	int i;
-
-	for (i = 0; i < MAXCONTROLLERS; i++) {
-		struct controller *c = controllers[i];
-
-		if (!c)
+	/* we support simple cgroup mounts and lxcfs mounts */
+	while (getline(&line, &len, f) != -1) {
+		char *user_slice;
+		bool has_user_slice = false;
+		if (!is_cgv2(line))
 			continue;
 
-		if (strcmp(c->name, "name=systemd") == 0) {
-			if (skip_systemd)
-				continue;
-			if (c->systemd_created)
-				continue;
-		}
+		mountpoint = get_mountpoint(line);
+		if (!mountpoint)
+			continue;
 
-		if (!do_enter(c, cg))
+		user_slice = must_make_path(mountpoint, current_cgroup, NULL);
+		if (cg_systemd_created_user_slice(current_cgroup, init_cgroup, user_slice, uid))
+			has_user_slice = true;
+		free(user_slice);
+
+		cgv2_add_controller(NULL, mountpoint, current_cgroup, init_cgroup, has_user_slice);
+		/* Although the unified hierarchy can be mounted multiple times,
+		 * each of those mountpoints will expose identical information.
+		 * So let the first mountpoint we find, win.
+		 */
+		break;
+	}
+
+	lxcfs_debug("Detected cgroupfs v2 hierarchy at mountpoint \"%s\" with "
+		    "current cgroup \"%s\" and init cgroup \"%s\".\n",
+		    mountpoint, current_cgroup, init_cgroup);
+
+cleanup:
+	if (f)
+		fclose(f);
+	free(line);
+
+	return true;
+}
+
+/* Detect and store information about mounted cgroupfs v1 hierarchies and the
+ * cgroupfs v2 hierarchy.
+ * Detect whether we are on a pure cgroupfs v1, cgroupfs v2, or mixed system,
+ * where some controllers are mounted into their standard cgroupfs v1 locations
+ * (/sys/fs/cgroup/<controller>) and others are mounted into the cgroupfs v2
+ * hierarchy (/sys/fs/cgroup).
+ */
+static bool cg_init(uid_t uid, gid_t gid)
+{
+	if (!cgv1_init(uid, gid))
+		return false;
+
+	if (!cgv2_init(uid, gid))
+		return false;
+
+	if (cgv1_hierarchies && cgv2_hierarchies) {
+		cg_mount_mode = CGROUP_MIXED;
+		lxcfs_debug("%s\n", "Detected cgroupfs v1 and v2 hierarchies.");
+	} else if (cgv1_hierarchies && !cgv2_hierarchies) {
+		cg_mount_mode = CGROUP_PURE_V1;
+		lxcfs_debug("%s\n", "Detected cgroupfs v1 hierarchies.");
+	} else if (cgv2_hierarchies && !cgv1_hierarchies) {
+		cg_mount_mode = CGROUP_PURE_V2;
+		lxcfs_debug("%s\n", "Detected cgroupfs v2 hierarchies.");
+	} else {
+		cg_mount_mode = CGROUP_UNKNOWN;
+		mysyslog(LOG_ERR, "Could not detect cgroupfs hierarchy.\n", NULL);
+	}
+
+	if (cg_mount_mode == CGROUP_UNKNOWN)
+		return false;
+
+	return true;
+}
+
+/* Try to move/migrate us into @cgroup in a cgroupfs v1 hierarchy. */
+static bool cgv1_enter(const char *cgroup)
+{
+	struct cgv1_hierarchy **it;
+
+	for (it = cgv1_hierarchies; it && *it; it++) {
+		char **controller;
+		bool entered = false;
+
+		if (!(*it)->controllers || !(*it)->mountpoint ||
+		    !(*it)->init_cgroup || !(*it)->create_rw_cgroup)
+			continue;
+
+		for (controller = (*it)->controllers; controller && *controller;
+		     controller++) {
+			char *path;
+
+			/* We've already been placed in a user slice, so we
+			 * don't need to enter the cgroup again.
+			 */
+			if ((*it)->systemd_user_slice) {
+				entered = true;
+				break;
+			}
+
+			path = must_make_path((*it)->mountpoint,
+					      (*it)->init_cgroup,
+					      cgroup,
+					      "/cgroup.procs",
+					      NULL);
+			if (!file_exists(path)) {
+				free(path);
+				path = must_make_path((*it)->mountpoint,
+						      (*it)->init_cgroup,
+						      cgroup,
+						      "/tasks",
+						      NULL);
+			}
+			lxcfs_debug("Attempting to enter cgroupfs v1 hierarchy in \"%s\" cgroup.\n", path);
+			entered = write_int(path, (int)getpid());
+			if (entered) {
+				free(path);
+				break;
+			}
+			lxcfs_debug("Failed to enter cgroupfs v1 hierarchy in \"%s\" cgroup.\n", path);
+			free(path);
+		}
+		if (!entered)
 			return false;
 	}
 
 	return true;
 }
 
-static void cgfs_escape(void)
+/* Try to move/migrate us into @cgroup in the cgroupfs v2 hierarchy. */
+static bool cgv2_enter(const char *cgroup)
 {
-	if (!cgfs_enter("/", true)) {
-		mysyslog(LOG_WARNING, "Failed to escape to init's cgroup\n");
+	struct cgv2_hierarchy *v2;
+	char *path;
+	bool entered = false;
+
+	if (!cgv2_hierarchies)
+		return true;
+
+	v2 = *cgv2_hierarchies;
+
+	if (!v2->mountpoint || !v2->base_cgroup)
+		return false;
+
+	if (!v2->create_rw_cgroup || v2->systemd_user_slice)
+		return true;
+
+	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
+			      "/cgroup.procs", NULL);
+	lxcfs_debug("Attempting to enter cgroupfs v2 hierarchy in cgroup \"%s\".\n", path);
+	entered = write_int(path, (int)getpid());
+	if (!entered) {
+		lxcfs_debug("Failed to enter cgroupfs v2 hierarchy in cgroup \"%s\".\n", path);
+		free(path);
+		return false;
 	}
+
+	free(path);
+
+	return true;
 }
 
+/* Wrapper around cgv{1,2}_enter(). */
+static bool cg_enter(const char *cgroup)
+{
+	if (!cgv1_enter(cgroup)) {
+		mysyslog(LOG_WARNING, "cgroupfs v1: Failed to enter cgroups.\n", NULL);
+		return false;
+	}
+
+	if (!cgv2_enter(cgroup)) {
+		mysyslog(LOG_WARNING, "cgroupfs v2: Failed to enter cgroups.\n", NULL);
+		return false;
+	}
+
+	return true;
+}
+
+/* Escape to root cgroup in all detected cgroupfs v1 hierarchies. */
+static void cgv1_escape(void)
+{
+	if (!cgv1_enter("/"))
+		mysyslog(LOG_WARNING, "cgroupfs v1: Failed to escape to init's cgroup.\n", NULL);
+}
+
+/* Escape to root cgroup in the cgroupfs v2 hierarchy. */
+static void cgv2_escape(void)
+{
+	if (!cgv2_enter("/"))
+		mysyslog(LOG_WARNING, "cgroupfs v2: Failed to escape to init's cgroup.\n", NULL);
+}
+
+/* Wrapper around cgv{1,2}_escape(). */
+static void cg_escape(void)
+{
+	cgv1_escape();
+	cgv2_escape();
+}
+
+/* Get uid and gid for @user. */
 static bool get_uid_gid(const char *user, uid_t *uid, gid_t *gid)
 {
 	struct passwd *pwent;
@@ -765,47 +1537,293 @@ static bool get_uid_gid(const char *user, uid_t *uid, gid_t *gid)
 	pwent = getpwnam(user);
 	if (!pwent)
 		return false;
+
 	*uid = pwent->pw_uid;
 	*gid = pwent->pw_gid;
 
 	return true;
 }
 
-#define DIRNAMSZ 200
-static int handle_login(const char *user)
+/* Check if cgroup belongs to our uid and gid. If so, reuse it. */
+static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid)
+{
+	struct stat statbuf;
+
+	if (stat(path, &statbuf) < 0)
+		return false;
+
+	if (!(statbuf.st_uid == uid) || !(statbuf.st_gid == gid))
+		return false;
+
+	return true;
+}
+
+/* Create and chown @cgroup for all given controllers in a cgroupfs v1 hierarchy
+ * (For example, create @cgroup for the cpu and cpuacct controller mounted into
+ * /sys/fs/cgroup/cpu,cpuacct). Check if the path already exists and report back
+ * to the caller in @existed.
+ */
+#define __PAM_CGFS_USER "/user/"
+#define __PAM_CGFS_USER_LEN 6
+static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t uid, gid_t gid, bool *existed)
+{
+	char *clean_base_cgroup, *path;
+	char **controller;
+	struct cgv1_hierarchy *it;
+	bool created = false;
+
+	*existed = false;
+	it = h;
+	for (controller = it->controllers; controller && *controller;
+	     controller++) {
+		created = false;
+		/* If systemd has already created a cgroup for us, keep using
+		 * it.
+		 */
+		if (cg_systemd_chown_existing_cgroup(it->mountpoint,
+						     it->base_cgroup, uid, gid,
+						     it->systemd_user_slice)) {
+			return true;
+		}
+
+		/* We need to make sure that we do not create an endless chain
+		 * of sub-cgroups. So we check if we have already logged in
+		 * somehow (sudo -i, su, etc.) and have created a
+		 * /user/PAM_user/idx cgroup. If so, we skip that part. For most
+		 * cgroups this is unnecessary since we use the init_cgroup
+		 * anyway, but for controllers which have an existing systemd
+		 * cgroup that does not match the current uid, this is pretty
+		 * useful.
+		 */
+		if (strncmp(it->base_cgroup, __PAM_CGFS_USER, __PAM_CGFS_USER_LEN) == 0) {
+			free(it->base_cgroup);
+			it->base_cgroup = must_copy_string("/");
+		} else {
+			clean_base_cgroup =
+				strstr(it->base_cgroup, __PAM_CGFS_USER);
+			if (clean_base_cgroup)
+				*clean_base_cgroup = '\0';
+		}
+
+		path = must_make_path(it->mountpoint, it->init_cgroup, cgroup, NULL);
+		lxcfs_debug("Constructing path: %s.\n", path);
+		if (file_exists(path)) {
+			bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
+			lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+			free(path);
+			if (our_cg)
+				*existed = false;
+			else
+				*existed = true;
+			return our_cg;
+		}
+		created = mkdir_p(it->mountpoint, path);
+		if (!created) {
+			free(path);
+			continue;
+		}
+		if (chown(path, uid, gid) < 0)
+			lxcfs_debug("Failed to chown %s to %d:%d: %m.\n", path,
+				    (int)uid, (int)gid);
+		free(path);
+		break;
+	}
+
+	if (!created)
+		return false;
+
+	return true;
+}
+
+/* Try to remove @cgroup for all given controllers in a cgroupfs v1 hierarchy
+ * (For example, try to remove @cgroup for the cpu and cpuacct controller
+ * mounted into /sys/fs/cgroup/cpu,cpuacct). Ignores failures.
+ */
+static bool cgv1_remove_one(struct cgv1_hierarchy *h, const char *cgroup)
+{
+
+	char *path;
+
+	/* Better safe than sorry. */
+	if (!h->controllers)
+		return true;
+
+	/* Cgroups created by systemd for us which we re-use won't be removed
+	 * here, since we're using init_cgroup + cgroup as path instead of
+	 * base_cgroup + cgroup.
+	 */
+	path = must_make_path(h->mountpoint, h->init_cgroup, cgroup, NULL);
+	(void)recursive_rmdir(path);
+	free(path);
+
+	return true;
+}
+
+/* Try to remove @cgroup the cgroupfs v2 hierarchy. */
+static bool cgv2_remove(const char *cgroup)
+{
+	struct cgv2_hierarchy *v2;
+	char *path;
+
+	if (!cgv2_hierarchies)
+		return true;
+
+	v2 = *cgv2_hierarchies;
+
+	/* If we reused an already existing cgroup, don't bother trying to
+	 * remove (a potentially wrong)/the path.
+	 * Cgroups created by systemd for us which we re-use would be removed
+	 * here, since we're using base_cgroup + cgroup as path.
+	 */
+	if (v2->systemd_user_slice)
+		return true;
+
+	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, NULL);
+	(void)recursive_rmdir(path);
+	free(path);
+
+	return true;
+}
+
+/* Create @cgroup in all detected cgroupfs v1 hierarchy. If the creation fails
+ * for any cgroupfs v1 hierarchy, remove all we have created so far. Report
+ * back, to the caller if the creation failed due to @cgroup already existing
+ * via @existed.
+ */
+static bool cgv1_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
+{
+	struct cgv1_hierarchy **it, **rev_it;
+	bool all_created = true;
+
+	for (it = cgv1_hierarchies; it && *it; it++) {
+		if (!(*it)->controllers || !(*it)->mountpoint ||
+		    !(*it)->init_cgroup || !(*it)->create_rw_cgroup)
+			continue;
+
+		if (!cgv1_create_one(*it, cgroup, uid, gid, existed)) {
+			all_created = false;
+			break;
+		}
+	}
+
+	if (all_created)
+		return true;
+
+	for (rev_it = cgv1_hierarchies; rev_it && *rev_it && (*rev_it != *it);
+	     rev_it++)
+		cgv1_remove_one(*rev_it, cgroup);
+
+	return false;
+}
+
+/* Create @cgroup in the cgroupfs v2 hierarchy. Report back, to the caller if
+ * the creation failed due to @cgroup already existing via @existed.
+ */
+static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
+{
+	char *clean_base_cgroup;
+	char *path;
+	struct cgv2_hierarchy *v2;
+	bool created = false;
+
+	*existed = false;
+
+	if (!cgv2_hierarchies || !(*cgv2_hierarchies)->create_rw_cgroup)
+		return true;
+
+	v2 = *cgv2_hierarchies;
+
+	/* We can't be placed under init's cgroup for the v2 hierarchy. We need
+	 * to be placed under our current cgroup.
+	 */
+	if (cg_systemd_chown_existing_cgroup(v2->mountpoint,
+				v2->base_cgroup, uid, gid,
+				v2->systemd_user_slice))
+		return true;
+
+	/* We need to make sure that we do not create an endless chaing of
+	 * sub-cgroups. So we check if we have already logged in somehow (sudo
+	 * -i, su, etc.) and have created a /user/PAM_user/idx cgroup. If so, we
+	 * skip that part.
+	 */
+	if (strncmp(v2->base_cgroup, __PAM_CGFS_USER, __PAM_CGFS_USER_LEN) == 0) {
+		free(v2->base_cgroup);
+		v2->base_cgroup = must_copy_string("/");
+	} else {
+		clean_base_cgroup = strstr(v2->base_cgroup, __PAM_CGFS_USER);
+		if (clean_base_cgroup)
+			*clean_base_cgroup = '\0';
+	}
+
+	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, NULL);
+	lxcfs_debug("Constructing path \"%s\".\n", path);
+	if (file_exists(path)) {
+		bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
+		lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+		free(path);
+		if (our_cg)
+			*existed = false;
+		else
+			*existed = true;
+		return our_cg;
+	}
+
+	created = mkdir_p(v2->mountpoint, path);
+	if (!created) {
+		free(path);
+		return false;
+	}
+
+	if (chown(path, uid, gid) < 0)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
+			 path, (int)uid, (int)gid, NULL);
+	free(path);
+
+	return true;
+}
+
+/* Create writeable cgroups for @user at login. Details can be found in the
+ * preamble/license at the top of this file.
+ */
+static int handle_login(const char *user, uid_t uid, gid_t gid)
 {
 	int idx = 0, ret;
 	bool existed;
-	uid_t uid = 0;
-	gid_t gid = 0;
 	char cg[MAXPATHLEN];
 
-	if (!get_uid_gid(user, &uid, &gid)) {
-		mysyslog(LOG_ERR, "Failed to get uid and gid for %s\n", user);
-		return PAM_SESSION_ERR;
-	}
-
-	cgfs_escape();
+	cg_escape();
 
 	while (idx >= 0) {
 		ret = snprintf(cg, MAXPATHLEN, "/user/%s/%d", user, idx);
 		if (ret < 0 || ret >= MAXPATHLEN) {
-			mysyslog(LOG_ERR, "username too long\n");
+			mysyslog(LOG_ERR, "Username too long.\n", NULL);
 			return PAM_SESSION_ERR;
 		}
 
 		existed = false;
-		if (!cgfs_create(cg, uid, gid, &existed)) {
+		if (!cgv2_create(cg, uid, gid, &existed)) {
 			if (existed) {
+				cgv2_remove(cg);
 				idx++;
 				continue;
 			}
-			mysyslog(LOG_ERR, "Failed to create a cgroup for user %s\n", user);
+			mysyslog(LOG_ERR, "Failed to create a cgroup for user %s.\n", user, NULL);
 			return PAM_SESSION_ERR;
 		}
 
-		if (!cgfs_enter(cg, false)) {
-			mysyslog(LOG_ERR, "Failed to enter user cgroup %s for user %s\n", cg, user);
+		existed = false;
+		if (!cgv1_create(cg, uid, gid, &existed)) {
+			if (existed) {
+				cgv2_remove(cg);
+				idx++;
+				continue;
+			}
+			mysyslog(LOG_ERR, "Failed to create a cgroup for user %s.\n", user, NULL);
+			return PAM_SESSION_ERR;
+		}
+
+		if (!cg_enter(cg)) {
+			mysyslog( LOG_ERR, "Failed to enter user cgroup %s for user %s.\n", cg, user, NULL);
 			return PAM_SESSION_ERR;
 		}
 		break;
@@ -814,75 +1832,229 @@ static int handle_login(const char *user)
 	return PAM_SUCCESS;
 }
 
+/* Try to prune cgroups we created and that now are empty from all cgroupfs v1
+ * hierarchies.
+ */
+static bool cgv1_prune_empty_cgroups(const char *user)
+{
+	bool controller_removed = true;
+	bool all_removed = true;
+	struct cgv1_hierarchy **it;
+
+	for (it = cgv1_hierarchies; it && *it; it++) {
+		int ret;
+		char *path_base, *path_init;
+		char **controller;
+
+		if (!(*it)->controllers || !(*it)->mountpoint ||
+		    !(*it)->init_cgroup || !(*it)->create_rw_cgroup)
+			continue;
+
+		for (controller = (*it)->controllers; controller && *controller;
+		     controller++) {
+			bool path_base_rm, path_init_rm;
+
+			path_base = must_make_path((*it)->mountpoint, (*it)->base_cgroup, "/user", user, NULL);
+			lxcfs_debug("cgroupfs v1: Trying to prune \"%s\".\n", path_base);
+			ret = recursive_rmdir(path_base);
+			if (ret == -ENOENT || ret >= 0)
+				path_base_rm = true;
+			else
+				path_base_rm = false;
+			free(path_base);
+
+			path_init = must_make_path((*it)->mountpoint, (*it)->init_cgroup, "/user", user, NULL);
+			lxcfs_debug("cgroupfs v1: Trying to prune \"%s\".\n", path_init);
+			ret = recursive_rmdir(path_init);
+			if (ret == -ENOENT || ret >= 0)
+				path_init_rm = true;
+			else
+				path_init_rm = false;
+			free(path_init);
+
+			if (!path_base_rm && !path_init_rm) {
+				controller_removed = false;
+				continue;
+			}
+
+			controller_removed = true;
+			break;
+		}
+		if (!controller_removed)
+			all_removed = false;
+	}
+
+	return all_removed;
+}
+
+/* Try to prune cgroup we created and that now is empty from the cgroupfs v2
+ * hierarchy.
+ */
+static bool cgv2_prune_empty_cgroups(const char *user)
+{
+	int ret;
+	struct cgv2_hierarchy *v2;
+	char *path_base, *path_init;
+	bool path_base_rm, path_init_rm;
+
+	if (!cgv2_hierarchies)
+		return true;
+
+	v2 = *cgv2_hierarchies;
+
+	path_base = must_make_path(v2->mountpoint, v2->base_cgroup, "/user", user, NULL);
+	lxcfs_debug("cgroupfs v2: Trying to prune \"%s\".\n", path_base);
+	ret = recursive_rmdir(path_base);
+	if (ret == -ENOENT || ret >= 0)
+		path_base_rm = true;
+	else
+		path_base_rm = false;
+	free(path_base);
+
+	path_init = must_make_path(v2->mountpoint, v2->init_cgroup, "/user", user, NULL);
+	lxcfs_debug("cgroupfs v2: Trying to prune \"%s\".\n", path_init);
+	ret = recursive_rmdir(path_init);
+	if (ret == -ENOENT || ret >= 0)
+		path_init_rm = true;
+	else
+		path_init_rm = false;
+	free(path_init);
+
+	if (!path_base_rm && !path_init_rm)
+		return false;
+
+	return true;
+}
+
+/* Wrapper around cgv{1,2}_prune_empty_cgroups(). */
+static void cg_prune_empty_cgroups(const char *user)
+{
+	(void)cgv1_prune_empty_cgroups(user);
+	(void)cgv2_prune_empty_cgroups(user);
+}
+
+/* Free allocated information for detected cgroupfs v1 hierarchies. */
+static void cgv1_free_hierarchies(void)
+{
+	struct cgv1_hierarchy **it;
+
+	if (!cgv1_hierarchies)
+		return;
+
+	for (it = cgv1_hierarchies; it && *it; it++) {
+		if ((*it)->controllers) {
+			char **tmp;
+			for (tmp = (*it)->controllers; tmp && *tmp; tmp++)
+				free(*tmp);
+
+			free((*it)->controllers);
+		}
+		free((*it)->mountpoint);
+		free((*it)->base_cgroup);
+		free((*it)->fullcgpath);
+		free((*it)->init_cgroup);
+	}
+	free(cgv1_hierarchies);
+}
+
+/* Free allocated information for the detected cgroupfs v2 hierarchy. */
+static void cgv2_free_hierarchies(void)
+{
+	struct cgv2_hierarchy **it;
+
+	if (!cgv2_hierarchies)
+		return;
+
+	for (it = cgv2_hierarchies; it && *it; it++) {
+		if ((*it)->controllers) {
+			char **tmp;
+			for (tmp = (*it)->controllers; tmp && *tmp; tmp++)
+				free(*tmp);
+
+			free((*it)->controllers);
+		}
+		free((*it)->mountpoint);
+		free((*it)->base_cgroup);
+		free((*it)->fullcgpath);
+		free((*it)->init_cgroup);
+	}
+	free(cgv2_hierarchies);
+}
+
+/* Wrapper around cgv{1,2}_free_hierarchies(). */
+static void cg_exit(void)
+{
+	cgv1_free_hierarchies();
+	cgv2_free_hierarchies();
+}
+
 int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
 		const char **argv)
 {
-	const char *PAM_user = NULL;
 	int ret;
-
-	if (!get_active_controllers()) {
-		mysyslog(LOG_ERR, "Failed to get list of controllers\n");
-		return PAM_SESSION_ERR;
-	}
-
-	if (argc > 1 && strcmp(argv[0], "-c") == 0)
-		filter_controllers(argv[1]);
+	uid_t uid = 0;
+	gid_t gid = 0;
+	const char *PAM_user = NULL;
 
 	ret = pam_get_user(pamh, &PAM_user, NULL);
 	if (ret != PAM_SUCCESS) {
-		mysyslog(LOG_ERR, "PAM-CGFS: couldn't get user\n");
+		mysyslog(LOG_ERR, "PAM-CGFS: couldn't get user\n", NULL);
 		return PAM_SESSION_ERR;
 	}
 
-	ret = handle_login(PAM_user);
-	return ret;
-}
-
-static void prune_empty_cgroups(struct controller *c, const char *user)
-{
-	while (c) {
-		if (!c->mount_path || !c->init_path)
-			goto next;
-		char *path = must_strcat(c->mount_path, c->init_path, "user/", user, NULL);
-#if DEBUG
-	fprintf(stderr, "Pruning %s\n", path);
-#endif
-		recursive_rmdir(path);
-		free(path);
-next:
-		c = c->next;
+	if (!get_uid_gid(PAM_user, &uid, &gid)) {
+		mysyslog(LOG_ERR, "Failed to get uid and gid for %s.\n", PAM_user, NULL);
+		return PAM_SESSION_ERR;
 	}
-}
 
-/*
- * Since we can't rely on kernel's autoremove, remove stale cgroups
- * any time the user logs out.
- */
-static void prune_user_cgs(const char *user)
-{
-	int i;
+	if (!cg_init(uid, gid)) {
+		mysyslog(LOG_ERR, "Failed to get list of controllers\n", NULL);
+		return PAM_SESSION_ERR;
+	}
 
-	for (i = 0; i < MAXCONTROLLERS; i++)
-		prune_empty_cgroups(controllers[i], user);
+	/* Try to prune cgroups, that are actually empty but were still marked
+	 * as busy by the kernel so we couldn't remove them on session close.
+	 */
+	cg_prune_empty_cgroups(PAM_user);
+
+	if (cg_mount_mode == CGROUP_UNKNOWN)
+		return PAM_SESSION_ERR;
+
+	if (argc > 1 && strcmp(argv[0], "-c") == 0)
+		cg_mark_to_make_rw(argv[1]);
+
+	return handle_login(PAM_user, uid, gid);
 }
 
 int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
 		const char **argv)
 {
+	int ret;
+	uid_t uid = 0;
+	gid_t gid = 0;
 	const char *PAM_user = NULL;
-	int ret = pam_get_user(pamh, &PAM_user, NULL);
 
+	ret = pam_get_user(pamh, &PAM_user, NULL);
 	if (ret != PAM_SUCCESS) {
-		mysyslog(LOG_ERR, "PAM-CGFS: couldn't get user\n");
+		mysyslog(LOG_ERR, "PAM-CGFS: couldn't get user\n", NULL);
 		return PAM_SESSION_ERR;
 	}
 
-	if (!initialized) {
-		get_active_controllers();
-		if (argc > 1 && strcmp(argv[0], "-c") == 0)
-			filter_controllers(argv[1]);
+	if (!get_uid_gid(PAM_user, &uid, &gid)) {
+		mysyslog(LOG_ERR, "Failed to get uid and gid for %s.\n", PAM_user, NULL);
+		return PAM_SESSION_ERR;
 	}
 
-	prune_user_cgs(PAM_user);
+	if (cg_mount_mode == CGROUP_UNINITIALIZED) {
+		if (!cg_init(uid, gid))
+			mysyslog(LOG_ERR, "Failed to get list of controllers\n", NULL);
+
+		if (argc > 1 && strcmp(argv[0], "-c") == 0)
+			cg_mark_to_make_rw(argv[1]);
+	}
+
+	cg_prune_empty_cgroups(PAM_user);
+	cg_exit();
+
 	return PAM_SUCCESS;
 }
