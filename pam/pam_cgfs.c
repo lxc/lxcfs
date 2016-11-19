@@ -518,7 +518,7 @@ static bool mkdir_p(const char *root, char *path)
 			goto next;
 
 		if (mkdir(path, 0755) < 0) {
-			lxcfs_debug("Failed to create %s: %m.\n", path);
+			lxcfs_debug("Failed to create %s: %s.\n", path, strerror(errno));
 			return false;
 		}
 
@@ -575,13 +575,13 @@ next:
 
 	if (rmdir(dirname) < 0) {
 		if (!r)
-			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+			lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		r = -1;
 	}
 
 	if (closedir(dir) < 0) {
 		if (!r)
-			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+			lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		r = -1;
 	}
 
@@ -1173,8 +1173,9 @@ static bool cg_systemd_chown_existing_cgroup(const char *mountpoint,
 	 * need to chown it.
 	 */
 	if (chown(path, uid, gid) < 0)
-		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
-			 path, (int)uid, (int)gid, NULL);
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 
 	free(path);
 	return true;
@@ -2089,7 +2090,7 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 		lxcfs_debug("Constructing path: %s.\n", path);
 		if (file_exists(path)) {
 			bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
-			lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+			lxcfs_debug("%s existed and does %shave our uid: %d and gid: %d.\n", path, our_cg ? "" : "not ", uid, gid);
 			free(path);
 			if (our_cg)
 				*existed = false;
@@ -2103,8 +2104,10 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 			continue;
 		}
 		if (chown(path, uid, gid) < 0)
-			lxcfs_debug("Failed to chown %s to %d:%d: %m.\n", path,
-				    (int)uid, (int)gid);
+			mysyslog(LOG_WARNING,
+				 "Failed to chown %s to %d:%d: %s.\n", path,
+				 (int)uid, (int)gid, strerror(errno), NULL);
+		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 		free(path);
 		break;
 	}
@@ -2239,7 +2242,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	lxcfs_debug("Constructing path \"%s\".\n", path);
 	if (file_exists(path)) {
 		bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
-		lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+		lxcfs_debug("%s existed and does %shave our uid: %d and gid: %d.\n", path, our_cg ? "" : "not ", uid, gid);
 		free(path);
 		if (our_cg)
 			*existed = false;
@@ -2255,8 +2258,9 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	}
 
 	if (chown(path, uid, gid) < 0)
-		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
-			 path, (int)uid, (int)gid, NULL);
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 	free(path);
 
 	return true;
