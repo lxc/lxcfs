@@ -33,11 +33,14 @@
  * See COPYING file for details.
  */
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +67,11 @@
 #define CGROUP2_SUPER_MAGIC 0x63677270
 #endif
 
+/* Taken over modified from the kernel sources. */
+#define NBITS 32 /* bits in uint32_t */
+#define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
+#define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
+
 static enum cg_mount_mode {
 	CGROUP_UNKNOWN = -1,
 	CGROUP_MIXED = 0,
@@ -72,16 +80,24 @@ static enum cg_mount_mode {
 	CGROUP_UNINITIALIZED = 3,
 } cg_mount_mode = CGROUP_UNINITIALIZED;
 
-/* Common helper prototypes. */
+/* Common helper functions. Most of these have been taken from LXC. */
 static void append_line(char **dest, size_t oldlen, char *new, size_t newlen);
 static int append_null_to_list(void ***list);
 static void batch_realloc(char **mem, size_t oldlen, size_t newlen);
+static inline void clear_bit(unsigned bit, uint32_t *bitarr)
+{
+	bitarr[bit / NBITS] &= ~(1 << (bit % NBITS));
+}
 static char *copy_to_eol(char *s);
 static bool file_exists(const char *f);
 static void free_string_list(char **list);
 static char *get_mountpoint(char *line);
 static bool get_uid_gid(const char *user, uid_t *uid, gid_t *gid);
 static int handle_login(const char *user, uid_t uid, gid_t gid);
+static inline bool is_set(unsigned bit, uint32_t *bitarr)
+{
+	return (bitarr[bit / NBITS] & (1 << (bit % NBITS))) != 0;
+}
 /* __typeof__ should be safe to use with all compilers. */
 typedef __typeof__(((struct statfs *)NULL)->f_type) fs_type_magic;
 static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val);
@@ -99,16 +115,31 @@ static char *must_make_path(const char *first, ...) __attribute__((sentinel));
 static void *must_realloc(void *orig, size_t sz);
 static void mysyslog(int err, const char *format, ...) __attribute__((sentinel));
 static char *read_file(char *fnam);
+static int read_from_file(const char *filename, void* buf, size_t count);
 static int recursive_rmdir(char *dirname);
+static inline void set_bit(unsigned bit, uint32_t *bitarr)
+{
+	bitarr[bit / NBITS] |= (1 << (bit % NBITS));
+}
 static bool string_in_list(char **list, const char *entry);
+char *string_join(const char *sep, const char **parts, bool use_as_prefix);
 static void trim(char *s);
 static bool write_int(char *path, int v);
+ssize_t write_nointr(int fd, const void* buf, size_t count);
 
 /* cgroupfs prototypes. */
+static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid);
+static uint32_t *cg_cpumask(char *buf, size_t nbits);
+static bool cg_copy_parent_file(char *path, char *file);
+static char *cg_cpumask_to_cpulist(uint32_t *bitarr, size_t nbits);
+static bool cg_enter(const char *cgroup);
+static void cg_escape(void);
+static bool cg_filter_and_set_cpus(char *path, bool am_initialized);
+static ssize_t cg_get_max_cpus(char *cpulist);
+static int cg_get_version_of_mntpt(const char *path);
+static bool cg_init(uid_t uid, gid_t gid);
 static void cg_mark_to_make_rw(const char *cstring);
-static bool cg_systemd_under_user_slice_1(const char *in, uid_t uid);
-static bool cg_systemd_under_user_slice_2(const char *base_cgroup,
-					  const char *init_cgroup, uid_t uid);
+static void cg_prune_empty_cgroups(const char *user);
 static bool cg_systemd_created_user_slice(const char *base_cgroup,
 					  const char *init_cgroup,
 					  const char *in, uid_t uid);
@@ -116,14 +147,13 @@ static bool cg_systemd_chown_existing_cgroup(const char *mountpoint,
 					     const char *base_cgroup, uid_t uid,
 					     gid_t gid,
 					     bool systemd_user_slice);
-static int cg_get_version_of_mntpt(const char *path);
-static bool cg_enter(const char *cgroup);
-static void cg_escape(void);
-static bool cg_init(uid_t uid, gid_t gid);
+static bool cg_systemd_under_user_slice_1(const char *in, uid_t uid);
+static bool cg_systemd_under_user_slice_2(const char *base_cgroup,
+					  const char *init_cgroup, uid_t uid);
 static void cg_systemd_prune_init_scope(char *cg);
-static void cg_prune_empty_cgroups(const char *user);
+int cg_write_to_file(const char *filename, const void *buf, size_t count,
+		     bool add_newline);
 static bool is_lxcfs(const char *line);
-static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid);
 
 /* cgroupfs v1 prototypes. */
 struct cgv1_hierarchy {
@@ -154,6 +184,9 @@ static bool cgv1_get_controllers(char ***klist, char ***nlist);
 static char *cgv1_get_current_cgroup(char *basecginfo, char *controller);
 static char **cgv1_get_proc_mountinfo_controllers(char **klist, char **nlist,
 						  char *line);
+static bool cgv1_handle_cpuset_hierarchy(struct cgv1_hierarchy *h,
+					 const char *cgroup);
+static bool cgv1_handle_root_cpuset_hierarchy(struct cgv1_hierarchy *h);
 static bool cgv1_init(uid_t uid, gid_t gid);
 static void cgv1_mark_to_make_rw(char **clist);
 static char *cgv1_must_prefix_named(char *entry);
@@ -192,13 +225,13 @@ static bool cgv2_prune_empty_cgroups(const char *user);
 static bool cgv2_remove(const char *cgroup);
 static bool is_cgv2(char *line);
 
-/* Common helper functions. */
+/* Common helper functions. Most of these have been taken from LXC. */
 static void mysyslog(int err, const char *format, ...)
 {
 	va_list args;
 
 	va_start(args, format);
-	openlog("PAM-CGFS", LOG_CONS|LOG_PID, LOG_AUTH);
+	openlog("PAM-CGFS", LOG_CONS | LOG_PID, LOG_AUTH);
 	vsyslog(err, format, args);
 	va_end(args);
 	closelog();
@@ -485,7 +518,7 @@ static bool mkdir_p(const char *root, char *path)
 			goto next;
 
 		if (mkdir(path, 0755) < 0) {
-			lxcfs_debug("Failed to create %s: %m.\n", path);
+			lxcfs_debug("Failed to create %s: %s.\n", path, strerror(errno));
 			return false;
 		}
 
@@ -542,13 +575,13 @@ next:
 
 	if (rmdir(dirname) < 0) {
 		if (!r)
-			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+			lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		r = -1;
 	}
 
 	if (closedir(dir) < 0) {
 		if (!r)
-			lxcfs_debug("Failed to delete %s: %m.\n", dirname);
+			lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		r = -1;
 	}
 
@@ -1140,8 +1173,9 @@ static bool cg_systemd_chown_existing_cgroup(const char *mountpoint,
 	 * need to chown it.
 	 */
 	if (chown(path, uid, gid) < 0)
-		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
-			 path, (int)uid, (int)gid, NULL);
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 
 	free(path);
 	return true;
@@ -1511,6 +1545,17 @@ static bool cg_enter(const char *cgroup)
 /* Escape to root cgroup in all detected cgroupfs v1 hierarchies. */
 static void cgv1_escape(void)
 {
+	struct cgv1_hierarchy **it;
+
+	/* In case systemd hasn't already placed us in a user slice for the
+	 * cpuset v1 controller we will reside in the root cgroup. This means
+	 * that cgroup.clone_children will not have been initialized for us so
+	 * we need to do it.
+	 */
+	for (it = cgv1_hierarchies; it && *it; it++)
+		if (!cgv1_handle_root_cpuset_hierarchy(*it))
+			mysyslog(LOG_WARNING, "cgroupfs v1: Failed to initialize cpuset.\n", NULL);
+
 	if (!cgv1_enter("/"))
 		mysyslog(LOG_WARNING, "cgroupfs v1: Failed to escape to init's cgroup.\n", NULL);
 }
@@ -1558,6 +1603,440 @@ static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid)
 	return true;
 }
 
+/* Create cpumask from cpulist aka turn:
+ *
+ *	0,2-3
+ *
+ *  into bit array
+ *
+ *	1 0 1 1
+ */
+static uint32_t *cg_cpumask(char *buf, size_t nbits)
+{
+	char *token;
+	char *saveptr = NULL;
+	size_t arrlen = BITS_TO_LONGS(nbits);
+	uint32_t *bitarr = calloc(arrlen, sizeof(uint32_t));
+	if (!bitarr)
+		return NULL;
+
+	for (; (token = strtok_r(buf, ",", &saveptr)); buf = NULL) {
+		errno = 0;
+		unsigned start = strtoul(token, NULL, 0);
+		unsigned end = start;
+
+		char *range = strchr(token, '-');
+		if (range)
+			end = strtoul(range + 1, NULL, 0);
+		if (!(start <= end)) {
+			free(bitarr);
+			return NULL;
+		}
+
+		if (end >= nbits) {
+			free(bitarr);
+			return NULL;
+		}
+
+		while (start <= end)
+			set_bit(start++, bitarr);
+	}
+
+	return bitarr;
+}
+
+char *string_join(const char *sep, const char **parts, bool use_as_prefix)
+{
+	char *result;
+	char **p;
+	size_t sep_len = strlen(sep);
+	size_t result_len = use_as_prefix * sep_len;
+
+	/* calculate new string length */
+	for (p = (char **)parts; *p; p++)
+		result_len += (p > (char **)parts) * sep_len + strlen(*p);
+
+	result = calloc(result_len + 1, 1);
+	if (!result)
+		return NULL;
+
+	if (use_as_prefix)
+		strcpy(result, sep);
+	for (p = (char **)parts; *p; p++) {
+		if (p > (char **)parts)
+			strcat(result, sep);
+		strcat(result, *p);
+	}
+
+	return result;
+}
+
+/* The largest integer that can fit into long int is 2^64. This is a
+ * 20-digit number.
+ */
+#define __IN_TO_STR_LEN 21
+/* Turn cpumask into simple, comma-separated cpulist. */
+static char *cg_cpumask_to_cpulist(uint32_t *bitarr, size_t nbits)
+{
+	size_t i;
+	int ret;
+	char numstr[__IN_TO_STR_LEN] = {0};
+	char **cpulist = NULL;
+
+	for (i = 0; i <= nbits; i++) {
+		if (is_set(i, bitarr)) {
+			ret = snprintf(numstr, __IN_TO_STR_LEN, "%zu", i);
+			if (ret < 0 || (size_t)ret >= __IN_TO_STR_LEN) {
+				free_string_list(cpulist);
+				return NULL;
+			}
+			must_append_string(&cpulist, numstr);
+		}
+	}
+	return string_join(",", (const char **)cpulist, false);
+}
+
+static ssize_t cg_get_max_cpus(char *cpulist)
+{
+	char *c1, *c2;
+	char *maxcpus = cpulist;
+	size_t cpus = 0;
+
+	c1 = strrchr(maxcpus, ',');
+	if (c1)
+		c1++;
+
+	c2 = strrchr(maxcpus, '-');
+	if (c2)
+		c2++;
+
+	if (!c1 && !c2)
+		c1 = maxcpus;
+	else if (c1 > c2)
+		c2 = c1;
+	else if (c1 < c2)
+		c1 = c2;
+
+	/* If the above logic is correct, c1 should always hold a valid string
+	 * here.
+	 */
+
+	errno = 0;
+	cpus = strtoul(c1, NULL, 0);
+	if (errno != 0)
+		return -1;
+
+	return cpus;
+}
+
+ssize_t write_nointr(int fd, const void* buf, size_t count)
+{
+	ssize_t ret;
+again:
+	ret = write(fd, buf, count);
+	if (ret < 0 && errno == EINTR)
+		goto again;
+	return ret;
+}
+
+int cg_write_to_file(const char *filename, const void* buf, size_t count, bool add_newline)
+{
+	int fd, saved_errno;
+	ssize_t ret;
+
+	fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT | O_CLOEXEC, 0666);
+	if (fd < 0)
+		return -1;
+	ret = write_nointr(fd, buf, count);
+	if (ret < 0)
+		goto out_error;
+	if ((size_t)ret != count)
+		goto out_error;
+	if (add_newline) {
+		ret = write_nointr(fd, "\n", 1);
+		if (ret != 1)
+			goto out_error;
+	}
+	close(fd);
+	return 0;
+
+out_error:
+	saved_errno = errno;
+	close(fd);
+	errno = saved_errno;
+	return -1;
+}
+
+static bool cg_filter_and_set_cpus(char *path, bool am_initialized)
+{
+	char *lastslash, *fpath, oldv;
+	int ret;
+	ssize_t i;
+
+	ssize_t maxposs = 0, maxisol = 0;
+	char *cpulist = NULL, *posscpus = NULL, *isolcpus = NULL;
+	uint32_t *possmask = NULL, *isolmask = NULL;
+	bool bret = false;
+
+	lastslash = strrchr(path, '/');
+	if (!lastslash) { // bug...  this shouldn't be possible
+		lxcfs_debug("cgfsng:copy_parent_file: bad path %s", path);
+		return bret;
+	}
+	oldv = *lastslash;
+	*lastslash = '\0';
+	fpath = must_make_path(path, "cpuset.cpus", NULL);
+	posscpus = read_file(fpath);
+	if (!posscpus)
+		goto cleanup;
+
+	/* Get maximum number of cpus found in possible cpuset. */
+	maxposs = cg_get_max_cpus(posscpus);
+	if (maxposs < 0)
+		goto cleanup;
+
+	isolcpus = read_file("/sys/devices/system/cpu/isolated");
+	if (!isolcpus)
+		goto cleanup;
+	if (!isdigit(isolcpus[0])) {
+		cpulist = posscpus;
+		/* No isolated cpus but we weren't already initialized by
+		 * someone. We should simply copy the parents cpuset.cpus
+		 * values.
+		 */
+		if (!am_initialized)
+			goto copy_parent;
+		/* No isolated cpus but we were already initialized by someone.
+		 * Nothing more to do for us.
+		 */
+		bret = true;
+		goto cleanup;
+	}
+
+	/* Get maximum number of cpus found in isolated cpuset. */
+	maxisol = cg_get_max_cpus(isolcpus);
+	if (maxisol < 0)
+		goto cleanup;
+
+	if (maxposs < maxisol)
+		maxposs = maxisol;
+	maxposs++;
+
+	possmask = cg_cpumask(posscpus, maxposs);
+	if (!possmask)
+		goto cleanup;
+
+	isolmask = cg_cpumask(isolcpus, maxposs);
+	if (!isolmask)
+		goto cleanup;
+
+	for (i = 0; i <= maxposs; i++) {
+		if (is_set(i, isolmask) && is_set(i, possmask)) {
+			clear_bit(i, possmask);
+		}
+	}
+
+	cpulist = cg_cpumask_to_cpulist(possmask, maxposs);
+	if (!cpulist) /* Bug */
+		goto cleanup;
+
+copy_parent:
+	*lastslash = oldv;
+	fpath = must_make_path(path, "cpuset.cpus", NULL);
+	ret = cg_write_to_file(fpath, cpulist, strlen(cpulist), false);
+	if (!ret)
+		bret = true;
+
+cleanup:
+	free(fpath);
+
+	free(isolcpus);
+	free(isolmask);
+
+	if (posscpus != cpulist)
+		free(posscpus);
+	free(possmask);
+
+	free(cpulist);
+	return bret;
+}
+
+int read_from_file(const char *filename, void* buf, size_t count)
+{
+	int fd = -1, saved_errno;
+	ssize_t ret;
+
+	fd = open(filename, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+
+	if (!buf || !count) {
+		char buf2[100];
+		size_t count2 = 0;
+		while ((ret = read(fd, buf2, 100)) > 0)
+			count2 += ret;
+		if (ret >= 0)
+			ret = count2;
+	} else {
+		memset(buf, 0, count);
+		ret = read(fd, buf, count);
+	}
+
+	if (ret < 0)
+		lxcfs_debug("read %s: %s", filename, strerror(errno));
+
+	saved_errno = errno;
+	close(fd);
+	errno = saved_errno;
+	return ret;
+}
+
+/* Copy contents of parent(@path)/@file to @path/@file */
+static bool cg_copy_parent_file(char *path, char *file)
+{
+	char *lastslash, *value = NULL, *fpath, oldv;
+	int len = 0;
+	int ret;
+
+	lastslash = strrchr(path, '/');
+	if (!lastslash) { // bug...  this shouldn't be possible
+		lxcfs_debug("cgfsng:copy_parent_file: bad path %s", path);
+		return false;
+	}
+	oldv = *lastslash;
+	*lastslash = '\0';
+	fpath = must_make_path(path, file, NULL);
+	len = read_from_file(fpath, NULL, 0);
+	if (len <= 0)
+		goto bad;
+	value = must_alloc(len + 1);
+	if (read_from_file(fpath, value, len) != len)
+		goto bad;
+	free(fpath);
+	*lastslash = oldv;
+	fpath = must_make_path(path, file, NULL);
+	ret = cg_write_to_file(fpath, value, len, false);
+	if (ret < 0)
+		lxcfs_debug("Unable to write %s to %s", value, fpath);
+	free(fpath);
+	free(value);
+	return ret >= 0;
+
+bad:
+	lxcfs_debug("Error reading '%s'", fpath);
+	free(fpath);
+	free(value);
+	return false;
+}
+
+/* In case systemd hasn't already placed us in a user slice for the cpuset v1
+ * controller we will reside in the root cgroup. This means that
+ * cgroup.clone_children will not have been initialized for us so we need to do
+ * it.
+ */
+static bool cgv1_handle_root_cpuset_hierarchy(struct cgv1_hierarchy *h)
+{
+	char *clonechildrenpath, v;
+
+	if (!string_in_list(h->controllers, "cpuset"))
+		return true;
+
+	clonechildrenpath = must_make_path(h->mountpoint, "cgroup.clone_children", NULL);
+
+	if (read_from_file(clonechildrenpath, &v, 1) < 0) {
+		lxcfs_debug("Failed to read '%s'", clonechildrenpath);
+		free(clonechildrenpath);
+		return false;
+	}
+
+	if (v == '1') {  /* already set for us by someone else */
+		free(clonechildrenpath);
+		return true;
+	}
+
+	if (cg_write_to_file(clonechildrenpath, "1", 1, false) < 0) {
+		/* Set clone_children so children inherit our settings */
+		lxcfs_debug("Failed to write 1 to %s", clonechildrenpath);
+		free(clonechildrenpath);
+		return false;
+	}
+	free(clonechildrenpath);
+	return true;
+}
+
+/*
+ * Initialize the cpuset hierarchy in first directory of @gname and
+ * set cgroup.clone_children so that children inherit settings.
+ * Since the h->base_path is populated by init or ourselves, we know
+ * it is already initialized.
+ */
+static bool cgv1_handle_cpuset_hierarchy(struct cgv1_hierarchy *h,
+					 const char *cgroup)
+{
+	char *cgpath, *clonechildrenpath, v, *slash;
+
+	if (!string_in_list(h->controllers, "cpuset"))
+		return true;
+
+	if (*cgroup == '/')
+		cgroup++;
+	slash = strchr(cgroup, '/');
+	if (slash)
+		*slash = '\0';
+
+	cgpath = must_make_path(h->mountpoint, h->base_cgroup, cgroup, NULL);
+	if (slash)
+		*slash = '/';
+	if (mkdir(cgpath, 0755) < 0 && errno != EEXIST) {
+		lxcfs_debug("Failed to create '%s'", cgpath);
+		free(cgpath);
+		return false;
+	}
+	clonechildrenpath = must_make_path(cgpath, "cgroup.clone_children", NULL);
+	if (!file_exists(clonechildrenpath)) { /* unified hierarchy doesn't have clone_children */
+		free(clonechildrenpath);
+		free(cgpath);
+		return true;
+	}
+	if (read_from_file(clonechildrenpath, &v, 1) < 0) {
+		lxcfs_debug("Failed to read '%s'", clonechildrenpath);
+		free(clonechildrenpath);
+		free(cgpath);
+		return false;
+	}
+
+	/* Make sure any isolated cpus are removed from cpuset.cpus. */
+	if (!cg_filter_and_set_cpus(cgpath, v == '1')) {
+		lxcfs_debug("%s", "Failed to remove isolated cpus.\n");
+		free(clonechildrenpath);
+		free(cgpath);
+		return false;
+	}
+
+	if (v == '1') {  /* already set for us by someone else */
+		free(clonechildrenpath);
+		free(cgpath);
+		return true;
+	}
+
+	/* copy parent's settings */
+	if (!cg_copy_parent_file(cgpath, "cpuset.mems")) {
+		free(cgpath);
+		free(clonechildrenpath);
+		return false;
+	}
+	free(cgpath);
+
+	if (cg_write_to_file(clonechildrenpath, "1", 1, false) < 0) {
+		/* Set clone_children so children inherit our settings */
+		lxcfs_debug("Failed to write 1 to %s", clonechildrenpath);
+		free(clonechildrenpath);
+		return false;
+	}
+	free(clonechildrenpath);
+	return true;
+}
+
 /* Create and chown @cgroup for all given controllers in a cgroupfs v1 hierarchy
  * (For example, create @cgroup for the cpu and cpuacct controller mounted into
  * /sys/fs/cgroup/cpu,cpuacct). Check if the path already exists and report back
@@ -1577,6 +2056,10 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 	for (controller = it->controllers; controller && *controller;
 	     controller++) {
 		created = false;
+
+		if (!cgv1_handle_cpuset_hierarchy(it, cgroup))
+			return false;
+
 		/* If systemd has already created a cgroup for us, keep using
 		 * it.
 		 */
@@ -1609,7 +2092,7 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 		lxcfs_debug("Constructing path: %s.\n", path);
 		if (file_exists(path)) {
 			bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
-			lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+			lxcfs_debug("%s existed and does %shave our uid: %d and gid: %d.\n", path, our_cg ? "" : "not ", uid, gid);
 			free(path);
 			if (our_cg)
 				*existed = false;
@@ -1623,8 +2106,10 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 			continue;
 		}
 		if (chown(path, uid, gid) < 0)
-			lxcfs_debug("Failed to chown %s to %d:%d: %m.\n", path,
-				    (int)uid, (int)gid);
+			mysyslog(LOG_WARNING,
+				 "Failed to chown %s to %d:%d: %s.\n", path,
+				 (int)uid, (int)gid, strerror(errno), NULL);
+		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 		free(path);
 		break;
 	}
@@ -1759,7 +2244,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	lxcfs_debug("Constructing path \"%s\".\n", path);
 	if (file_exists(path)) {
 		bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
-		lxcfs_debug("%s existed and does %s have our uid and gid.\n", path, our_cg ? "" : "not");
+		lxcfs_debug("%s existed and does %shave our uid: %d and gid: %d.\n", path, our_cg ? "" : "not ", uid, gid);
 		free(path);
 		if (our_cg)
 			*existed = false;
@@ -1775,8 +2260,9 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	}
 
 	if (chown(path, uid, gid) < 0)
-		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %m.\n",
-			 path, (int)uid, (int)gid, NULL);
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 	free(path);
 
 	return true;
