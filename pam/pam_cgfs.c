@@ -80,7 +80,7 @@ static enum cg_mount_mode {
 	CGROUP_UNINITIALIZED = 3,
 } cg_mount_mode = CGROUP_UNINITIALIZED;
 
-/* Common helper prototypes. */
+/* Common helper functions. Most of these have been taken from LXC. */
 static void append_line(char **dest, size_t oldlen, char *new, size_t newlen);
 static int append_null_to_list(void ***list);
 static void batch_realloc(char **mem, size_t oldlen, size_t newlen);
@@ -225,7 +225,7 @@ static bool cgv2_prune_empty_cgroups(const char *user);
 static bool cgv2_remove(const char *cgroup);
 static bool is_cgv2(char *line);
 
-/* Common helper functions. */
+/* Common helper functions. Most of these have been taken from LXC. */
 static void mysyslog(int err, const char *format, ...)
 {
 	va_list args;
@@ -1716,8 +1716,6 @@ static ssize_t cg_get_max_cpus(char *cpulist)
 		c2 = c1;
 	else if (c1 < c2)
 		c1 = c2;
-	else if (!c1 && c2) // The reverse case is obvs. not needed.
-		c1 = c2;
 
 	/* If the above logic is correct, c1 should always hold a valid string
 	 * here.
@@ -2008,8 +2006,12 @@ static bool cgv1_handle_cpuset_hierarchy(struct cgv1_hierarchy *h,
 	}
 
 	/* Make sure any isolated cpus are removed from cpuset.cpus. */
-	if (!cg_filter_and_set_cpus(cgpath, v == '1'))
+	if (!cg_filter_and_set_cpus(cgpath, v == '1')) {
+		lxcfs_debug("%s", "Failed to remove isolated cpus.\n");
+		free(clonechildrenpath);
+		free(cgpath);
 		return false;
+	}
 
 	if (v == '1') {  /* already set for us by someone else */
 		free(clonechildrenpath);
