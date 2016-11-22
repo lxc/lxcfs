@@ -122,10 +122,12 @@ static inline void set_bit(unsigned bit, uint32_t *bitarr)
 	bitarr[bit / NBITS] |= (1 << (bit % NBITS));
 }
 static bool string_in_list(char **list, const char *entry);
-char *string_join(const char *sep, const char **parts, bool use_as_prefix);
+static char *string_join(const char *sep, const char **parts, bool use_as_prefix);
 static void trim(char *s);
 static bool write_int(char *path, int v);
-ssize_t write_nointr(int fd, const void* buf, size_t count);
+static ssize_t write_nointr(int fd, const void* buf, size_t count);
+static int write_to_file(const char *filename, const void *buf, size_t count,
+			 bool add_newline);
 
 /* cgroupfs prototypes. */
 static bool cg_belongs_to_uid_gid(const char *path, uid_t uid, gid_t gid);
@@ -151,8 +153,6 @@ static bool cg_systemd_under_user_slice_1(const char *in, uid_t uid);
 static bool cg_systemd_under_user_slice_2(const char *base_cgroup,
 					  const char *init_cgroup, uid_t uid);
 static void cg_systemd_prune_init_scope(char *cg);
-int cg_write_to_file(const char *filename, const void *buf, size_t count,
-		     bool add_newline);
 static bool is_lxcfs(const char *line);
 
 /* cgroupfs v1 prototypes. */
@@ -1645,7 +1645,7 @@ static uint32_t *cg_cpumask(char *buf, size_t nbits)
 	return bitarr;
 }
 
-char *string_join(const char *sep, const char **parts, bool use_as_prefix)
+static char *string_join(const char *sep, const char **parts, bool use_as_prefix)
 {
 	char *result;
 	char **p;
@@ -1729,7 +1729,7 @@ static ssize_t cg_get_max_cpus(char *cpulist)
 	return cpus;
 }
 
-ssize_t write_nointr(int fd, const void* buf, size_t count)
+static ssize_t write_nointr(int fd, const void* buf, size_t count)
 {
 	ssize_t ret;
 again:
@@ -1739,7 +1739,7 @@ again:
 	return ret;
 }
 
-int cg_write_to_file(const char *filename, const void* buf, size_t count, bool add_newline)
+static int write_to_file(const char *filename, const void* buf, size_t count, bool add_newline)
 {
 	int fd, saved_errno;
 	ssize_t ret;
@@ -1767,6 +1767,7 @@ out_error:
 	return -1;
 }
 
+#define __ISOL_CPUS "/sys/devices/system/cpu/isolated"
 static bool cg_filter_and_set_cpus(char *path, bool am_initialized)
 {
 	char *lastslash, *fpath, oldv;
@@ -1776,78 +1777,102 @@ static bool cg_filter_and_set_cpus(char *path, bool am_initialized)
 	ssize_t maxposs = 0, maxisol = 0;
 	char *cpulist = NULL, *posscpus = NULL, *isolcpus = NULL;
 	uint32_t *possmask = NULL, *isolmask = NULL;
-	bool bret = false;
+	bool bret = false, flipped_bit = false;
 
 	lastslash = strrchr(path, '/');
 	if (!lastslash) { // bug...  this shouldn't be possible
-		lxcfs_debug("cgfsng:copy_parent_file: bad path %s", path);
+		lxcfs_debug("Invalid path: %s.\n", path);
 		return bret;
 	}
 	oldv = *lastslash;
 	*lastslash = '\0';
 	fpath = must_make_path(path, "cpuset.cpus", NULL);
 	posscpus = read_file(fpath);
-	if (!posscpus)
-		goto cleanup;
+	if (!posscpus) {
+		lxcfs_debug("Could not read file: %s.\n", fpath);
+		goto on_error;
+	}
 
 	/* Get maximum number of cpus found in possible cpuset. */
 	maxposs = cg_get_max_cpus(posscpus);
 	if (maxposs < 0)
-		goto cleanup;
+		goto on_error;
 
-	isolcpus = read_file("/sys/devices/system/cpu/isolated");
-	if (!isolcpus)
-		goto cleanup;
+	isolcpus = read_file(__ISOL_CPUS);
+	if (!isolcpus) {
+		lxcfs_debug("%s", "Could not read file "__ISOL_CPUS"\n");
+		goto on_error;
+	}
 	if (!isdigit(isolcpus[0])) {
+		lxcfs_debug("%s", "No isolated cpus detected.\n");
 		cpulist = posscpus;
 		/* No isolated cpus but we weren't already initialized by
 		 * someone. We should simply copy the parents cpuset.cpus
 		 * values.
 		 */
-		if (!am_initialized)
+		if (!am_initialized) {
+			lxcfs_debug("%s", "Copying cpuset of parent cgroup.\n");
 			goto copy_parent;
+		}
 		/* No isolated cpus but we were already initialized by someone.
 		 * Nothing more to do for us.
 		 */
-		bret = true;
-		goto cleanup;
+		goto on_success;
 	}
 
 	/* Get maximum number of cpus found in isolated cpuset. */
 	maxisol = cg_get_max_cpus(isolcpus);
 	if (maxisol < 0)
-		goto cleanup;
+		goto on_error;
 
 	if (maxposs < maxisol)
 		maxposs = maxisol;
 	maxposs++;
 
 	possmask = cg_cpumask(posscpus, maxposs);
-	if (!possmask)
-		goto cleanup;
+	if (!possmask) {
+		lxcfs_debug("%s", "Could not create cpumask for all possible cpus.\n");
+		goto on_error;
+	}
 
 	isolmask = cg_cpumask(isolcpus, maxposs);
-	if (!isolmask)
-		goto cleanup;
+	if (!isolmask) {
+		lxcfs_debug("%s", "Could not create cpumask for all isolated cpus.\n");
+		goto on_error;
+	}
 
 	for (i = 0; i <= maxposs; i++) {
 		if (is_set(i, isolmask) && is_set(i, possmask)) {
+			flipped_bit = true;
 			clear_bit(i, possmask);
 		}
 	}
 
+	if (!flipped_bit) {
+		lxcfs_debug("%s", "No isolated cpus present in cpuset.\n");
+		goto on_success;
+	}
+	lxcfs_debug("%s", "Removed isolated cpus from cpuset.\n");
+
 	cpulist = cg_cpumask_to_cpulist(possmask, maxposs);
-	if (!cpulist) /* Bug */
-		goto cleanup;
+	if (!cpulist) {
+		lxcfs_debug("%s", "Could not create cpu list.\n");
+		goto on_error;
+	}
 
 copy_parent:
 	*lastslash = oldv;
 	fpath = must_make_path(path, "cpuset.cpus", NULL);
-	ret = cg_write_to_file(fpath, cpulist, strlen(cpulist), false);
-	if (!ret)
-		bret = true;
+	ret = write_to_file(fpath, cpulist, strlen(cpulist), false);
+	if (ret < 0) {
+		lxcfs_debug("Could not write cpu list to: %s.\n", fpath);
+		goto on_error;
+	}
 
-cleanup:
+on_success:
+	bret = true;
+
+on_error:
 	free(fpath);
 
 	free(isolcpus);
@@ -1915,7 +1940,7 @@ static bool cg_copy_parent_file(char *path, char *file)
 	free(fpath);
 	*lastslash = oldv;
 	fpath = must_make_path(path, file, NULL);
-	ret = cg_write_to_file(fpath, value, len, false);
+	ret = write_to_file(fpath, value, len, false);
 	if (ret < 0)
 		lxcfs_debug("Unable to write %s to %s", value, fpath);
 	free(fpath);
@@ -1954,7 +1979,7 @@ static bool cgv1_handle_root_cpuset_hierarchy(struct cgv1_hierarchy *h)
 		return true;
 	}
 
-	if (cg_write_to_file(clonechildrenpath, "1", 1, false) < 0) {
+	if (write_to_file(clonechildrenpath, "1", 1, false) < 0) {
 		/* Set clone_children so children inherit our settings */
 		lxcfs_debug("Failed to write 1 to %s", clonechildrenpath);
 		free(clonechildrenpath);
@@ -2014,6 +2039,7 @@ static bool cgv1_handle_cpuset_hierarchy(struct cgv1_hierarchy *h,
 	}
 
 	if (v == '1') {  /* already set for us by someone else */
+		lxcfs_debug("%s", "\"cgroup.clone_children\" was already set to \"1\".\n");
 		free(clonechildrenpath);
 		free(cgpath);
 		return true;
@@ -2021,13 +2047,14 @@ static bool cgv1_handle_cpuset_hierarchy(struct cgv1_hierarchy *h,
 
 	/* copy parent's settings */
 	if (!cg_copy_parent_file(cgpath, "cpuset.mems")) {
+		lxcfs_debug("%s", "Failed to copy \"cpuset.mems\" settings.\n");
 		free(cgpath);
 		free(clonechildrenpath);
 		return false;
 	}
 	free(cgpath);
 
-	if (cg_write_to_file(clonechildrenpath, "1", 1, false) < 0) {
+	if (write_to_file(clonechildrenpath, "1", 1, false) < 0) {
 		/* Set clone_children so children inherit our settings */
 		lxcfs_debug("Failed to write 1 to %s", clonechildrenpath);
 		free(clonechildrenpath);
