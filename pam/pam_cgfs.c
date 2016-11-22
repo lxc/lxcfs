@@ -1798,6 +1798,24 @@ static bool cg_filter_and_set_cpus(char *path, bool am_initialized)
 	if (maxposs < 0)
 		goto on_error;
 
+	if (!file_exists(__ISOL_CPUS)) {
+		/* This system doesn't expose isolated cpus. */
+		lxcfs_debug("%s", "Path: "__ISOL_CPUS" to read isolated cpus from does not exist.\n");
+		cpulist = posscpus;
+		/* No isolated cpus but we weren't already initialized by
+		 * someone. We should simply copy the parents cpuset.cpus
+		 * values.
+		 */
+		if (!am_initialized) {
+			lxcfs_debug("%s", "Copying cpuset of parent cgroup.\n");
+			goto copy_parent;
+		}
+		/* No isolated cpus but we were already initialized by someone.
+		 * Nothing more to do for us.
+		 */
+		goto on_success;
+	}
+
 	isolcpus = read_file(__ISOL_CPUS);
 	if (!isolcpus) {
 		lxcfs_debug("%s", "Could not read file "__ISOL_CPUS"\n");
