@@ -2953,19 +2953,19 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 
 	while (*memstat) {
 		if (startswith(memstat, "cache")) {
-			sscanf(memstat + 11, "%lu", cached);
+			sscanf(memstat + 5, "%lu", cached);
 			*cached /= 1024;
 		} else if (startswith(memstat, "active_anon")) {
 			sscanf(memstat + 11, "%lu", active_anon);
 			*active_anon /= 1024;
 		} else if (startswith(memstat, "inactive_anon")) {
-			sscanf(memstat + 11, "%lu", inactive_anon);
+			sscanf(memstat + 13, "%lu", inactive_anon);
 			*inactive_anon /= 1024;
 		} else if (startswith(memstat, "active_file")) {
 			sscanf(memstat + 11, "%lu", active_file);
 			*active_file /= 1024;
 		} else if (startswith(memstat, "inactive_file")) {
-			sscanf(memstat + 11, "%lu", inactive_file);
+			sscanf(memstat + 13, "%lu", inactive_file);
 			*inactive_file /= 1024;
 		} else if (startswith(memstat, "unevictable")) {
 			sscanf(memstat + 11, "%lu", unevictable);
