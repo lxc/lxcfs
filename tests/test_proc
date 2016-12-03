@@ -32,7 +32,7 @@ mkdir ${mempath}/lxcfs_test_proc
 echo 1 > ${cpupath}/lxcfs_test_proc/tasks
 echo 1 > ${mempath}/lxcfs_test_proc/tasks
 
-echo $((1024*1024)) > ${mempath}/lxcfs_test_proc/memory.limit_in_bytes
+echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/memory.limit_in_bytes
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test uptime
@@ -46,7 +46,7 @@ grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo
 [ "$(grep "^cpu" ${LXCFSDIR}/proc/stat | wc -l)" = "2" ]
 
 # Test meminfo
-grep -q "^MemTotal.*1024 kB$" ${LXCFSDIR}/proc/meminfo
+grep -q "^MemTotal.*65536 kB$" ${LXCFSDIR}/proc/meminfo
 
 PASS=1
 echo PASS
