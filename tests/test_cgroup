@@ -42,12 +42,12 @@ for p in ${mempath} ${frzpath} ${cpupath}; do
 done
 
 # set values though lxcfs
-echo $((1024*1024)) > ${LXCFSDIR}/cgroup/memory/${initmemory}/${UUID}/memory.limit_in_bytes
+echo $((64*1024*1024)) > ${LXCFSDIR}/cgroup/memory/${initmemory}/${UUID}/memory.limit_in_bytes
 echo 0 > ${LXCFSDIR}/cgroup/cpuset/${initcpuset}/${UUID}/cpuset.cpus
 
 # and verify them through cgroupfs
 v=`cat $mempath/${UUID}/memory.limit_in_bytes`
-[ "$v" = "$((1024*1024))" ]
+[ "$v" = "$((64*1024*1024))" ]
 v=`cat ${cpupath}/${UUID}/cpuset.cpus`
 [ "$v" = "0" ]
 
