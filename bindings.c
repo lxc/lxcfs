@@ -3046,12 +3046,12 @@ static int read_file(const char *path, char *buf, size_t size,
  * FUSE ops for /proc
  */
 
-static unsigned long get_memlimit(const char *cgroup)
+static unsigned long get_memlimit(const char *cgroup, const char *file)
 {
 	char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
 
-	if (cgfs_get_value("memory", cgroup, "memory.limit_in_bytes", &memlimit_str))
+	if (cgfs_get_value("memory", cgroup, file, &memlimit_str))
 		memlimit = strtoul(memlimit_str, NULL, 10);
 
 	free(memlimit_str);
@@ -3059,16 +3059,16 @@ static unsigned long get_memlimit(const char *cgroup)
 	return memlimit;
 }
 
-static unsigned long get_min_memlimit(const char *cgroup)
+static unsigned long get_min_memlimit(const char *cgroup, const char *file)
 {
 	char *copy = strdupa(cgroup);
 	unsigned long memlimit = 0, retlimit;
 
-	retlimit = get_memlimit(copy);
+	retlimit = get_memlimit(copy, file);
 
 	while (strcmp(copy, "/") != 0) {
 		copy = dirname(copy);
-		memlimit = get_memlimit(copy);
+		memlimit = get_memlimit(copy, file);
 		if (memlimit != -1 && memlimit < retlimit)
 			retlimit = memlimit;
 	};
@@ -3083,8 +3083,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
 	char *memusage_str = NULL, *memstat_str = NULL,
-		*memswlimit_str = NULL, *memswusage_str = NULL,
-		*memswlimit_default_str = NULL, *memswusage_default_str = NULL;
+		*memswlimit_str = NULL, *memswusage_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		cached = 0, hosttotal = 0, active_anon = 0, inactive_anon = 0,
 		active_file = 0, inactive_file = 0, unevictable = 0;
@@ -3113,7 +3112,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/meminfo", buf, size, d);
 	prune_init_slice(cg);
 
-	memlimit = get_min_memlimit(cg);
+	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
 	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
 	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
@@ -3124,19 +3123,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if(cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
 		cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str))
 	{
-		/* If swapaccounting is turned on, then default value is assumed to be that of cgroup / */
-		if (!cgfs_get_value("memory", "/", "memory.memsw.limit_in_bytes", &memswlimit_default_str))
-			goto err;
-		if (!cgfs_get_value("memory", "/", "memory.memsw.usage_in_bytes", &memswusage_default_str))
-			goto err;
-
-		memswlimit = strtoul(memswlimit_str, NULL, 10);
+		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
 		memswusage = strtoul(memswusage_str, NULL, 10);
-
-		if (!strcmp(memswlimit_str, memswlimit_default_str))
-			memswlimit = 0;
-		if (!strcmp(memswusage_str, memswusage_default_str))
-			memswusage = 0;
 
 		memswlimit = memswlimit / 1024;
 		memswusage = memswusage / 1024;
@@ -3257,8 +3245,6 @@ err:
 	free(memswlimit_str);
 	free(memswusage_str);
 	free(memstat_str);
-	free(memswlimit_default_str);
-	free(memswusage_default_str);
 	return rv;
 }
 
@@ -3859,8 +3845,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg = NULL;
-	char *memswlimit_str = NULL, *memlimit_str = NULL, *memusage_str = NULL, *memswusage_str = NULL,
-             *memswlimit_default_str = NULL, *memswusage_default_str = NULL;
+	char *memswlimit_str = NULL, *memlimit_str = NULL, *memusage_str = NULL, *memswusage_str = NULL;
 	unsigned long memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0, swap_total = 0, swap_free = 0;
 	ssize_t total_len = 0, rv = 0;
 	ssize_t l = 0;
@@ -3885,31 +3870,18 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/swaps", buf, size, d);
 	prune_init_slice(cg);
 
-	if (!cgfs_get_value("memory", cg, "memory.limit_in_bytes", &memlimit_str))
-		goto err;
+	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
 
 	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
 
-	memlimit = strtoul(memlimit_str, NULL, 10);
 	memusage = strtoul(memusage_str, NULL, 10);
 
 	if (cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str) &&
 	    cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str)) {
 
-                /* If swap accounting is turned on, then default value is assumed to be that of cgroup / */
-                if (!cgfs_get_value("memory", "/", "memory.memsw.limit_in_bytes", &memswlimit_default_str))
-                    goto err;
-                if (!cgfs_get_value("memory", "/", "memory.memsw.usage_in_bytes", &memswusage_default_str))
-                    goto err;
-
-		memswlimit = strtoul(memswlimit_str, NULL, 10);
+		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
 		memswusage = strtoul(memswusage_str, NULL, 10);
-
-                if (!strcmp(memswlimit_str, memswlimit_default_str))
-                    memswlimit = 0;
-                if (!strcmp(memswusage_str, memswusage_default_str))
-                    memswusage = 0;
 
 		swap_total = (memswlimit - memlimit) / 1024;
 		swap_free = (memswusage - memusage) / 1024;
@@ -3964,8 +3936,6 @@ err:
 	free(memlimit_str);
 	free(memusage_str);
 	free(memswusage_str);
-	free(memswusage_default_str);
-	free(memswlimit_default_str);
 	return rv;
 }
 
