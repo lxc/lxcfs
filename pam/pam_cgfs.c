@@ -1318,7 +1318,6 @@ static int cg_get_version_of_mntpt(const char *path)
 static bool cgv2_init(uid_t uid, gid_t gid)
 {
 	char *mountpoint;
-	bool ret = false;
 	FILE *f = NULL;
 	char *current_cgroup = NULL, *init_cgroup = NULL;
 	char * line = NULL;
@@ -1327,7 +1326,6 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 	current_cgroup = cgv2_get_current_cgroup(getpid());
 	if (!current_cgroup) {
 		/* No v2 hierarchy present. We're done. */
-		ret = true;
 		goto cleanup;
 	}
 
@@ -1360,7 +1358,6 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 
 		cgv2_add_controller(NULL, mountpoint, current_cgroup, init_cgroup, has_user_slice);
 
-		ret = true;
 		goto cleanup;
 	}
 
