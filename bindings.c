@@ -2908,7 +2908,7 @@ int cg_rmdir(const char *path)
 	if (initpid <= 0)
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
-		if (!last || strcmp(next, last) == 0)
+		if (!last || (next && (strcmp(next, last) == 0)))
 			ret = -EBUSY;
 		else
 			ret = -ENOENT;
