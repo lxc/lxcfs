@@ -863,11 +863,11 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 	fnam = alloca(len);
 	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
 	if (ret < 0 || (size_t)ret >= len)
-		return NULL;
+		return false;
 
 	fd = openat(cfd, fnam, O_RDONLY);
 	if (fd < 0)
-		return NULL;
+		return false;
 
 	*value = slurp_file(fnam, fd);
 	return *value != NULL;
