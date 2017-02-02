@@ -3086,7 +3086,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		*memswlimit_str = NULL, *memswusage_str = NULL;
 	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		cached = 0, hosttotal = 0, active_anon = 0, inactive_anon = 0,
-		active_file = 0, inactive_file = 0, unevictable = 0;
+		active_file = 0, inactive_file = 0, unevictable = 0,
+		hostswtotal = 0;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *cache = d->buf;
@@ -3148,7 +3149,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 		memset(lbuf, 0, 100);
 		if (startswith(line, "MemTotal:")) {
-			sscanf(line+14, "%lu", &hosttotal);
+			sscanf(line+sizeof("MemTotal:")-1, "%lu", &hosttotal);
 			if (hosttotal < memlimit)
 				memlimit = hosttotal;
 			snprintf(lbuf, 100, "MemTotal:       %8lu kB\n", memlimit);
@@ -3160,6 +3161,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0) {
+			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
+			if (hostswtotal < memswlimit - memlimit)
+				memswlimit = hostswtotal + memlimit;
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit - memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0) {
