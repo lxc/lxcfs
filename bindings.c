@@ -3454,6 +3454,27 @@ err:
 	return rv;
 }
 
+static long int getreaperctime(pid_t pid)
+{
+	char fnam[100];
+	struct stat sb;
+	int ret;
+	pid_t qpid;
+
+	qpid = lookup_initpid_in_store(pid);
+	if (qpid <= 0)
+		return 0;
+
+	ret = snprintf(fnam, 100, "/proc/%d", qpid);
+	if (ret < 0 || ret >= 100)
+		return 0;
+
+	if (lstat(fnam, &sb) < 0)
+		return 0;
+
+	return sb.st_ctime;
+}
+
 static int proc_stat_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
@@ -3517,7 +3538,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
-			l = snprintf(cache, cache_size, "%s", line);
+			if (strncmp(line, "btime", 5) == 0)
+				l = snprintf(cache, cache_size, "btime %ld\n", getreaperctime(fc->pid));
+			else
+				l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
 				perror("Error writing to cache");
 				rv = 0;
@@ -3607,23 +3631,12 @@ err:
 
 static long int getreaperage(pid_t pid)
 {
-	char fnam[100];
-	struct stat sb;
-	int ret;
-	pid_t qpid;
+	long int ctime;
 
-	qpid = lookup_initpid_in_store(pid);
-	if (qpid <= 0)
-		return 0;
-
-	ret = snprintf(fnam, 100, "/proc/%d", qpid);
-	if (ret < 0 || ret >= 100)
-		return 0;
-
-	if (lstat(fnam, &sb) < 0)
-		return 0;
-
-	return time(NULL) - sb.st_ctime;
+	ctime = getreaperctime(pid);
+	if (ctime)
+		return time(NULL) - ctime;
+	return ctime;
 }
 
 static unsigned long get_reaper_busy(pid_t task)
