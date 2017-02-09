@@ -1709,8 +1709,6 @@ static ssize_t cg_get_max_cpus(char *cpulist)
 
 	if (!c1 && !c2)
 		c1 = maxcpus;
-	else if (c1 > c2)
-		c2 = c1;
 	else if (c1 < c2)
 		c1 = c2;
 
