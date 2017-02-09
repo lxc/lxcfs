@@ -1649,6 +1649,9 @@ static char *string_join(const char *sep, const char **parts, bool use_as_prefix
 	size_t sep_len = strlen(sep);
 	size_t result_len = use_as_prefix * sep_len;
 
+	if (!parts)
+		return NULL;
+
 	/* calculate new string length */
 	for (p = (char **)parts; *p; p++)
 		result_len += (p > (char **)parts) * sep_len + strlen(*p);
@@ -1709,8 +1712,6 @@ static ssize_t cg_get_max_cpus(char *cpulist)
 
 	if (!c1 && !c2)
 		c1 = maxcpus;
-	else if (c1 > c2)
-		c2 = c1;
 	else if (c1 < c2)
 		c1 = c2;
 
@@ -2156,10 +2157,7 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 		break;
 	}
 
-	if (!created)
-		return false;
-
-	return true;
+	return created;
 }
 
 /* Try to remove @cgroup for all given controllers in a cgroupfs v1 hierarchy

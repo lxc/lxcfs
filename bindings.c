@@ -4467,7 +4467,7 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 		goto out;
 	}
 
-	fd_hierarchies = malloc(sizeof(int *) * num_hierarchies);
+	fd_hierarchies = malloc(sizeof(int) * num_hierarchies);
 	if (!fd_hierarchies) {
 		lxcfs_error("%s\n", strerror(errno));
 		goto out;
