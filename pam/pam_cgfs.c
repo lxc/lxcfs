@@ -1649,6 +1649,9 @@ static char *string_join(const char *sep, const char **parts, bool use_as_prefix
 	size_t sep_len = strlen(sep);
 	size_t result_len = use_as_prefix * sep_len;
 
+	if (!parts)
+		return NULL;
+
 	/* calculate new string length */
 	for (p = (char **)parts; *p; p++)
 		result_len += (p > (char **)parts) * sep_len + strlen(*p);
