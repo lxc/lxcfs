@@ -2154,10 +2154,7 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 		break;
 	}
 
-	if (!created)
-		return false;
-
-	return true;
+	return created;
 }
 
 /* Try to remove @cgroup for all given controllers in a cgroupfs v1 hierarchy
