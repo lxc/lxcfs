@@ -346,7 +346,7 @@ static void trim(char *s)
 {
 	size_t len = strlen(s);
 
-	while (s[len - 1] == '\n')
+	while ((len > 0) && s[len - 1] == '\n')
 		s[--len] = '\0';
 }
 
