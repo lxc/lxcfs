@@ -1322,10 +1322,12 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 	char *current_cgroup = NULL, *init_cgroup = NULL;
 	char * line = NULL;
 	size_t len = 0;
+	int ret = false;
 
 	current_cgroup = cgv2_get_current_cgroup(getpid());
 	if (!current_cgroup) {
 		/* No v2 hierarchy present. We're done. */
+		ret = true;
 		goto cleanup;
 	}
 
@@ -1358,12 +1360,13 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 
 		cgv2_add_controller(NULL, mountpoint, current_cgroup, init_cgroup, has_user_slice);
 
+		ret = true;
 		goto cleanup;
 	}
 
 	f = fopen("/proc/self/mountinfo", "r");
 	if (!f)
-		return false;
+		goto cleanup;
 
 	/* we support simple cgroup mounts and lxcfs mounts */
 	while (getline(&line, &len, f) != -1) {
@@ -1398,7 +1401,7 @@ cleanup:
 		fclose(f);
 	free(line);
 
-	return true;
+	return ret;
 }
 
 /* Detect and store information about mounted cgroupfs v1 hierarchies and the
