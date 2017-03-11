@@ -1659,7 +1659,7 @@ static char *string_join(const char *sep, const char **parts, bool use_as_prefix
 	for (p = (char **)parts; *p; p++)
 		result_len += (p > (char **)parts) * sep_len + strlen(*p);
 
-	result = calloc(result_len + 1, 1);
+	result = calloc(result_len + 1, sizeof(char));
 	if (!result)
 		return NULL;
 
@@ -2101,8 +2101,6 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 	it = h;
 	for (controller = it->controllers; controller && *controller;
 	     controller++) {
-		created = false;
-
 		if (!cgv1_handle_cpuset_hierarchy(it, cgroup))
 			return false;
 
