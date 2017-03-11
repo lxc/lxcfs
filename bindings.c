@@ -3485,9 +3485,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
-	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0;
+	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
-					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0;
+					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
 #define CPUALL_MAX_SIZE BUF_RESERVE_SIZE
 	char cpuall[CPUALL_MAX_SIZE];
 	/* reserve for cpu all */
@@ -3584,8 +3584,17 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		cache_size -= l;
 		total_len += l;
 
-		if (sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu", &user, &nice, &system, &idle, &iowait, &irq,
-			&softirq, &steal, &guest) != 9)
+		if (sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+			   &user,
+			   &nice,
+			   &system,
+			   &idle,
+			   &iowait,
+			   &irq,
+			   &softirq,
+			   &steal,
+			   &guest,
+			   &guest_nice) != 10)
 			continue;
 		user_sum += user;
 		nice_sum += nice;
@@ -3596,16 +3605,26 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		softirq_sum += softirq;
 		steal_sum += steal;
 		guest_sum += guest;
+		guest_nice_sum += guest_nice;
 	}
 
 	cache = d->buf;
 
-	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-		"cpu ", user_sum, nice_sum, system_sum, idle_sum, iowait_sum, irq_sum, softirq_sum, steal_sum, guest_sum);
-	if (cpuall_len > 0 && cpuall_len < CPUALL_MAX_SIZE){
+	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "cpu  %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
+			user_sum,
+			nice_sum,
+			system_sum,
+			idle_sum,
+			iowait_sum,
+			irq_sum,
+			softirq_sum,
+			steal_sum,
+			guest_sum,
+			guest_nice_sum);
+	if (cpuall_len > 0 && cpuall_len < CPUALL_MAX_SIZE) {
 		memcpy(cache, cpuall, cpuall_len);
 		cache += cpuall_len;
-	} else{
+	} else {
 		/* shouldn't happen */
 		lxcfs_error("proc_stat_read copy cpuall failed, cpuall_len=%d.", cpuall_len);
 		cpuall_len = 0;
@@ -3615,7 +3634,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	total_len += cpuall_len;
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
 	rv = total_len;
