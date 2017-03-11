@@ -72,8 +72,8 @@ struct file_info {
 	int cached;
 };
 
-/* reserve buffer size, for cpuall in /proc/stat */
-#define BUF_RESERVE_SIZE 256
+/* Reserve buffer size to account for file size changes. */
+#define BUF_RESERVE_SIZE 512
 
 /*
  * A table caching which pid is init for a pid namespace.
@@ -3475,6 +3475,7 @@ static long int getreaperctime(pid_t pid)
 	return sb.st_ctime;
 }
 
+#define CPUALL_MAX_SIZE (BUF_RESERVE_SIZE / 2)
 static int proc_stat_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
@@ -3488,7 +3489,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
 					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
-#define CPUALL_MAX_SIZE BUF_RESERVE_SIZE
 	char cpuall[CPUALL_MAX_SIZE];
 	/* reserve for cpu all */
 	char *cache = d->buf + CPUALL_MAX_SIZE;
