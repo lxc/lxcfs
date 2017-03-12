@@ -1322,10 +1322,12 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 	char *current_cgroup = NULL, *init_cgroup = NULL;
 	char * line = NULL;
 	size_t len = 0;
+	int ret = false;
 
 	current_cgroup = cgv2_get_current_cgroup(getpid());
 	if (!current_cgroup) {
 		/* No v2 hierarchy present. We're done. */
+		ret = true;
 		goto cleanup;
 	}
 
@@ -1358,12 +1360,13 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 
 		cgv2_add_controller(NULL, mountpoint, current_cgroup, init_cgroup, has_user_slice);
 
+		ret = true;
 		goto cleanup;
 	}
 
 	f = fopen("/proc/self/mountinfo", "r");
 	if (!f)
-		return false;
+		goto cleanup;
 
 	/* we support simple cgroup mounts and lxcfs mounts */
 	while (getline(&line, &len, f) != -1) {
@@ -1398,7 +1401,7 @@ cleanup:
 		fclose(f);
 	free(line);
 
-	return true;
+	return ret;
 }
 
 /* Detect and store information about mounted cgroupfs v1 hierarchies and the
@@ -1656,7 +1659,7 @@ static char *string_join(const char *sep, const char **parts, bool use_as_prefix
 	for (p = (char **)parts; *p; p++)
 		result_len += (p > (char **)parts) * sep_len + strlen(*p);
 
-	result = calloc(result_len + 1, 1);
+	result = calloc(result_len + 1, sizeof(char));
 	if (!result)
 		return NULL;
 
@@ -2098,8 +2101,6 @@ static bool cgv1_create_one(struct cgv1_hierarchy *h, const char *cgroup, uid_t 
 	it = h;
 	for (controller = it->controllers; controller && *controller;
 	     controller++) {
-		created = false;
-
 		if (!cgv1_handle_cpuset_hierarchy(it, cgroup))
 			return false;
 
