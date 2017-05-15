@@ -1511,8 +1511,7 @@ static bool cgv2_enter(const char *cgroup)
 	if (!v2->create_rw_cgroup || v2->systemd_user_slice)
 		return true;
 
-	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
-			      "/cgroup.procs", NULL);
+	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, "/cgroup.procs", NULL);
 	lxcfs_debug("Attempting to enter cgroupfs v2 hierarchy in cgroup \"%s\".\n", path);
 	entered = write_int(path, (int)getpid());
 	if (!entered) {
@@ -2267,7 +2266,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 				v2->systemd_user_slice))
 		return true;
 
-	/* We need to make sure that we do not create an endless chaing of
+	/* We need to make sure that we do not create an endless chain of
 	 * sub-cgroups. So we check if we have already logged in somehow (sudo
 	 * -i, su, etc.) and have created a /user/PAM_user/idx cgroup. If so, we
 	 * skip that part.
