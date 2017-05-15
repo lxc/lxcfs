@@ -1389,6 +1389,7 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 		 * each of those mountpoints will expose identical information.
 		 * So let the first mountpoint we find, win.
 		 */
+		ret = true;
 		break;
 	}
 
