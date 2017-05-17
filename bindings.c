@@ -4383,11 +4383,13 @@ static bool cgfs_mount_hierarchies(void)
 
 	for (i = 0; i < num_hierarchies; i++) {
 		char *controller = hierarchies[i];
+
 		clen = strlen(controller);
 		len = strlen(BASEDIR) + clen + 2;
 		target = malloc(len);
 		if (!target)
 			return false;
+
 		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
 		if (ret < 0 || ret >= len) {
 			free(target);
@@ -4397,8 +4399,12 @@ static bool cgfs_mount_hierarchies(void)
 			free(target);
 			return false;
 		}
-		if (mount(controller, target, "cgroup", 0, controller) < 0) {
-			lxcfs_error("Failed mounting cgroup %s\n", controller);
+		if (!strcmp(controller, "unified"))
+			ret = mount("none", target, "cgroup2", 0, NULL);
+		else
+			ret = mount(controller, target, "cgroup", 0, controller);
+		if (ret < 0) {
+			lxcfs_error("Failed mounting cgroup %s: %s\n", controller, strerror(errno));
 			free(target);
 			return false;
 		}
@@ -4449,6 +4455,7 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	char cwd[MAXPATHLEN];
 	size_t len = 0;
 	int i, init_ns = -1;
+	bool found_unified = false;
 
 	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
 		lxcfs_error("Error opening /proc/self/cgroup: %s\n", strerror(errno));
@@ -4456,11 +4463,12 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	}
 
 	while (getline(&line, &len, f) != -1) {
-		char *p, *p2;
+		char *idx, *p, *p2;
 
 		p = strchr(line, ':');
 		if (!p)
 			goto out;
+		idx = line;
 		*(p++) = '\0';
 
 		p2 = strrchr(p, ':');
@@ -4473,8 +4481,10 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 		 * because it parses out the empty string "" and later on passes
 		 * it to mount(). Let's skip such entries.
 		 */
-		if (!strcmp(p, ""))
-			continue;
+		if (!strcmp(p, "") && !strcmp(idx, "0") && !found_unified) {
+			found_unified = true;
+			p = "unified";
+		}
 
 		if (!store_hierarchy(line, p))
 			goto out;
