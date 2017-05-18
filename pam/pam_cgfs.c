@@ -1389,6 +1389,7 @@ static bool cgv2_init(uid_t uid, gid_t gid)
 		 * each of those mountpoints will expose identical information.
 		 * So let the first mountpoint we find, win.
 		 */
+		ret = true;
 		break;
 	}
 
@@ -1511,8 +1512,7 @@ static bool cgv2_enter(const char *cgroup)
 	if (!v2->create_rw_cgroup || v2->systemd_user_slice)
 		return true;
 
-	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
-			      "/cgroup.procs", NULL);
+	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, "/cgroup.procs", NULL);
 	lxcfs_debug("Attempting to enter cgroupfs v2 hierarchy in cgroup \"%s\".\n", path);
 	entered = write_int(path, (int)getpid());
 	if (!entered) {
@@ -2250,7 +2250,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	char *clean_base_cgroup;
 	char *path;
 	struct cgv2_hierarchy *v2;
-	bool created = false;
+	bool our_cg = false, created = false;
 
 	*existed = false;
 
@@ -2262,12 +2262,11 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	/* We can't be placed under init's cgroup for the v2 hierarchy. We need
 	 * to be placed under our current cgroup.
 	 */
-	if (cg_systemd_chown_existing_cgroup(v2->mountpoint,
-				v2->base_cgroup, uid, gid,
-				v2->systemd_user_slice))
-		return true;
+	if (cg_systemd_chown_existing_cgroup(v2->mountpoint, v2->base_cgroup,
+					     uid, gid, v2->systemd_user_slice))
+		goto chown_cgroup_procs_file;
 
-	/* We need to make sure that we do not create an endless chaing of
+	/* We need to make sure that we do not create an endless chain of
 	 * sub-cgroups. So we check if we have already logged in somehow (sudo
 	 * -i, su, etc.) and have created a /user/PAM_user/idx cgroup. If so, we
 	 * skip that part.
@@ -2284,14 +2283,18 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup, NULL);
 	lxcfs_debug("Constructing path \"%s\".\n", path);
 	if (file_exists(path)) {
-		bool our_cg = cg_belongs_to_uid_gid(path, uid, gid);
-		lxcfs_debug("%s existed and does %shave our uid: %d and gid: %d.\n", path, our_cg ? "" : "not ", uid, gid);
+		our_cg = cg_belongs_to_uid_gid(path, uid, gid);
+		lxcfs_debug(
+		    "%s existed and does %shave our uid: %d and gid: %d.\n",
+		    path, our_cg ? "" : "not ", uid, gid);
 		free(path);
-		if (our_cg)
+		if (our_cg) {
 			*existed = false;
-		else
+			goto chown_cgroup_procs_file;
+		} else {
 			*existed = true;
-		return our_cg;
+			return false;
+		}
 	}
 
 	created = mkdir_p(v2->mountpoint, path);
@@ -2300,10 +2303,27 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 		return false;
 	}
 
+	/* chown cgroup to user */
 	if (chown(path, uid, gid) < 0)
 		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
 			 path, (int)uid, (int)gid, strerror(errno), NULL);
-	lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
+	else
+		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
+	free(path);
+
+chown_cgroup_procs_file:
+	/* chown cgroup.procs to user */
+	if (v2->systemd_user_slice)
+		path = must_make_path(v2->mountpoint, v2->base_cgroup,
+				      "/cgroup.procs", NULL);
+	else
+		path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
+				      "/cgroup.procs", NULL);
+	if (chown(path, uid, gid) < 0)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	else
+		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 	free(path);
 
 	return true;
