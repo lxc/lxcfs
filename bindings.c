@@ -8,14 +8,17 @@
 
 #define FUSE_USE_VERSION 26
 
+#define __STDC_FORMAT_MACROS
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,10 +33,14 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
 #include "bindings.h"
 #include "config.h" // for VERSION
+
+/* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
+#define LXCFS_NUMSTRLEN64 21
 
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
@@ -3454,25 +3461,152 @@ err:
 	return rv;
 }
 
-static long int getreaperctime(pid_t pid)
+static uint64_t get_reaper_start_time(pid_t pid)
 {
-	char fnam[100];
-	struct stat sb;
 	int ret;
+	FILE *f;
+	uint64_t starttime;
+	/* strlen("/proc/") = 6
+	 * +
+	 * LXCFS_NUMSTRLEN64
+	 * +
+	 * strlen("/stat") = 5
+	 * +
+	 * \0 = 1
+	 * */
+#define __PROC_PID_STAT_LEN (6 + LXCFS_NUMSTRLEN64 + 5 + 1)
+	char path[__PROC_PID_STAT_LEN];
 	pid_t qpid;
 
 	qpid = lookup_initpid_in_store(pid);
-	if (qpid <= 0)
+	if (qpid <= 0) {
+		/* Caller can check for EINVAL on 0. */
+		errno = EINVAL;
 		return 0;
+	}
 
-	ret = snprintf(fnam, 100, "/proc/%d", qpid);
-	if (ret < 0 || ret >= 100)
+	ret = snprintf(path, __PROC_PID_STAT_LEN, "/proc/%d/stat", qpid);
+	if (ret < 0 || ret >= __PROC_PID_STAT_LEN) {
+		/* Caller can check for EINVAL on 0. */
+		errno = EINVAL;
 		return 0;
+	}
 
-	if (lstat(fnam, &sb) < 0)
+	f = fopen(path, "r");
+	if (!f) {
+		/* Caller can check for EINVAL on 0. */
+		errno = EINVAL;
 		return 0;
+	}
 
-	return sb.st_ctime;
+	/* Note that the *scanf() argument supression requires that length
+	 * modifiers such as "l" are omitted. Otherwise some compilers will yell
+	 * at us. It's like telling someone you're not married and then asking
+	 * if you can bring your wife to the party.
+	 */
+	ret = fscanf(f, "%*d "      /* (1)  pid         %d   */
+			"%*s "      /* (2)  comm        %s   */
+			"%*c "      /* (3)  state       %c   */
+			"%*d "      /* (4)  ppid        %d   */
+			"%*d "      /* (5)  pgrp        %d   */
+			"%*d "      /* (6)  session     %d   */
+			"%*d "      /* (7)  tty_nr      %d   */
+			"%*d "      /* (8)  tpgid       %d   */
+			"%*u "      /* (9)  flags       %u   */
+			"%*u "      /* (10) minflt      %lu  */
+			"%*u "      /* (11) cminflt     %lu  */
+			"%*u "      /* (12) majflt      %lu  */
+			"%*u "      /* (13) cmajflt     %lu  */
+			"%*u "      /* (14) utime       %lu  */
+			"%*u "      /* (15) stime       %lu  */
+			"%*d "      /* (16) cutime      %ld  */
+			"%*d "      /* (17) cstime      %ld  */
+			"%*d "      /* (18) priority    %ld  */
+			"%*d "      /* (19) nice        %ld  */
+			"%*d "      /* (20) num_threads %ld  */
+			"%*d "      /* (21) itrealvalue %ld  */
+			"%" PRIu64, /* (22) starttime   %llu */
+		     &starttime);
+	if (ret != 1) {
+		fclose(f);
+		/* Caller can check for EINVAL on 0. */
+		errno = EINVAL;
+		return 0;
+	}
+
+	fclose(f);
+
+	errno = 0;
+	return starttime;
+}
+
+static uint64_t get_reaper_start_time_in_sec(pid_t pid)
+{
+	uint64_t clockticks;
+	int64_t ticks_per_sec;
+
+	clockticks = get_reaper_start_time(pid);
+	if (clockticks == 0 && errno == EINVAL) {
+		lxcfs_debug("failed to retrieve start time of pid %d\n", pid);
+		return 0;
+	}
+
+	ticks_per_sec = sysconf(_SC_CLK_TCK);
+	if (ticks_per_sec < 0 && errno == EINVAL) {
+		lxcfs_debug(
+		    "%s\n",
+		    "failed to determine number of clock ticks in a second");
+		return 0;
+	}
+
+	return (clockticks /= ticks_per_sec);
+}
+
+static uint64_t get_reaper_age(pid_t pid)
+{
+	uint64_t procstart, uptime, procage;
+
+	/* We need to substract the time the process has started since system
+	 * boot minus the time when the system has started to get the actual
+	 * reaper age.
+	 */
+	procstart = get_reaper_start_time_in_sec(pid);
+	procage = procstart;
+	if (procstart > 0) {
+		int ret;
+		struct timespec spec;
+
+		ret = clock_gettime(CLOCK_BOOTTIME, &spec);
+		if (ret < 0)
+			return 0;
+		/* We could make this more precise here by using the tv_nsec
+		 * field in the timespec struct and convert it to milliseconds
+		 * and then create a double for the seconds and milliseconds but
+		 * that seems more work than it is worth.
+		 */
+		uptime = spec.tv_sec;
+		procage = uptime - procstart;
+	}
+
+	return procage;
+}
+
+static uint64_t get_reaper_btime(pid)
+{
+	int ret;
+	struct sysinfo sys;
+	uint64_t procstart;
+	uint64_t uptime;
+
+	ret = sysinfo(&sys);
+	if (ret < 0) {
+		lxcfs_debug("%s\n", "failed to retrieve system information");
+		return 0;
+	}
+
+	uptime = (uint64_t)time(NULL) - (uint64_t)sys.uptime;
+	procstart = get_reaper_start_time_in_sec(pid);
+	return uptime - procstart;
 }
 
 #define CPUALL_MAX_SIZE (BUF_RESERVE_SIZE / 2)
@@ -3539,7 +3673,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
 			if (strncmp(line, "btime", 5) == 0)
-				l = snprintf(cache, cache_size, "btime %ld\n", getreaperctime(fc->pid));
+				l = snprintf(cache, cache_size, "btime %"PRIu64"\n", get_reaper_btime(fc->pid));
 			else
 				l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
@@ -3649,16 +3783,13 @@ err:
 	return rv;
 }
 
-static long int getreaperage(pid_t pid)
-{
-	long int ctime;
-
-	ctime = getreaperctime(pid);
-	if (ctime)
-		return time(NULL) - ctime;
-	return ctime;
-}
-
+/* This function retrieves the busy time of a group of tasks by looking at
+ * cpuacct.usage. Unfortunately, this only makes sense when the container has
+ * been given it's own cpuacct cgroup. If not, this function will take the busy
+ * time of all other taks that do not actually belong to the container into
+ * account as well. If someone has a clever solution for this please send a
+ * patch!
+ */
 static unsigned long get_reaper_busy(pid_t task)
 {
 	pid_t initpid = lookup_initpid_in_store(task);
@@ -3704,10 +3835,10 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	long int reaperage = getreaperage(fc->pid);
-	unsigned long int busytime = get_reaper_busy(fc->pid), idletime;
+	unsigned long int busytime = get_reaper_busy(fc->pid);
 	char *cache = d->buf;
 	ssize_t total_len = 0;
+	uint64_t idletime, reaperage;
 
 #if RELOADTEST
 	iwashere();
@@ -3724,13 +3855,17 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	idletime = reaperage - busytime;
-	if (idletime > reaperage)
-		idletime = reaperage;
+	reaperage = get_reaper_age(fc->pid);
+	/* To understand why this is done, please read the comment to the
+	 * get_reaper_busy() function.
+	 */
+	idletime = reaperage;
+	if (reaperage >= busytime)
+		idletime = reaperage - busytime;
 
-	total_len = snprintf(d->buf, d->size, "%ld.0 %lu.0\n", reaperage, idletime);
-	if (total_len < 0){
-		perror("Error writing to cache");
+	total_len = snprintf(d->buf, d->size, "%"PRIu64".00 %"PRIu64".00\n", reaperage, idletime);
+	if (total_len < 0 || total_len >=  d->size){
+		lxcfs_error("%s\n", "failed to write to cache");
 		return 0;
 	}
 
