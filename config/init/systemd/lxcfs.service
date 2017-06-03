@@ -10,6 +10,7 @@ KillMode=process
 Restart=on-failure
 ExecStopPost=-/bin/fusermount -u /var/lib/lxcfs
 Delegate=yes
+ExecReload=/bin/kill -USR1 $MAINPID
 
 [Install]
 WantedBy=multi-user.target
