@@ -3606,7 +3606,7 @@ static uint64_t get_reaper_btime(pid)
 
 	uptime = (uint64_t)time(NULL) - (uint64_t)sys.uptime;
 	procstart = get_reaper_start_time_in_sec(pid);
-	return uptime - procstart;
+	return uptime + procstart;
 }
 
 #define CPUALL_MAX_SIZE (BUF_RESERVE_SIZE / 2)
