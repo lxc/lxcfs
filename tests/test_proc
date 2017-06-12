@@ -36,7 +36,7 @@ echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/memory.limit_in_bytes
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test uptime
-[ "$(cat ${LXCFSDIR}/proc/uptime)" = "0.0 0.0" ]
+[ "$(cat ${LXCFSDIR}/proc/uptime)" = "0.00 0.00" ]
 
 # Test cpuinfo
 [ "$(grep "^processor" ${LXCFSDIR}/proc/cpuinfo | wc -l)" = "1" ]
