@@ -3672,10 +3672,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
-			if (strncmp(line, "btime", 5) == 0)
-				l = snprintf(cache, cache_size, "btime %"PRIu64"\n", get_reaper_btime(fc->pid));
-			else
-				l = snprintf(cache, cache_size, "%s", line);
+			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
 				perror("Error writing to cache");
 				rv = 0;
