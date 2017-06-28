@@ -737,7 +737,8 @@ static void usage()
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs [-p pidfile] mountpoint\n");
+	fprintf(stderr, "lxcfs [-f|-d] [-p pidfile] mountpoint\n");
+	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
 	exit(1);
@@ -753,7 +754,7 @@ static bool is_help(char *w)
 	return false;
 }
 
-void swallow_arg(int *argcp, char *argv[], char *which)
+bool swallow_arg(int *argcp, char *argv[], char *which)
 {
 	int i;
 
@@ -764,8 +765,9 @@ void swallow_arg(int *argcp, char *argv[], char *which)
 			argv[i] = argv[i+1];
 		}
 		(*argcp)--;
-		return;
+		return true;
 	}
+	return false;
 }
 
 bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
@@ -837,9 +839,10 @@ int main(int argc, char *argv[])
 	int pidfd = -1;
 	char *pidfile = NULL, *v = NULL;
 	size_t pidfile_len;
+	bool debug = false;
 	/*
 	 * what we pass to fuse_main is:
-	 * argv[0] -s -f -o allow_other,directio argv[1] NULL
+	 * argv[0] -s [-f|-d] -o allow_other,directio argv[1] NULL
 	 */
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
@@ -847,6 +850,7 @@ int main(int argc, char *argv[])
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
 	swallow_arg(&argc, argv, "-f");
+	debug = swallow_arg(&argc, argv, "-d");
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		if (strcmp(v, "allow_other") != 0) {
 			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
@@ -872,7 +876,11 @@ int main(int argc, char *argv[])
 	}
 
 	newargv[cnt++] = argv[0];
-	newargv[cnt++] = "-f";
+        if (debug) {
+                newargv[cnt++] = "-d";
+        } else {
+                newargv[cnt++] = "-f";
+        }
 	newargv[cnt++] = "-o";
 	newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
