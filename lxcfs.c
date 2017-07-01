@@ -28,6 +28,7 @@
 #include <sys/epoll.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
+#include <linux/limits.h>
 
 #include "bindings.h"
 #include "config.h" // for VERSION
@@ -74,6 +75,7 @@ static volatile sig_atomic_t need_reload;
  * lock and when we know the user_count was 0 */
 static void do_reload(void)
 {
+	char lxcfs_lib_path[PATH_MAX];
 	if (dlopen_handle) {
 		lxcfs_debug("%s\n", "Closing liblxcfs.so handle.");
 		dlclose(dlopen_handle);
@@ -86,7 +88,13 @@ static void do_reload(void)
 		goto good;
 	}
 
-	dlopen_handle = dlopen("/usr/lib/lxcfs/liblxcfs.so", RTLD_LAZY);
+#ifdef LIBDIR
+	/* LIBDIR: autoconf will setup this MACRO. Default value is $PREFIX/lib */
+        snprintf(lxcfs_lib_path, PATH_MAX, "%s/lxcfs/liblxcfs.so", LIBDIR);
+#else
+        snprintf(lxcfs_lib_path, PATH_MAX, "/usr/local/lib/lxcfs/liblxcfs.so");
+#endif
+        dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
 	if (!dlopen_handle) {
 		lxcfs_error("Failed to open liblxcfs.so: %s.\n", dlerror());
 		_exit(1);
