@@ -90,9 +90,9 @@ static void do_reload(void)
 
 #ifdef LIBDIR
 	/* LIBDIR: autoconf will setup this MACRO. Default value is $PREFIX/lib */
-        snprintf(lxcfs_lib_path, PATH_MAX, "%s/lxcfs/liblxcfs.so", LIBDIR);
+        snprintf(lxcfs_lib_path, PATH_MAX, "%s/liblxcfs.so", LIBDIR);
 #else
-        snprintf(lxcfs_lib_path, PATH_MAX, "/usr/local/lib/lxcfs/liblxcfs.so");
+        snprintf(lxcfs_lib_path, PATH_MAX, "/usr/local/lib/liblxcfs.so");
 #endif
         dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
 	if (!dlopen_handle) {
