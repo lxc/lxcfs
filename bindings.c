@@ -3842,10 +3842,10 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 #endif
 
 	if (offset){
-		if (offset > d->size)
-			return -EINVAL;
 		if (!d->cached)
 			return 0;
+		if (offset > d->size)
+			return -EINVAL;
 		int left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
@@ -3860,8 +3860,8 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	if (reaperage >= busytime)
 		idletime = reaperage - busytime;
 
-	total_len = snprintf(d->buf, d->size, "%"PRIu64".00 %"PRIu64".00\n", reaperage, idletime);
-	if (total_len < 0 || total_len >=  d->size){
+	total_len = snprintf(d->buf, d->buflen, "%"PRIu64".00 %"PRIu64".00\n", reaperage, idletime);
+	if (total_len < 0 || total_len >=  d->buflen){
 		lxcfs_error("%s\n", "failed to write to cache");
 		return 0;
 	}
