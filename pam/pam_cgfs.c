@@ -140,7 +140,7 @@ static bool cg_filter_and_set_cpus(char *path, bool am_initialized);
 static ssize_t cg_get_max_cpus(char *cpulist);
 static int cg_get_version_of_mntpt(const char *path);
 static bool cg_init(uid_t uid, gid_t gid);
-static void cg_mark_to_make_rw(const char *cstring);
+static void cg_mark_to_make_rw(char **list);
 static void cg_prune_empty_cgroups(const char *user);
 static bool cg_systemd_created_user_slice(const char *base_cgroup,
 					  const char *init_cgroup,
@@ -416,6 +416,39 @@ static bool string_in_list(char **list, const char *entry)
 			return true;
 
 	return false;
+}
+
+/*
+ * Creates a null-terminated array of strings, made by splitting the entries in
+ * @str on each @sep. Caller is responsible for calling free_string_list.
+ */
+static char **make_string_list(const char *str, const char *sep)
+{
+	char *copy, *tok;
+	char *saveptr = NULL;
+	char **clist = NULL;
+
+	copy = must_copy_string(str);
+
+	for (tok = strtok_r(copy, sep, &saveptr); tok;
+	     tok = strtok_r(NULL, sep, &saveptr))
+		must_add_to_list(&clist, tok);
+
+	free(copy);
+
+	return clist;
+}
+
+/* Gets the length of a null-terminated array of strings. */
+static size_t string_list_length(char **list)
+{
+	size_t len = 0;
+	char **it;
+
+	for (it = list; it && *it; it++)
+		len++;
+
+	return len;
 }
 
 /* Free null-terminated array of strings. */
@@ -761,7 +794,8 @@ static void cgv1_mark_to_make_rw(char **clist)
 
 	for (it = cgv1_hierarchies; it && *it; it++)
 		if ((*it)->controllers)
-			if (cgv1_controller_lists_intersect((*it)->controllers, clist))
+			if (cgv1_controller_lists_intersect((*it)->controllers, clist) ||
+				string_in_list(clist, "all"))
 				(*it)->create_rw_cgroup = true;
 }
 
@@ -770,30 +804,16 @@ static void cgv1_mark_to_make_rw(char **clist)
  */
 static void cgv2_mark_to_make_rw(char **clist)
 {
-	if (string_in_list(clist, "unified"))
+	if (string_in_list(clist, "unified") || string_in_list(clist, "all"))
 		if (cgv2_hierarchies)
 			(*cgv2_hierarchies)->create_rw_cgroup = true;
 }
 
 /* Wrapper around cgv{1,2}_mark_to_make_rw(). */
-static void cg_mark_to_make_rw(const char *cstring)
+static void cg_mark_to_make_rw(char **clist)
 {
-	char *copy, *tok;
-	char *saveptr = NULL;
-	char **clist = NULL;
-
-	copy = must_copy_string(cstring);
-
-	for (tok = strtok_r(copy, ",", &saveptr); tok;
-	     tok = strtok_r(NULL, ",", &saveptr))
-		must_add_to_list(&clist, tok);
-
-	free(copy);
-
 	cgv1_mark_to_make_rw(clist);
 	cgv2_mark_to_make_rw(clist);
-
-	free_string_list(clist);
 }
 
 /* Prefix any named controllers with "name=", e.g. "name=systemd". */
@@ -2567,8 +2587,22 @@ int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
 	if (cg_mount_mode == CGROUP_UNKNOWN)
 		return PAM_SESSION_ERR;
 
-	if (argc > 1 && strcmp(argv[0], "-c") == 0)
-		cg_mark_to_make_rw(argv[1]);
+	if (argc > 1 && !strcmp(argv[0], "-c")) {
+		char **clist = make_string_list(argv[1], ",");
+
+		/*
+		 * We don't allow using "all" and other controllers explicitly because
+		 * that simply doesn't make any sense.
+		 */
+		if (string_list_length(clist) > 1 && string_in_list(clist, "all")) {
+			mysyslog(LOG_ERR, "Invalid -c option, cannot specify individual controllers alongside 'all'.\n", NULL);
+			free_string_list(clist);
+			return PAM_SESSION_ERR;
+		}
+
+		cg_mark_to_make_rw(clist);
+		free_string_list(clist);
+	}
 
 	return handle_login(PAM_user, uid, gid);
 }
@@ -2596,8 +2630,22 @@ int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
 		if (!cg_init(uid, gid))
 			mysyslog(LOG_ERR, "Failed to get list of controllers\n", NULL);
 
-		if (argc > 1 && strcmp(argv[0], "-c") == 0)
-			cg_mark_to_make_rw(argv[1]);
+		if (argc > 1 && !strcmp(argv[0], "-c")) {
+			char **clist = make_string_list(argv[1], ",");
+
+			/*
+			 * We don't allow using "all" and other controllers explicitly because
+			 * that simply doesn't make any sense.
+			 */
+			if (string_list_length(clist) > 1 && string_in_list(clist, "all")) {
+				mysyslog(LOG_ERR, "Invalid -c option, cannot specify individual controllers alongside 'all'.\n", NULL);
+				free_string_list(clist);
+				return PAM_SESSION_ERR;
+			}
+
+			cg_mark_to_make_rw(clist);
+			free_string_list(clist);
+		}
 	}
 
 	cg_prune_empty_cgroups(PAM_user);
