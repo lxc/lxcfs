@@ -22,7 +22,7 @@ liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 noinst_HEADERS = bindings.h macro.h
 
 sodir=$(libdir)
-lib_LTLIBRARIES = liblxcfs.la
+lxcfs_LTLIBRARIES = liblxcfs.la
 EXTRA_LTLIBRARIES = liblxcfstest.la
 
 lxcfs_SOURCES = lxcfs.c
