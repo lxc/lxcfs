@@ -151,6 +151,7 @@ AM_CONDITIONAL([INIT_SCRIPT_UPSTART], [echo "$init_script" |grep -q "upstart"])
 AC_MSG_RESULT($init_script)
 
 
+AC_SUBST([lxcfsdir], "${libdir}/lxcfs")
 AC_ARG_WITH(
 	[pamdir],
 	[AS_HELP_STRING([--with-pamdir=PATH],[Specify the directory where PAM modules are stored,
