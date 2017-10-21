@@ -3169,12 +3169,12 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0) {
 			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
-			if (hostswtotal < memswlimit - memlimit)
-				memswlimit = hostswtotal + memlimit;
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit - memlimit);
+			if (hostswtotal < memswlimit)
+				memswlimit = hostswtotal;
+			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0) {
-			unsigned long swaptotal = memswlimit - memlimit,
+			unsigned long swaptotal = memswlimit,
 					swapusage = memswusage - memusage,
 					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
