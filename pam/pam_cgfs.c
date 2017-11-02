@@ -2267,6 +2267,7 @@ static bool cgv1_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
  */
 static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 {
+	int ret;
 	char *clean_base_cgroup;
 	char *path;
 	struct cgv2_hierarchy *v2;
@@ -2284,7 +2285,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 	 */
 	if (cg_systemd_chown_existing_cgroup(v2->mountpoint, v2->base_cgroup,
 					     uid, gid, v2->systemd_user_slice))
-		goto chown_cgroup_procs_file;
+		goto delegate_files;
 
 	/* We need to make sure that we do not create an endless chain of
 	 * sub-cgroups. So we check if we have already logged in somehow (sudo
@@ -2310,7 +2311,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 		free(path);
 		if (our_cg) {
 			*existed = false;
-			goto chown_cgroup_procs_file;
+			goto delegate_files;
 		} else {
 			*existed = true;
 			return false;
@@ -2331,7 +2332,7 @@ static bool cgv2_create(const char *cgroup, uid_t uid, gid_t gid, bool *existed)
 		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
 	free(path);
 
-chown_cgroup_procs_file:
+delegate_files:
 	/* chown cgroup.procs to user */
 	if (v2->systemd_user_slice)
 		path = must_make_path(v2->mountpoint, v2->base_cgroup,
@@ -2339,11 +2340,38 @@ chown_cgroup_procs_file:
 	else
 		path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
 				      "/cgroup.procs", NULL);
-	if (chown(path, uid, gid) < 0)
+	ret = chown(path, uid, gid);
+	if (ret < 0)
 		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
 			 path, (int)uid, (int)gid, strerror(errno), NULL);
 	else
 		lxcfs_debug("Chowned %s to %d:%d.\n", path, (int)uid, (int)gid);
+	free(path);
+
+	/* chown cgroup.subtree_control to user */
+	if (v2->systemd_user_slice)
+		path = must_make_path(v2->mountpoint, v2->base_cgroup,
+				      "/cgroup.subtree_control", NULL);
+	else
+		path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
+				      "/cgroup.subtree_control", NULL);
+	ret = chown(path, uid, gid);
+	if (ret < 0)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
+	free(path);
+
+	/* chown cgroup.threads to user */
+	if (v2->systemd_user_slice)
+		path = must_make_path(v2->mountpoint, v2->base_cgroup,
+				      "/cgroup.threads", NULL);
+	else
+		path = must_make_path(v2->mountpoint, v2->base_cgroup, cgroup,
+				      "/cgroup.threads", NULL);
+	ret = chown(path, uid, gid);
+	if (ret < 0 && errno != ENOENT)
+		mysyslog(LOG_WARNING, "Failed to chown %s to %d:%d: %s.\n",
+			 path, (int)uid, (int)gid, strerror(errno), NULL);
 	free(path);
 
 	return true;
