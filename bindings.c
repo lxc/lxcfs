@@ -3593,24 +3593,6 @@ static uint64_t get_reaper_age(pid_t pid)
 	return procage;
 }
 
-static uint64_t get_reaper_btime(pid)
-{
-	int ret;
-	struct sysinfo sys;
-	uint64_t procstart;
-	uint64_t uptime;
-
-	ret = sysinfo(&sys);
-	if (ret < 0) {
-		lxcfs_debug("%s\n", "failed to retrieve system information");
-		return 0;
-	}
-
-	uptime = (uint64_t)time(NULL) - (uint64_t)sys.uptime;
-	procstart = get_reaper_start_time_in_sec(pid);
-	return uptime + procstart;
-}
-
 #define CPUALL_MAX_SIZE (BUF_RESERVE_SIZE / 2)
 static int proc_stat_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
