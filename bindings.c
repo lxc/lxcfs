@@ -139,6 +139,7 @@ static char **hierarchies;
  * another namespace using the *at() family of functions
  * {openat(), fchownat(), ...}. */
 static int *fd_hierarchies;
+static int cgroup_mount_ns_fd = -1;
 
 static void unlock_mutex(pthread_mutex_t *l)
 {
@@ -421,6 +422,7 @@ static void print_subsystems(void)
 {
 	int i;
 
+	fprintf(stderr, "mount namespace: %d\n", cgroup_mount_ns_fd);
 	fprintf(stderr, "hierarchies:\n");
 	for (i = 0; i < num_hierarchies; i++) {
 		if (hierarchies[i])
@@ -4477,6 +4479,19 @@ static bool permute_root(void)
 	return true;
 }
 
+static int preserve_mnt_ns(int pid)
+{
+	int ret;
+	size_t len = sizeof("/proc/") + 21 + sizeof("/ns/mnt");
+	char path[len];
+
+	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
+	if (ret < 0 || (size_t)ret >= len)
+		return -1;
+
+	return open(path, O_RDONLY | O_CLOEXEC);
+}
+
 static bool cgfs_prepare_mounts(void)
 {
 	if (!mkdir_p(BASEDIR, 0700)) {
@@ -4491,6 +4506,12 @@ static bool cgfs_prepare_mounts(void)
 
 	if (unshare(CLONE_NEWNS) < 0) {
 		lxcfs_error("Failed to unshare mount namespace: %s.\n", strerror(errno));
+		return false;
+	}
+
+	cgroup_mount_ns_fd = preserve_mnt_ns(getpid());
+	if (cgroup_mount_ns_fd < 0) {
+		lxcfs_error("Failed to preserve mount namespace: %s.\n", strerror(errno));
 		return false;
 	}
 
@@ -4567,19 +4588,6 @@ static bool cgfs_setup_controllers(void)
 	return true;
 }
 
-static int preserve_ns(int pid)
-{
-	int ret;
-	size_t len = 5 /* /proc */ + 21 /* /int_as_str */ + 7 /* /ns/mnt */ + 1 /* \0 */;
-	char path[len];
-
-	ret = snprintf(path, len, "/proc/%d/ns/mnt", pid);
-	if (ret < 0 || (size_t)ret >= len)
-		return -1;
-
-	return open(path, O_RDONLY | O_CLOEXEC);
-}
-
 static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
 	FILE *f;
@@ -4623,7 +4631,7 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	}
 
 	/* Preserve initial namespace. */
-	init_ns = preserve_ns(getpid());
+	init_ns = preserve_mnt_ns(getpid());
 	if (init_ns < 0) {
 		lxcfs_error("%s\n", "Failed to preserve initial mount namespace.");
 		goto out;
@@ -4680,4 +4688,7 @@ static void __attribute__((destructor)) free_subsystems(void)
 	}
 	free(hierarchies);
 	free(fd_hierarchies);
+
+	if (cgroup_mount_ns_fd >= 0)
+		close(cgroup_mount_ns_fd);
 }
