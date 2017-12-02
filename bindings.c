@@ -2961,23 +2961,23 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 	char *eol;
 
 	while (*memstat) {
-		if (startswith(memstat, "cache")) {
-			sscanf(memstat + 5, "%lu", cached);
+		if (startswith(memstat, "total_cache")) {
+			sscanf(memstat + 11, "%lu", cached);
 			*cached /= 1024;
-		} else if (startswith(memstat, "active_anon")) {
-			sscanf(memstat + 11, "%lu", active_anon);
+		} else if (startswith(memstat, "total_active_anon")) {
+			sscanf(memstat + 17, "%lu", active_anon);
 			*active_anon /= 1024;
-		} else if (startswith(memstat, "inactive_anon")) {
-			sscanf(memstat + 13, "%lu", inactive_anon);
+		} else if (startswith(memstat, "total_inactive_anon")) {
+			sscanf(memstat + 19, "%lu", inactive_anon);
 			*inactive_anon /= 1024;
-		} else if (startswith(memstat, "active_file")) {
-			sscanf(memstat + 11, "%lu", active_file);
+		} else if (startswith(memstat, "total_active_file")) {
+			sscanf(memstat + 17, "%lu", active_file);
 			*active_file /= 1024;
-		} else if (startswith(memstat, "inactive_file")) {
-			sscanf(memstat + 13, "%lu", inactive_file);
+		} else if (startswith(memstat, "total_inactive_file")) {
+			sscanf(memstat + 19, "%lu", inactive_file);
 			*inactive_file /= 1024;
-		} else if (startswith(memstat, "unevictable")) {
-			sscanf(memstat + 11, "%lu", unevictable);
+		} else if (startswith(memstat, "total_unevictable")) {
+			sscanf(memstat + 17, "%lu", unevictable);
 			*unevictable /= 1024;
 		}
 		eol = strchr(memstat, '\n');
