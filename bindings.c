@@ -3167,7 +3167,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "MemFree:        %8lu kB\n", memlimit - memusage);
 			printme = lbuf;
 		} else if (startswith(line, "MemAvailable:")) {
-			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage);
+			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage + cached);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0) {
 			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
