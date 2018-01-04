@@ -1,5 +1,7 @@
 # lxcfs
 
+[![Help Contribute to Open Source](https://www.codetriage.com/lxc/lxcfs/badges/users.svg)](https://www.codetriage.com/lxc/lxcfs)
+
 ## Introduction
 LXCFS is a small FUSE filesystem written with the intention of making Linux
 containers feel more like a virtual machine. It started as a side-project of
