@@ -40,7 +40,7 @@ echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test cpuinfo
 [ "$(grep "^processor" ${LXCFSDIR}/proc/cpuinfo | wc -l)" = "1" ]
-grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo
+grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo || grep -q "^processor 0:.*" ${LXCFSDIR}/proc/cpuinfo
 
 # Test stat
 [ "$(grep "^cpu" ${LXCFSDIR}/proc/stat | wc -l)" = "2" ]
