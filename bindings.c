@@ -66,6 +66,7 @@ enum {
 	LXC_TYPE_PROC_STAT,
 	LXC_TYPE_PROC_DISKSTATS,
 	LXC_TYPE_PROC_SWAPS,
+	LXC_TYPE_PROC_LOADAVG,
 };
 
 struct file_info {
@@ -4128,7 +4129,8 @@ int proc_getattr(const char *path, struct stat *sb)
 			strcmp(path, "/proc/uptime") == 0 ||
 			strcmp(path, "/proc/stat") == 0 ||
 			strcmp(path, "/proc/diskstats") == 0 ||
-			strcmp(path, "/proc/swaps") == 0) {
+			strcmp(path, "/proc/swaps") == 0 ||
+			strcmp(path, "/proc/loadavg") == 0) {
 		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -4148,7 +4150,8 @@ int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offs
 	    filler(buf, "stat", NULL, 0) != 0 ||
 	    filler(buf, "uptime", NULL, 0) != 0 ||
 	    filler(buf, "diskstats", NULL, 0) != 0 ||
-	    filler(buf, "swaps", NULL, 0) != 0)
+	    filler(buf, "swaps", NULL, 0) != 0   ||
+	    filler(buf, "loadavg", NULL, 0) != 0)
 		return -EINVAL;
 	return 0;
 }
@@ -4170,6 +4173,8 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_PROC_DISKSTATS;
 	else if (strcmp(path, "/proc/swaps") == 0)
 		type = LXC_TYPE_PROC_SWAPS;
+	else if (strcmp(path, "/proc/loadavg") == 0)
+		type = LXC_TYPE_PROC_LOADAVG;
 	if (type == -1)
 		return -ENOENT;
 
@@ -4227,6 +4232,8 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		return proc_diskstats_read(buf, size, offset, fi);
 	case LXC_TYPE_PROC_SWAPS:
 		return proc_swaps_read(buf, size, offset, fi);
+	case LXC_TYPE_PROC_LOADAVG:
+		return proc_loadavg_read(buf, size, offset, fi);
 	default:
 		return -EINVAL;
 	}
