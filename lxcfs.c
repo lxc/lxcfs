@@ -845,9 +845,9 @@ int main(int argc, char *argv[])
 {
 	int ret = EXIT_FAILURE;
 	int pidfd = -1;
-	char *pidfile = NULL, *v = NULL;
+	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	size_t pidfile_len;
-	bool debug = false;
+	bool debug = false, nonempty = false;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s [-f|-d] -o allow_other,directio argv[1] NULL
@@ -860,9 +860,17 @@ int main(int argc, char *argv[])
 	swallow_arg(&argc, argv, "-f");
 	debug = swallow_arg(&argc, argv, "-d");
 	if (swallow_option(&argc, argv, "-o", &v)) {
-		if (strcmp(v, "allow_other") != 0) {
-			fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
-			exit(EXIT_FAILURE);
+		/* Parse multiple values */
+		for (; (token = strtok_r(v, ",", &saveptr)); v = NULL) {
+			if (strcmp(token, "allow_other") == 0) {
+				/* Noop. this is the default. Always enabled. */
+			} else if (strcmp(token, "nonempty") == 0) {
+				nonempty = true;
+			} else {
+				free(v);
+				fprintf(stderr, "Warning: unexpected fuse option %s\n", v);
+				exit(EXIT_FAILURE);
+			}
 		}
 		free(v);
 		v = NULL;
@@ -884,13 +892,15 @@ int main(int argc, char *argv[])
 	}
 
 	newargv[cnt++] = argv[0];
-        if (debug) {
-                newargv[cnt++] = "-d";
-        } else {
-                newargv[cnt++] = "-f";
-        }
+	if (debug)
+		newargv[cnt++] = "-d";
+	else
+		newargv[cnt++] = "-f";
 	newargv[cnt++] = "-o";
-	newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+	if (nonempty)
+		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
+	else
+		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
