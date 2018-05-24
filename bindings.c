@@ -247,6 +247,38 @@ static struct load_node *del_node(struct load_node *n, int locate)
 	return g;
 }
 
+void load_free(void)
+{
+	int i;
+	struct load_node *f, *p;
+
+	for (i = 0; i < LOAD_SIZE; i++) {
+		pthread_mutex_lock(&load_hash[i].lock);
+		pthread_rwlock_wrlock(&load_hash[i].rilock);
+		pthread_rwlock_wrlock(&load_hash[i].rdlock);
+		if (load_hash[i].next == NULL) {
+			pthread_mutex_unlock(&load_hash[i].lock);
+			pthread_mutex_destroy(&load_hash[i].lock);
+			pthread_rwlock_unlock(&load_hash[i].rilock);
+			pthread_rwlock_destroy(&load_hash[i].rilock);
+			pthread_rwlock_unlock(&load_hash[i].rdlock);
+			pthread_rwlock_destroy(&load_hash[i].rdlock);
+			continue;
+		}
+		for (f = load_hash[i].next; f; ) {
+			free(f->cg);
+			p = f->next;
+			free(f);
+			f = p;
+		}
+		pthread_mutex_unlock(&load_hash[i].lock);
+		pthread_mutex_destroy(&load_hash[i].lock);
+		pthread_rwlock_unlock(&load_hash[i].rilock);
+		pthread_rwlock_destroy(&load_hash[i].rilock);
+		pthread_rwlock_unlock(&load_hash[i].rdlock);
+		pthread_rwlock_destroy(&load_hash[i].rdlock);
+	}
+}
 /* Reserve buffer size to account for file size changes. */
 #define BUF_RESERVE_SIZE 512
 

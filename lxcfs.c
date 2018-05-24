@@ -937,6 +937,27 @@ int main(int argc, char *argv[])
 	}
 	if (!fuse_main(nargs, newargv, &lxcfs_ops, NULL))
 		ret = EXIT_SUCCESS;
+	if (load_use == true) {
+		s = pthread_cancel(pid);
+		if (s == 0) {
+			s = pthread_join(pid, NULL); /* Make sure sub thread has been canceled. */
+			if (s != 0) {
+				lxcfs_error("%s\n", "load_free error!");
+				goto out;
+			}
+			dlerror();    /* Clear any existing error */
+
+			load_free = (void (*)(void)) dlsym(dlopen_handle, "load_free");
+			error = dlerror();
+			if (error != NULL) {
+				lxcfs_error("load_free error: %s\n", error);
+				goto out;
+			}
+			load_free();
+		} else {
+			lxcfs_error("%s\n", "load_free error!");
+		}
+	}
 
 out:
 	if (dlopen_handle)
