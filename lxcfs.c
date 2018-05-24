@@ -745,8 +745,9 @@ static void usage()
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs [-f|-d] [-p pidfile] mountpoint\n");
+	fprintf(stderr, "lxcfs [-f|-d] -l [-p pidfile] mountpoint\n");
 	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
+	fprintf(stderr, "  -l use loadavg \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
 	exit(1);
@@ -848,6 +849,12 @@ int main(int argc, char *argv[])
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	size_t pidfile_len;
 	bool debug = false, nonempty = false;
+	pthread_t pid;
+	int s = 0;
+	char *error;
+	bool load_use = false;
+	pthread_t (*load_daemon)(int);
+	void (*load_free)(void);
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s [-f|-d] -o allow_other,directio argv[1] NULL
@@ -859,6 +866,9 @@ int main(int argc, char *argv[])
 	swallow_arg(&argc, argv, "-s");
 	swallow_arg(&argc, argv, "-f");
 	debug = swallow_arg(&argc, argv, "-d");
+	if (swallow_arg(&argc, argv, "-l")) {
+		load_use = true;
+	}
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
 		for (; (token = strtok_r(v, ",", &saveptr)); v = NULL) {
@@ -912,6 +922,19 @@ int main(int argc, char *argv[])
 	if ((pidfd = set_pidfile(pidfile)) < 0)
 		goto out;
 
+	if (load_use == true) {
+		dlerror();    /* Clear any existing error */
+
+		load_daemon = (pthread_t (*)(int)) dlsym(dlopen_handle, "load_daemon");
+		error = dlerror();
+		if (error != NULL) {
+			lxcfs_error("load_daemon fails:%s\n", error);
+			goto out;
+		}
+		pid = load_daemon(1);
+		if (pid == 0)
+			goto out;
+	}
 	if (!fuse_main(nargs, newargv, &lxcfs_ops, NULL))
 		ret = EXIT_SUCCESS;
 

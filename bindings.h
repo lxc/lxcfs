@@ -32,5 +32,6 @@ extern int proc_open(const char *path, struct fuse_file_info *fi);
 extern int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi);
 extern int proc_access(const char *path, int mask);
+extern pthread_t load_daemon(int load_use);
 
 #endif /* __LXCFS_BINDINGS_H */

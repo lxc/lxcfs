@@ -82,6 +82,21 @@ struct file_info {
 
 /* The function of hash table.*/
 #define LOAD_SIZE 100 /*the size of hash_table */
+#define FLUSH_TIME 5  /*the flush rate */
+#define DEPTH_DIR 3   /*the depth of per cgroup */
+/* The function of calculate loadavg .*/
+#define FSHIFT		11		/* nr of bits of precision */
+#define FIXED_1		(1<<FSHIFT)	/* 1.0 as fixed-point */
+#define EXP_1		1884		/* 1/exp(5sec/1min) as fixed-point */
+#define EXP_5		2014		/* 1/exp(5sec/5min) */
+#define EXP_15		2037		/* 1/exp(5sec/15min) */
+#define LOAD_INT(x) ((x) >> FSHIFT)
+#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
+/* 
+ * This parameter is used for proc_loadavg_read().
+ * 1 means use loadavg, 0 means not use.
+ */
+static int loadavg = 0;
 static int calc_hash(char *name)
 {
 	unsigned int hash = 0;
@@ -4243,6 +4258,363 @@ err:
 	free(memusage_str);
 	free(memswusage_str);
 	return rv;
+}
+/*
+ * Find the process pid from cgroup path.
+ * eg:from /sys/fs/cgroup/cpu/docker/containerid/cgroup.procs to find the process pid.
+ * @pid_buf : put pid to pid_buf.
+ * @dpath : the path of cgroup. eg: /docker/containerid or /docker/containerid/child-cgroup ...
+ * @depth : the depth of cgroup in container.
+ * @sum : return the number of pid.
+ * @cfd : the file descriptor of the mounted cgroup. eg: /sys/fs/cgroup/cpu
+ */
+static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
+{
+	DIR *dir;
+	int fd;
+	struct dirent *file;
+	FILE *f = NULL;
+	size_t linelen = 0;
+	char *line = NULL;
+	int pd;
+	char *path_dir, *path;
+	char **pid;
+
+	/* path = dpath + "/cgroup.procs" + /0 */
+	do {
+		path = malloc(strlen(dpath) + 20);
+	} while (!path);
+
+	strcpy(path, dpath);
+	fd = openat(cfd, path, O_RDONLY);
+	if (fd < 0)
+		goto out;
+
+	dir = fdopendir(fd);
+	if (dir == NULL) {
+		close(fd);
+		goto out;
+	}
+
+	while (((file = readdir(dir)) != NULL) && depth > 0) {
+		if (strncmp(file->d_name, ".", 1) == 0)
+			continue;
+		if (strncmp(file->d_name, "..", 1) == 0)
+			continue;
+		if (file->d_type == DT_DIR) {
+			/* path + '/' + d_name +/0 */
+			do {
+				path_dir = malloc(strlen(path) + 2 + sizeof(file->d_name));
+			} while (!path_dir);
+			strcpy(path_dir, path);
+			strcat(path_dir, "/");
+			strcat(path_dir, file->d_name);
+			pd = depth - 1;
+			sum = calc_pid(pid_buf, path_dir, pd, sum, cfd);
+			free(path_dir);
+		}
+	}
+	closedir(dir);
+
+	strcat(path, "/cgroup.procs");
+	fd = openat(cfd, path, O_RDONLY);
+	if (fd < 0)
+		goto out;
+
+	f = fdopen(fd, "r");
+	if (!f) {
+		close(fd);
+		goto out;
+	}
+
+	while (getline(&line, &linelen, f) != -1) {
+		do {
+			pid = realloc(*pid_buf, sizeof(char *) * (sum + 1));
+		} while (!pid);
+		*pid_buf = pid;
+		do {
+			*(*pid_buf + sum) = malloc(strlen(line) + 1);
+		} while (*(*pid_buf + sum) == NULL);
+		strcpy(*(*pid_buf + sum), line);
+		sum++;
+	}
+	fclose(f);
+out:
+	free(path);
+	return sum;
+}
+/*
+ * calc_load calculates the load according to the following formula:
+ * load1 = load0 * exp + active * (1 - exp)
+ *
+ * @load1: the new loadavg.
+ * @load0: the former loadavg.
+ * @active: the total number of running pid at this moment.
+ * @exp: the fixed-point defined in the beginning.
+ */
+static unsigned long
+calc_load(unsigned long load, unsigned long exp, unsigned long active)
+{
+	unsigned long newload;
+
+	active = active > 0 ? active * FIXED_1 : 0;
+	newload = load * exp + active * (FIXED_1 - exp);
+	if (active >= load)
+		newload += FIXED_1 - 1;
+
+	return newload / FIXED_1;
+}
+
+/*
+ * Return 0 means that container p->cg is closed.
+ * Return -1 means that error occurred in refresh.
+ * Positive num equals the total number of pid.
+ */
+static int refresh_load(struct load_node *p, char *path)
+{
+	FILE *f = NULL;
+	char **idbuf;
+	char proc_path[256];
+	int i, ret, run_pid = 0, total_pid = 0, last_pid = 0;
+	char *line = NULL;
+	size_t linelen = 0;
+	int sum, length;
+	DIR *dp;
+	struct dirent *file;
+
+	do {
+		idbuf = malloc(sizeof(char *));
+	} while (!idbuf);
+	sum = calc_pid(&idbuf, path, DEPTH_DIR, 0, p->cfd);
+	/*  normal exit  */
+	if (sum == 0)
+		goto out;
+
+	for (i = 0; i < sum; i++) {
+		/*clean up '\n' */
+		length = strlen(idbuf[i])-1;
+		idbuf[i][length] = '\0';
+		ret = snprintf(proc_path, 256, "/proc/%s/task", idbuf[i]);
+		if (ret < 0 || ret > 255) {
+			lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
+			i = sum;
+			sum = -1;
+			goto err_out;
+		}
+
+		dp = opendir(proc_path);
+		if (!dp) {
+			lxcfs_error("%s\n", "Open proc_path failed in refresh_load.");
+			continue;
+		}
+		while ((file = readdir(dp)) != NULL) {
+			if (strncmp(file->d_name, ".", 1) == 0)
+				continue;
+			if (strncmp(file->d_name, "..", 1) == 0)
+				continue;
+			total_pid++;
+			/* We make the biggest pid become last_pid.*/
+			ret = atof(file->d_name);
+			last_pid = (ret > last_pid) ? ret : last_pid;
+
+			ret = snprintf(proc_path, 256, "/proc/%s/task/%s/status", idbuf[i], file->d_name);
+			if (ret < 0 || ret > 255) {
+				lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
+				i = sum;
+				sum = -1;
+				closedir(dp);
+				goto err_out;
+			}
+			f = fopen(proc_path, "r");
+			if (f != NULL) {
+				while (getline(&line, &linelen, f) != -1) {
+					/* Find State */
+					if ((line[0] == 'S') && (line[1] == 't'))
+						break;
+				}
+			if ((line[7] == 'R') || (line[7] == 'D'))
+				run_pid++;
+			fclose(f);
+			}
+		}
+		closedir(dp);
+	}
+	/*Calculate the loadavg.*/
+	p->avenrun[0] = calc_load(p->avenrun[0], EXP_1, run_pid);
+	p->avenrun[1] = calc_load(p->avenrun[1], EXP_5, run_pid);
+	p->avenrun[2] = calc_load(p->avenrun[2], EXP_15, run_pid);
+	p->run_pid = run_pid;
+	p->total_pid = total_pid;
+	p->last_pid = last_pid;
+
+	free(line);
+err_out:	
+	for (; i > 0; i--)
+		free(idbuf[i-1]);
+out:
+	free(idbuf);
+	return sum;
+}
+/*
+ * Traverse the hash table and update it.
+ */
+void *load_begin(void *arg)
+{
+
+	char *path = NULL;
+	int i, sum, length, ret;
+	struct load_node *f;
+	int first_node;
+	clock_t time1, time2;
+
+	while (1) {
+		time1 = clock();
+		for (i = 0; i < LOAD_SIZE; i++) {
+			pthread_mutex_lock(&load_hash[i].lock);
+			if (load_hash[i].next == NULL) {
+				pthread_mutex_unlock(&load_hash[i].lock);
+				continue;
+			}
+			f = load_hash[i].next;
+			first_node = 1;
+			while (f) {
+				length = strlen(f->cg) + 2;
+				do {
+					/* strlen(f->cg) + '.' or '' + \0 */
+					path = malloc(length);
+				} while (!path);
+
+				ret = snprintf(path, length, "%s%s", *(f->cg) == '/' ? "." : "", f->cg);
+				if (ret < 0 || ret > length - 1) {
+					/* snprintf failed, ignore the node.*/
+					lxcfs_error("Refresh node %s failed for snprintf().\n", f->cg);
+					goto out;
+				}
+				sum = refresh_load(f, path);
+				if (sum == 0) {
+					f = del_node(f, i);
+				} else {
+out:					f = f->next;
+				}
+				free(path);
+				/* load_hash[i].lock locks only on the first node.*/
+				if (first_node == 1) {
+					first_node = 0;
+					pthread_mutex_unlock(&load_hash[i].lock);
+				}
+			}
+		}
+		time2 = clock();
+		usleep(FLUSH_TIME * 1000000 - (int)((time2 - time1) * 1000000 / CLOCKS_PER_SEC));
+	}
+}
+
+static int proc_loadavg_read(char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = (struct file_info *)fi->fh;
+	pid_t initpid;
+	char *cg;
+	size_t total_len = 0;
+	char *cache = d->buf;
+	struct load_node *n;
+	int hash;
+	int cfd;
+	unsigned long a, b, c;
+
+	if (offset) {
+		if (offset > d->size)
+			return -EINVAL;
+		if (!d->cached)
+			return 0;
+		int left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+		return total_len;
+	}
+	if (!loadavg)
+		return read_file("/proc/loadavg", buf, size, d);
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 0)
+		initpid = fc->pid;
+	cg = get_pid_cgroup(initpid, "cpu");
+	if (!cg)
+		return read_file("/proc/loadavg", buf, size, d);
+
+	prune_init_slice(cg);
+	hash = calc_hash(cg);
+	n = locate_node(cg, hash);
+
+	/* First time */
+	if (n == NULL) {
+		if (!find_mounted_controller("cpu", &cfd)) {
+			/*
+			 * In locate_node() above, pthread_rwlock_unlock() isn't used
+			 * because delete is not allowed before read has ended.
+			 */
+			pthread_rwlock_unlock(&load_hash[hash].rdlock);
+			return 0;
+		}
+		do {
+			n = malloc(sizeof(struct load_node));
+		} while (!n);
+
+		do {
+			n->cg = malloc(strlen(cg)+1);
+		} while (!n->cg);
+		strcpy(n->cg, cg);
+		n->avenrun[0] = 0;
+		n->avenrun[1] = 0;
+		n->avenrun[2] = 0;
+		n->run_pid = 0;
+		n->total_pid = 1;
+		n->last_pid = initpid;
+		n->cfd = cfd;
+		insert_node(&n, hash);
+	}
+	a = n->avenrun[0] + (FIXED_1/200);
+	b = n->avenrun[1] + (FIXED_1/200);
+	c = n->avenrun[2] + (FIXED_1/200);
+	total_len = snprintf(d->buf, d->buflen, "%lu.%02lu %lu.%02lu %lu.%02lu %d/%d %d\n",
+		LOAD_INT(a), LOAD_FRAC(a),
+		LOAD_INT(b), LOAD_FRAC(b),
+		LOAD_INT(c), LOAD_FRAC(c),
+		n->run_pid, n->total_pid, n->last_pid);
+	pthread_rwlock_unlock(&load_hash[hash].rdlock);
+	if (total_len < 0 || total_len >=  d->buflen) {
+		lxcfs_error("%s\n", "Failed to write to cache");
+		return 0;
+	}
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if (total_len > size)
+		total_len = size;
+	memcpy(buf, d->buf, total_len);
+	return total_len;
+}
+/* Return a positive number on success, return 0 on failure.*/
+pthread_t load_daemon(int load_use)
+{
+	int ret;
+	pthread_t pid;
+
+	ret = init_load();
+	if (ret == -1) {
+		lxcfs_error("%s\n", "Initialize hash_table fails in load_daemon!");
+		return 0;
+	}
+	ret = pthread_create(&pid, NULL, load_begin, NULL);
+	if (ret != 0) {
+		lxcfs_error("%s\n", "Create pthread fails in load_daemon!");
+		load_free();
+		return 0;
+	}
+	/* use loadavg, here loadavg = 1*/
+	loadavg = load_use;
+	return pid;
 }
 
 static off_t get_procfile_size(const char *which)
