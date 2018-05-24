@@ -80,6 +80,158 @@ struct file_info {
 	int cached;
 };
 
+/* The function of hash table.*/
+#define LOAD_SIZE 100 /*the size of hash_table */
+static int calc_hash(char *name)
+{
+	unsigned int hash = 0;
+	unsigned int x = 0;
+	/* ELFHash algorithm. */
+	while (*name) {
+		hash = (hash << 4) + *name++;
+		x = hash & 0xf0000000;
+		if (x != 0)
+			hash ^= (x >> 24);
+		hash &= ~x;
+	}
+	return ((hash & 0x7fffffff) % LOAD_SIZE);
+}
+
+struct load_node {
+	char *cg;  /*cg */
+	unsigned long avenrun[3];		/* Load averages */
+	unsigned int run_pid;
+	unsigned int total_pid;
+	unsigned int last_pid;
+	int cfd; /* The file descriptor of the mounted cgroup */
+	struct  load_node *next;
+	struct  load_node **pre;
+};
+
+struct load_head {
+	/*
+	 * The lock is about insert load_node and refresh load_node.To the first
+	 * load_node of each hash bucket, insert and refresh in this hash bucket is
+	 * mutually exclusive.
+	 */
+	pthread_mutex_t lock;
+	/*
+	 * The rdlock is about read loadavg and delete load_node.To each hash
+	 * bucket, read and delete is mutually exclusive. But at the same time, we
+	 * allow paratactic read operation. This rdlock is at list level.
+	 */
+	pthread_rwlock_t rdlock;
+	/*
+	 * The rilock is about read loadavg and insert load_node.To the first
+	 * load_node of each hash bucket, read and insert is mutually exclusive.
+	 * But at the same time, we allow paratactic read operation.
+	 */
+	pthread_rwlock_t rilock;
+	struct load_node *next;
+};
+
+static struct load_head load_hash[LOAD_SIZE]; /* hash table */
+/*
+ * init_load initialize the hash table.
+ * Return 0 on success, return -1 on failure.
+ */
+static int init_load(void)
+{
+	int i;
+	int ret;
+
+	for (i = 0; i < LOAD_SIZE; i++) {
+		load_hash[i].next = NULL;
+		ret = pthread_mutex_init(&load_hash[i].lock, NULL);
+		if (ret != 0) {
+			lxcfs_error("%s\n", "Failed to initialize lock");
+			goto out3;
+		}
+		ret = pthread_rwlock_init(&load_hash[i].rdlock, NULL);
+		if (ret != 0) {
+			lxcfs_error("%s\n", "Failed to initialize rdlock");
+			goto out2;
+		}
+		ret = pthread_rwlock_init(&load_hash[i].rilock, NULL);
+		if (ret != 0) {
+			lxcfs_error("%s\n", "Failed to initialize rilock");
+			goto out1;
+		}
+	}
+	return 0;
+out1:
+	pthread_rwlock_destroy(&load_hash[i].rdlock);
+out2:
+	pthread_mutex_destroy(&load_hash[i].lock);
+out3:
+	while (i > 0) {
+		i--;
+		pthread_mutex_destroy(&load_hash[i].lock);
+		pthread_rwlock_destroy(&load_hash[i].rdlock);
+		pthread_rwlock_destroy(&load_hash[i].rilock);
+	}
+	return -1;
+}
+
+static void insert_node(struct load_node **n, int locate)
+{
+	struct load_node *f;
+
+	pthread_mutex_lock(&load_hash[locate].lock);
+	pthread_rwlock_wrlock(&load_hash[locate].rilock);
+	f = load_hash[locate].next;
+	load_hash[locate].next = *n;
+
+	(*n)->pre = &(load_hash[locate].next);
+	if (f)
+		f->pre = &((*n)->next);
+	(*n)->next = f;
+	pthread_mutex_unlock(&load_hash[locate].lock);
+	pthread_rwlock_unlock(&load_hash[locate].rilock);
+}
+/*
+ * locate_node() finds special node. Not return NULL means success.
+ * It should be noted that rdlock isn't unlocked at the end of code
+ * because this function is used to read special node. Delete is not
+ * allowed before read has ended.
+ * unlock rdlock only in proc_loadavg_read().
+ */
+static struct load_node *locate_node(char *cg, int locate)
+{
+	struct load_node *f = NULL;
+	int i = 0;
+
+	pthread_rwlock_rdlock(&load_hash[locate].rilock);
+	pthread_rwlock_rdlock(&load_hash[locate].rdlock);
+	if (load_hash[locate].next == NULL) {
+		pthread_rwlock_unlock(&load_hash[locate].rilock);
+		return f;
+	}
+	f = load_hash[locate].next;
+	pthread_rwlock_unlock(&load_hash[locate].rilock);
+	while (f && ((i = strcmp(f->cg, cg)) != 0))
+		f = f->next;
+	return f;
+}
+/* Delete the load_node n and return the next node of it. */
+static struct load_node *del_node(struct load_node *n, int locate)
+{
+	struct load_node *g;
+
+	pthread_rwlock_wrlock(&load_hash[locate].rdlock);
+	if (n->next == NULL) {
+		*(n->pre) = NULL;
+	} else {
+		*(n->pre) = n->next;
+		n->next->pre = n->pre;
+	}
+	g = n->next;
+	free(n->cg);
+	free(n);
+	pthread_rwlock_unlock(&load_hash[locate].rdlock);
+	return g;
+}
+
 /* Reserve buffer size to account for file size changes. */
 #define BUF_RESERVE_SIZE 512
 
