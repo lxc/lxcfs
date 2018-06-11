@@ -4552,7 +4552,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	char *cache = d->buf;
 	struct load_node *n;
 	int hash;
-	int cfd;
+	int cfd, rv = 0;
 	unsigned long a, b, c;
 
 	if (offset) {
@@ -4587,7 +4587,8 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 			 * because delete is not allowed before read has ended.
 			 */
 			pthread_rwlock_unlock(&load_hash[hash].rdlock);
-			return 0;
+			rv = 0;
+			goto err;
 		}
 		do {
 			n = malloc(sizeof(struct load_node));
@@ -4617,7 +4618,8 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	pthread_rwlock_unlock(&load_hash[hash].rdlock);
 	if (total_len < 0 || total_len >=  d->buflen) {
 		lxcfs_error("%s\n", "Failed to write to cache");
-		return 0;
+		rv = 0;
+		goto err;
 	}
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -4625,7 +4627,11 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	if (total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
-	return total_len;
+	rv = total_len;
+
+err:
+	free(cg);
+	return rv;
 }
 /* Return a positive number on success, return 0 on failure.*/
 pthread_t load_daemon(int load_use)
