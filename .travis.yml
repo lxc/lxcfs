@@ -14,7 +14,7 @@ addons:
     build_command: "make -j4"
     branch_pattern: master
 before_install:
-  - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
+ - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
  - sudo add-apt-repository ppa:ubuntu-lxc/daily -y
  - sudo apt-get update -qq
  - sudo apt-get -y install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
