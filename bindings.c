@@ -4521,6 +4521,8 @@ static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 	}
 	fclose(f);
 out:
+	if (line)
+		free(line);
 	free(path);
 	return sum;
 }
