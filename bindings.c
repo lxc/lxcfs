@@ -298,6 +298,7 @@ struct cg_proc_stat {
 
 struct cg_proc_stat_head {
 	struct cg_proc_stat *next;
+	time_t lastcheck;
 };
 
 #define CPUVIEW_HASH_SIZE 100
@@ -311,6 +312,7 @@ static bool cpuview_init_head(struct cg_proc_stat_head **head)
 		return false;
 	}
 
+	(*head)->lastcheck = time(NULL);
 	(*head)->next = NULL;
 	return true;
 }
@@ -340,6 +342,14 @@ err:
 	return false;
 }
 
+static void free_proc_stat_node(struct cg_proc_stat *node)
+{
+	free(node->cg);
+	free(node->usage);
+	free(node->view);
+	free(node);
+}
+
 static void cpuview_free_head(struct cg_proc_stat_head *head)
 {
 	struct cg_proc_stat *node, *tmp;
@@ -350,11 +360,7 @@ static void cpuview_free_head(struct cg_proc_stat_head *head)
 		for (;;) {
 			tmp = node;
 			node = node->next;
-
-			free(tmp->cg);
-			free(tmp->usage);
-			free(tmp->view);
-			free(tmp);
+			free_proc_stat_node(tmp);
 
 			if (!node)
 				break;
@@ -1180,6 +1186,28 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 
 	*value = slurp_file(fnam, fd);
 	return *value != NULL;
+}
+
+bool cgfs_param_exist(const char *controller, const char *cgroup, const char *file)
+{
+	int ret, cfd;
+	size_t len;
+	char *fnam, *tmpc;
+
+	tmpc = find_mounted_controller(controller, &cfd);
+	if (!tmpc)
+		return false;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	return (faccessat(cfd, fnam, F_OK, 0) == 0);
 }
 
 struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, const char *file)
@@ -4127,6 +4155,51 @@ static void add_cpu_usage(unsigned long *surplus, struct cpuacct_usage *usage, u
 	*surplus -= to_add;
 }
 
+static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
+{
+	struct cg_proc_stat *first = NULL, *prev, *tmp;
+
+	for (prev = NULL; node; ) {
+		if (!cgfs_param_exist("cpu", node->cg, "cpu.shares")) {
+			tmp = node;
+			lxcfs_debug("Removing stat node for %s\n", node->cg);
+
+			if (prev)
+				prev->next = node->next;
+			else
+				first = node->next;
+
+			node = node->next;
+			free_proc_stat_node(tmp);
+		} else {
+			if (!first)
+				first = node;
+			prev = node;
+			node = node->next;
+		}
+	}
+
+	return first;
+}
+
+#define PROC_STAT_PRUNE_INTERVAL 10
+static void prune_proc_stat_history(void)
+{
+	int i;
+	time_t now = time(NULL);
+
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now)
+			return;
+
+		if (!proc_stat_history[i]->next)
+			continue;
+
+		proc_stat_history[i]->next = prune_proc_stat_list(proc_stat_history[i]->next);
+		proc_stat_history[i]->lastcheck = now;
+	}
+}
+
 static struct cg_proc_stat *find_proc_stat_node(const char *cg)
 {
 	int hash = calc_hash(cg) % CPUVIEW_HASH_SIZE;
@@ -4140,10 +4213,14 @@ static struct cg_proc_stat *find_proc_stat_node(const char *cg)
 
 	do {
 		if (strcmp(cg, node->cg) == 0)
-			return node;
+			goto out;
 	} while ((node = node->next));
 
-	return NULL;
+	node = NULL;
+
+out:
+	prune_proc_stat_history();
+	return node;
 }
 
 static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
