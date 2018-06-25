@@ -3304,6 +3304,85 @@ static bool cpuline_in_cpuset(const char *line, const char *cpuset)
 }
 
 /*
+ * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or `cpu.cfs_period_us`,
+ * depending on `param`. Parameter value is returned throuh `value`.
+ */
+static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
+{
+	bool rv = false;
+	char file[11 + 6 + 1]; // cpu.cfs__us + quota/period + \0
+	char *str = NULL;
+
+	sprintf(file, "cpu.cfs_%s_us", param);
+
+	if (!cgfs_get_value("cpu", cg, file, &str))
+		goto err;
+
+	if (sscanf(str, "%ld", value) != 1)
+		goto err;
+
+	rv = true;
+
+err:
+	if (str)
+		free(str);
+	return rv;
+}
+
+/*
+ * Return the maximum number of visible CPUs based on CPU quotas.
+ * If there is no quota set, zero is returned.
+ */
+int max_cpu_count(const char *cg)
+{
+	int rv, nprocs;
+	int64_t cfs_quota, cfs_period;
+
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
+
+	if (cfs_quota <= 0 || cfs_period <= 0)
+		return 0;
+
+	rv = cfs_quota / cfs_period;
+
+	/* In case quota/period does not yield a whole number, add one CPU for
+	 * the remainder.
+	 */
+	if ((cfs_quota % cfs_period) > 0)
+		rv += 1;
+
+	nprocs = get_nprocs();
+
+	if (rv > nprocs)
+		rv = nprocs;
+
+	return rv;
+}
+
+/*
+ * Determine whether CPU views should be used or not.
+ */
+bool use_cpuview(const char *cg)
+{
+	int cfd;
+	char *tmpc;
+
+	tmpc = find_mounted_controller("cpu", &cfd);
+	if (!tmpc)
+		return false;
+
+	tmpc = find_mounted_controller("cpuacct", &cfd);
+	if (!tmpc)
+		return false;
+
+	return true;
+}
+
+/*
  * check whether this is a '^processor" line in /proc/cpuinfo
  */
 static bool is_processor_line(const char *line)
@@ -3325,7 +3404,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	bool am_printing = false, firstline = true, is_s390x = false;
-	int curcpu = -1, cpu;
+	int curcpu = -1, cpu, max_cpus = 0;
+	bool use_view;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 	FILE *f = NULL;
@@ -3353,6 +3433,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		goto err;
 
+	use_view = use_cpuview(cg);
+
+	if (use_view)
+		max_cpus = max_cpu_count(cg);
+
 	f = fopen("/proc/cpuinfo", "r");
 	if (!f)
 		goto err;
@@ -3370,6 +3455,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		if (strncmp(line, "# processors:", 12) == 0)
 			continue;
 		if (is_processor_line(line)) {
+			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+				break;
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
 				curcpu ++;
@@ -3391,6 +3478,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			continue;
 		} else if (is_s390x && sscanf(line, "processor %d:", &cpu) == 1) {
 			char *p;
+			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+				break;
 			if (!cpu_in_cpuset(cpu, cpuset))
 				continue;
 			curcpu ++;
