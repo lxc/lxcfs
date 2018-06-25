@@ -293,12 +293,18 @@ struct cg_proc_stat {
 	struct cpuacct_usage *usage; // Real usage as read from the host's /proc/stat
 	struct cpuacct_usage *view; // Usage stats reported to the container
 	int cpu_count;
+	pthread_mutex_t lock; // For node manipulation
 	struct cg_proc_stat *next;
 };
 
 struct cg_proc_stat_head {
 	struct cg_proc_stat *next;
 	time_t lastcheck;
+
+	/*
+	 * For access to the list. Reading can be parallel, pruning is exclusive.
+	 */
+	pthread_rwlock_t lock;
 };
 
 #define CPUVIEW_HASH_SIZE 100
@@ -314,6 +320,13 @@ static bool cpuview_init_head(struct cg_proc_stat_head **head)
 
 	(*head)->lastcheck = time(NULL);
 	(*head)->next = NULL;
+
+	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
+		lxcfs_error("%s\n", "Failed to initialize list lock");
+		free(*head);
+		return false;
+	}
+
 	return true;
 }
 
@@ -344,6 +357,7 @@ err:
 
 static void free_proc_stat_node(struct cg_proc_stat *node)
 {
+	pthread_mutex_destroy(&node->lock);
 	free(node->cg);
 	free(node->usage);
 	free(node->view);
@@ -367,6 +381,7 @@ static void cpuview_free_head(struct cg_proc_stat_head *head)
 		}
 	}
 
+	pthread_rwlock_destroy(&head->lock);
 	free(head);
 }
 
@@ -4189,25 +4204,32 @@ static void prune_proc_stat_history(void)
 	time_t now = time(NULL);
 
 	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
-		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now)
+		pthread_rwlock_wrlock(&proc_stat_history[i]->lock);
+
+		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now) {
+			pthread_rwlock_unlock(&proc_stat_history[i]->lock);
 			return;
+		}
 
-		if (!proc_stat_history[i]->next)
-			continue;
+		if (proc_stat_history[i]->next) {
+			proc_stat_history[i]->next = prune_proc_stat_list(proc_stat_history[i]->next);
+			proc_stat_history[i]->lastcheck = now;
+		}
 
-		proc_stat_history[i]->next = prune_proc_stat_list(proc_stat_history[i]->next);
-		proc_stat_history[i]->lastcheck = now;
+		pthread_rwlock_unlock(&proc_stat_history[i]->lock);
 	}
 }
 
-static struct cg_proc_stat *find_proc_stat_node(const char *cg)
+static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head, const char *cg)
 {
-	int hash = calc_hash(cg) % CPUVIEW_HASH_SIZE;
-	struct cg_proc_stat_head *head = proc_stat_history[hash];
 	struct cg_proc_stat *node;
 
-	if (!head->next)
+	pthread_rwlock_rdlock(&head->lock);
+
+	if (!head->next) {
+		pthread_rwlock_unlock(&head->lock);
 		return NULL;
+	}
 
 	node = head->next;
 
@@ -4219,6 +4241,7 @@ static struct cg_proc_stat *find_proc_stat_node(const char *cg)
 	node = NULL;
 
 out:
+	pthread_rwlock_unlock(&head->lock);
 	prune_proc_stat_history();
 	return node;
 }
@@ -4255,6 +4278,11 @@ static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int 
 	node->cpu_count = cpu_count;
 	node->next = NULL;
 
+	if (pthread_mutex_init(&node->lock, NULL) != 0) {
+		lxcfs_error("%s\n", "Failed to initialize node lock");
+		goto err;
+	}
+
 	for (i = 0; i < cpu_count; i++) {
 		node->view[i].user = 0;
 		node->view[i].system = 0;
@@ -4276,19 +4304,28 @@ err:
 	return NULL;
 }
 
-static void add_proc_stat_node(struct cg_proc_stat *new_node)
+static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 {
 	int hash = calc_hash(new_node->cg) % CPUVIEW_HASH_SIZE;
 	struct cg_proc_stat_head *head = proc_stat_history[hash];
-	struct cg_proc_stat *node;
+	struct cg_proc_stat *node, *rv = new_node;
+
+	pthread_rwlock_wrlock(&head->lock);
 
 	if (!head->next) {
 		head->next = new_node;
-		return;
+		goto out;
 	}
 
+	node = head->next;
+
 	for (;;) {
-		node = head->next;
+		if (strcmp(node->cg, new_node->cg) == 0) {
+			/* The node is already present, return it */
+			free_proc_stat_node(new_node);
+			rv = node;
+			goto out;
+		}
 
 		if (node->next) {
 			node = node->next;
@@ -4296,8 +4333,33 @@ static void add_proc_stat_node(struct cg_proc_stat *new_node)
 		}
 
 		node->next = new_node;
-		return;
+		goto out;
 	}
+
+out:
+	pthread_rwlock_unlock(&head->lock);
+	return rv;
+}
+
+static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+{
+	int hash = calc_hash(cg) % CPUVIEW_HASH_SIZE;
+	struct cg_proc_stat_head *head = proc_stat_history[hash];
+	struct cg_proc_stat *node;
+
+	node = find_proc_stat_node(head, cg);
+
+	if (!node) {
+		node = new_proc_stat_node(usage, cpu_count, cg);
+		if (!node)
+			return NULL;
+
+		node = add_proc_stat_node(node);
+		lxcfs_debug("New stat node (%d) for %s\n", cpu_count, cg);
+	}
+
+	pthread_mutex_lock(&node->lock);
+	return node;
 }
 
 static void reset_proc_stat_node(struct cg_proc_stat *node, struct cpuacct_usage *usage, int cpu_count)
@@ -4383,16 +4445,12 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	if (max_cpus > cpu_cnt)
 		max_cpus = cpu_cnt;
 
-	stat_node = find_proc_stat_node(cg);
+	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
 
 	if (!stat_node) {
-		stat_node = new_proc_stat_node(cg_cpu_usage, nprocs, cg);
-		if (!stat_node) {
-			rv = 0;
-			goto err;
-		}
-
-		add_proc_stat_node(stat_node);
+		lxcfs_error("unable to find/create stat node for %s\n", cg);
+		rv = 0;
+		goto err;
 	}
 
 	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
@@ -4566,6 +4624,8 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	rv = total_len;
 
 err:
+	if (stat_node)
+		pthread_mutex_unlock(&stat_node->lock);
 	if (line)
 		free(line);
 	if (diff)
