@@ -115,7 +115,7 @@ static int calc_hash(char *name)
 			hash ^= (x >> 24);
 		hash &= ~x;
 	}
-	return ((hash & 0x7fffffff) % LOAD_SIZE);
+	return (hash & 0x7fffffff);
 }
 
 struct load_node {
@@ -4841,7 +4841,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/loadavg", buf, size, d);
 
 	prune_init_slice(cg);
-	hash = calc_hash(cg);
+	hash = calc_hash(cg) % LOAD_SIZE;
 	n = locate_node(cg, hash);
 
 	/* First time */
