@@ -97,7 +97,7 @@ struct cpuacct_usage {
 #define EXP_15		2037		/* 1/exp(5sec/15min) */
 #define LOAD_INT(x) ((x) >> FSHIFT)
 #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
-/* 
+/*
  * This parameter is used for proc_loadavg_read().
  * 1 means use loadavg, 0 means not use.
  */
@@ -584,19 +584,24 @@ static bool write_string(const char *fnam, const char *string, int fd)
 	FILE *f;
 	size_t len, ret;
 
-	if (!(f = fdopen(fd, "w")))
+	f = fdopen(fd, "w");
+	if (!f)
 		return false;
+
 	len = strlen(string);
 	ret = fwrite(string, 1, len, f);
 	if (ret != len) {
-		lxcfs_error("Error writing to file: %s\n", strerror(errno));
+		lxcfs_error("%s - Error writing \"%s\" to \"%s\"\n",
+			    strerror(errno), string, fnam);
 		fclose(f);
 		return false;
 	}
+
 	if (fclose(f) < 0) {
-		lxcfs_error("Error writing to file: %s\n", strerror(errno));
+		lxcfs_error("%s - Failed to close \"%s\"\n", strerror(errno), fnam);
 		return false;
 	}
+
 	return true;
 }
 
@@ -4643,7 +4648,7 @@ static int refresh_load(struct load_node *p, char *path)
 	p->last_pid = last_pid;
 
 	free(line);
-err_out:	
+err_out:
 	for (; i > 0; i--)
 		free(idbuf[i-1]);
 out:
