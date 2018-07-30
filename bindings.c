@@ -378,19 +378,24 @@ static bool write_string(const char *fnam, const char *string, int fd)
 	FILE *f;
 	size_t len, ret;
 
-	if (!(f = fdopen(fd, "w")))
+	f = fdopen(fd, "w");
+	if (!f)
 		return false;
+
 	len = strlen(string);
 	ret = fwrite(string, 1, len, f);
 	if (ret != len) {
-		lxcfs_error("Error writing to file: %s\n", strerror(errno));
+		lxcfs_error("%s - Error writing \"%s\" to \"%s\"\n",
+			    strerror(errno), string, fnam);
 		fclose(f);
 		return false;
 	}
+
 	if (fclose(f) < 0) {
-		lxcfs_error("Error writing to file: %s\n", strerror(errno));
+		lxcfs_error("%s - Failed to close \"%s\"\n", strerror(errno), fnam);
 		return false;
 	}
+
 	return true;
 }
 
