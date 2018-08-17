@@ -2054,6 +2054,7 @@ static void do_release_file_info(struct fuse_file_info *fi)
 	free(f->buf);
 	f->buf = NULL;
 	free(f);
+	f = NULL;
 }
 
 int cg_releasedir(const char *path, struct fuse_file_info *fi)
