@@ -84,6 +84,7 @@ struct cpuacct_usage {
 	uint64_t user;
 	uint64_t system;
 	uint64_t idle;
+	bool online;
 };
 
 /* The function of hash table.*/
@@ -4045,7 +4046,7 @@ static uint64_t get_reaper_age(pid_t pid)
  */
 static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage)
 {
-	int cpucount = get_nprocs();
+	int cpucount = get_nprocs_conf();
 	struct cpuacct_usage *cpu_usage;
 	int rv = 0, i, j, ret, read_pos = 0, read_cnt;
 	int cg_cpu;
@@ -4097,9 +4098,6 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 		read_pos += read_cnt;
 
-		if (!cpu_in_cpuset(i, cpuset))
-			continue;
-
 		/* Convert the time from nanoseconds to USER_HZ */
 		cpu_usage[j].user = cg_user / 1000.0 / 1000 / 1000 * ticks_per_sec;
 		cpu_usage[j].system = cg_system / 1000.0 / 1000 / 1000 * ticks_per_sec;
@@ -4127,6 +4125,9 @@ static unsigned long diff_cpu_usage(struct cpuacct_usage *older, struct cpuacct_
 	unsigned long sum = 0;
 
 	for (i = 0; i < cpu_count; i++) {
+		if (!newer[i].online)
+			continue;
+
 		/* When cpuset is changed on the fly, the CPUs might get reordered.
 		 * We could either reset all counters, or check that the substractions
 		 * below will return expected results.
@@ -4445,6 +4446,7 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0, l;
 	int curcpu = -1; /* cpu numbering starts at 0 */
+	int physcpu, i;
 	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
 	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, system_sum = 0, idle_sum = 0;
@@ -4452,11 +4454,11 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	unsigned long total_sum, threshold;
 	struct cg_proc_stat *stat_node;
 	struct cpuacct_usage *diff = NULL;
-	int nprocs = get_nprocs();
+	int nprocs = get_nprocs_conf();
 
 	/* Read all CPU stats and stop when we've encountered other lines */
 	while (getline(&line, &linelen, f) != -1) {
-		int cpu, ret;
+		int ret;
 		char cpu_char[10]; /* That's a lot of cores */
 		uint64_t all_used, cg_used;
 
@@ -4467,12 +4469,28 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 			break;
 		}
 
-		if (sscanf(cpu_char, "%d", &cpu) != 1)
+		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
-		if (!cpu_in_cpuset(cpu, cpuset))
-			continue;
+
 		curcpu ++;
 		cpu_cnt ++;
+
+		if (!cpu_in_cpuset(physcpu, cpuset)) {
+			for (i = curcpu; i <= physcpu; i++) {
+				cg_cpu_usage[i].online = false;
+			}
+			continue;
+		}
+
+		if (curcpu < physcpu) {
+			/* Some CPUs may be disabled */
+			for (i = curcpu; i < physcpu; i++)
+				cg_cpu_usage[i].online = false;
+
+			curcpu = physcpu;
+		}
+
+		cg_cpu_usage[curcpu].online = true;
 
 		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
 			   &user,
@@ -4525,17 +4543,31 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	 * If the new values are LOWER than values stored in memory, it means
 	 * the cgroup has been reset/recreated and we should reset too.
 	 */
-	if (cg_cpu_usage[0].user < stat_node->usage[0].user)
-		reset_proc_stat_node(stat_node, cg_cpu_usage, nprocs);
+	for (curcpu = 0; curcpu < nprocs; curcpu++) {
+		if (!cg_cpu_usage[curcpu].online)
+			continue;
 
-	total_sum = diff_cpu_usage(stat_node->usage, cg_cpu_usage, diff, cpu_cnt);
+		if (cg_cpu_usage[curcpu].user < stat_node->usage[curcpu].user)
+			reset_proc_stat_node(stat_node, cg_cpu_usage, nprocs);
 
-	for (curcpu = 0; curcpu < cpu_cnt; curcpu++) {
+		break;
+	}
+
+	total_sum = diff_cpu_usage(stat_node->usage, cg_cpu_usage, diff, nprocs);
+
+	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+		stat_node->usage[curcpu].online = cg_cpu_usage[curcpu].online;
+
+		if (!stat_node->usage[curcpu].online)
+			continue;
+
+		i++;
+
 		stat_node->usage[curcpu].user += diff[curcpu].user;
 		stat_node->usage[curcpu].system += diff[curcpu].system;
 		stat_node->usage[curcpu].idle += diff[curcpu].idle;
 
-		if (max_cpus > 0 && curcpu >= max_cpus) {
+		if (max_cpus > 0 && i >= max_cpus) {
 			user_surplus += diff[curcpu].user;
 			system_surplus += diff[curcpu].system;
 		}
@@ -4546,7 +4578,15 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		/* threshold = maximum usage per cpu, including idle */
 		threshold = total_sum / cpu_cnt * max_cpus;
 
-		for (curcpu = 0; curcpu < max_cpus; curcpu++) {
+		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+			if (i == max_cpus)
+				break;
+
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
+			i++;
+
 			if (diff[curcpu].user + diff[curcpu].system >= threshold)
 				continue;
 
@@ -4573,7 +4613,15 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		if (system_surplus > 0)
 			lxcfs_debug("leftover system: %lu for %s\n", system_surplus, cg);
 
-		for (curcpu = 0; curcpu < max_cpus; curcpu++) {
+		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+			if (i == max_cpus)
+				break;
+
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
+			i++;
+
 			stat_node->view[curcpu].user += diff[curcpu].user;
 			stat_node->view[curcpu].system += diff[curcpu].system;
 			stat_node->view[curcpu].idle += diff[curcpu].idle;
@@ -4584,7 +4632,10 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		}
 
 	} else {
-		for (curcpu = 0; curcpu < cpu_cnt; curcpu++) {
+		for (curcpu = 0; curcpu < nprocs; curcpu++) {
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
 			stat_node->view[curcpu].user = stat_node->usage[curcpu].user;
 			stat_node->view[curcpu].system = stat_node->usage[curcpu].system;
 			stat_node->view[curcpu].idle = stat_node->usage[curcpu].idle;
@@ -4619,12 +4670,17 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	total_len += l;
 
 	/* Render visible CPUs */
-	for (curcpu = 0; curcpu < cpu_cnt; curcpu++) {
-		if (max_cpus > 0 && curcpu == max_cpus)
+	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+		if (!stat_node->usage[curcpu].online)
+			continue;
+
+		i++;
+
+		if (max_cpus > 0 && i == max_cpus)
 			break;
 
 		l = snprintf(buf, buf_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-				curcpu,
+				i,
 				stat_node->view[curcpu].user,
 				stat_node->view[curcpu].system,
 				stat_node->view[curcpu].idle);
@@ -4706,6 +4762,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
+	int physcpu = 0;
 	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
 					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
@@ -4766,7 +4823,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
-		int cpu;
 		char cpu_char[10]; /* That's a lot of cores */
 		char *c;
 		uint64_t all_used, cg_used, new_idle;
@@ -4793,9 +4849,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		}
 
-		if (sscanf(cpu_char, "%d", &cpu) != 1)
+		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
-		if (!cpu_in_cpuset(cpu, cpuset))
+		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
 		curcpu ++;
 
@@ -4838,7 +4894,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 		if (cg_cpu_usage) {
 			all_used = user + nice + system + iowait + irq + softirq + steal + guest + guest_nice;
-			cg_used = cg_cpu_usage[curcpu].user + cg_cpu_usage[curcpu].system;
+			cg_used = cg_cpu_usage[physcpu].user + cg_cpu_usage[physcpu].system;
 
 			if (all_used >= cg_used) {
 				new_idle = idle + (all_used - cg_used);
@@ -4851,7 +4907,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			}
 
 			l = snprintf(cache, cache_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-					curcpu, cg_cpu_usage[curcpu].user, cg_cpu_usage[curcpu].system,
+					curcpu, cg_cpu_usage[physcpu].user, cg_cpu_usage[physcpu].system,
 					new_idle);
 
 			if (l < 0) {
@@ -4870,8 +4926,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			cache_size -= l;
 			total_len += l;
 
-			user_sum += cg_cpu_usage[curcpu].user;
-			system_sum += cg_cpu_usage[curcpu].system;
+			user_sum += cg_cpu_usage[physcpu].user;
+			system_sum += cg_cpu_usage[physcpu].system;
 			idle_sum += new_idle;
 
 		} else {
