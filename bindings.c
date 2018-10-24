@@ -4044,7 +4044,7 @@ static uint64_t get_reaper_age(pid_t pid)
  * It is the caller's responsibility to free `return_usage`, unless this
  * function returns an error.
  */
-static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage)
+static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage, int *size)
 {
 	int cpucount = get_nprocs_conf();
 	struct cpuacct_usage *cpu_usage;
@@ -4106,6 +4106,7 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 	rv = 0;
 	*return_usage = cpu_usage;
+	*size = cpucount;
 
 err:
 	if (usage_str)
@@ -4441,7 +4442,7 @@ static void reset_proc_stat_node(struct cg_proc_stat *node, struct cpuacct_usage
 	node->cpu_count = cpu_count;
 }
 
-static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_usage *cg_cpu_usage, FILE *f, char *buf, size_t buf_size)
+static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_usage *cg_cpu_usage, int cg_cpu_usage_size, FILE *f, char *buf, size_t buf_size)
 {
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0, l;
@@ -4455,6 +4456,9 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 	struct cg_proc_stat *stat_node;
 	struct cpuacct_usage *diff = NULL;
 	int nprocs = get_nprocs_conf();
+
+	if (cg_cpu_usage_size < nprocs)
+		nprocs = cg_cpu_usage_size;
 
 	/* Read all CPU stats and stop when we've encountered other lines */
 	while (getline(&line, &linelen, f) != -1) {
@@ -4470,6 +4474,9 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		}
 
 		if (sscanf(cpu_char, "%d", &physcpu) != 1)
+			continue;
+
+		if (physcpu >= cg_cpu_usage_size)
 			continue;
 
 		curcpu ++;
@@ -4772,6 +4779,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	FILE *f = NULL;
 	struct cpuacct_usage *cg_cpu_usage = NULL;
+	int cg_cpu_usage_size = 0;
 
 	if (offset){
 		if (offset > d->size)
@@ -4801,7 +4809,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
 	 * CPU usage. If not, values from the host's /proc/stat are used.
 	 */
-	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage) != 0) {
+	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0) {
 		lxcfs_debug("%s\n", "proc_stat_read failed to read from cpuacct, "
 				"falling back to the host's /proc/stat");
 	}
@@ -4817,7 +4825,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (use_cpuview(cg) && cg_cpu_usage) {
-		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, f, d->buf, d->buflen);
+		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, cg_cpu_usage_size,
+				f, d->buf, d->buflen);
 		goto out;
 	}
 
@@ -4893,6 +4902,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		}
 
 		if (cg_cpu_usage) {
+			if (physcpu >= cg_cpu_usage_size)
+				break;
+
 			all_used = user + nice + system + iowait + irq + softirq + steal + guest + guest_nice;
 			cg_used = cg_cpu_usage[physcpu].user + cg_cpu_usage[physcpu].system;
 
