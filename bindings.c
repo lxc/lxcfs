@@ -83,6 +83,8 @@ struct file_info {
 struct cpuacct_usage {
 	uint64_t user;
 	uint64_t system;
+	uint64_t idle;
+	bool online;
 };
 
 /* The function of hash table.*/
@@ -103,7 +105,7 @@ struct cpuacct_usage {
  */
 static int loadavg = 0;
 static volatile sig_atomic_t loadavg_stop = 0;
-static int calc_hash(char *name)
+static int calc_hash(const char *name)
 {
 	unsigned int hash = 0;
 	unsigned int x = 0;
@@ -115,7 +117,7 @@ static int calc_hash(char *name)
 			hash ^= (x >> 24);
 		hash &= ~x;
 	}
-	return ((hash & 0x7fffffff) % LOAD_SIZE);
+	return (hash & 0x7fffffff);
 }
 
 struct load_node {
@@ -285,6 +287,115 @@ static void load_free(void)
 		pthread_rwlock_destroy(&load_hash[i].rdlock);
 	}
 }
+
+/* Data for CPU view */
+struct cg_proc_stat {
+	char *cg;
+	struct cpuacct_usage *usage; // Real usage as read from the host's /proc/stat
+	struct cpuacct_usage *view; // Usage stats reported to the container
+	int cpu_count;
+	pthread_mutex_t lock; // For node manipulation
+	struct cg_proc_stat *next;
+};
+
+struct cg_proc_stat_head {
+	struct cg_proc_stat *next;
+	time_t lastcheck;
+
+	/*
+	 * For access to the list. Reading can be parallel, pruning is exclusive.
+	 */
+	pthread_rwlock_t lock;
+};
+
+#define CPUVIEW_HASH_SIZE 100
+static struct cg_proc_stat_head *proc_stat_history[CPUVIEW_HASH_SIZE];
+
+static bool cpuview_init_head(struct cg_proc_stat_head **head)
+{
+	*head = malloc(sizeof(struct cg_proc_stat_head));
+	if (!(*head)) {
+		lxcfs_error("%s\n", strerror(errno));
+		return false;
+	}
+
+	(*head)->lastcheck = time(NULL);
+	(*head)->next = NULL;
+
+	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
+		lxcfs_error("%s\n", "Failed to initialize list lock");
+		free(*head);
+		return false;
+	}
+
+	return true;
+}
+
+static bool init_cpuview()
+{
+	int i;
+
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++)
+		proc_stat_history[i] = NULL;
+
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+		if (!cpuview_init_head(&proc_stat_history[i]))
+			goto err;
+	}
+
+	return true;
+
+err:
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+		if (proc_stat_history[i]) {
+			free(proc_stat_history[i]);
+			proc_stat_history[i] = NULL;
+		}
+	}
+
+	return false;
+}
+
+static void free_proc_stat_node(struct cg_proc_stat *node)
+{
+	pthread_mutex_destroy(&node->lock);
+	free(node->cg);
+	free(node->usage);
+	free(node->view);
+	free(node);
+}
+
+static void cpuview_free_head(struct cg_proc_stat_head *head)
+{
+	struct cg_proc_stat *node, *tmp;
+
+	if (head->next) {
+		node = head->next;
+
+		for (;;) {
+			tmp = node;
+			node = node->next;
+			free_proc_stat_node(tmp);
+
+			if (!node)
+				break;
+		}
+	}
+
+	pthread_rwlock_destroy(&head->lock);
+	free(head);
+}
+
+static void free_cpuview()
+{
+	int i;
+
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+		if (proc_stat_history[i])
+			cpuview_free_head(proc_stat_history[i]);
+	}
+}
+
 /* Reserve buffer size to account for file size changes. */
 #define BUF_RESERVE_SIZE 512
 
@@ -1091,6 +1202,28 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 
 	*value = slurp_file(fnam, fd);
 	return *value != NULL;
+}
+
+bool cgfs_param_exist(const char *controller, const char *cgroup, const char *file)
+{
+	int ret, cfd;
+	size_t len;
+	char *fnam, *tmpc;
+
+	tmpc = find_mounted_controller(controller, &cfd);
+	if (!tmpc)
+		return false;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	return (faccessat(cfd, fnam, F_OK, 0) == 0);
 }
 
 struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, const char *file)
@@ -3510,6 +3643,85 @@ static bool cpuline_in_cpuset(const char *line, const char *cpuset)
 }
 
 /*
+ * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or `cpu.cfs_period_us`,
+ * depending on `param`. Parameter value is returned throuh `value`.
+ */
+static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
+{
+	bool rv = false;
+	char file[11 + 6 + 1]; // cpu.cfs__us + quota/period + \0
+	char *str = NULL;
+
+	sprintf(file, "cpu.cfs_%s_us", param);
+
+	if (!cgfs_get_value("cpu", cg, file, &str))
+		goto err;
+
+	if (sscanf(str, "%ld", value) != 1)
+		goto err;
+
+	rv = true;
+
+err:
+	if (str)
+		free(str);
+	return rv;
+}
+
+/*
+ * Return the maximum number of visible CPUs based on CPU quotas.
+ * If there is no quota set, zero is returned.
+ */
+int max_cpu_count(const char *cg)
+{
+	int rv, nprocs;
+	int64_t cfs_quota, cfs_period;
+
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
+
+	if (cfs_quota <= 0 || cfs_period <= 0)
+		return 0;
+
+	rv = cfs_quota / cfs_period;
+
+	/* In case quota/period does not yield a whole number, add one CPU for
+	 * the remainder.
+	 */
+	if ((cfs_quota % cfs_period) > 0)
+		rv += 1;
+
+	nprocs = get_nprocs();
+
+	if (rv > nprocs)
+		rv = nprocs;
+
+	return rv;
+}
+
+/*
+ * Determine whether CPU views should be used or not.
+ */
+bool use_cpuview(const char *cg)
+{
+	int cfd;
+	char *tmpc;
+
+	tmpc = find_mounted_controller("cpu", &cfd);
+	if (!tmpc)
+		return false;
+
+	tmpc = find_mounted_controller("cpuacct", &cfd);
+	if (!tmpc)
+		return false;
+
+	return true;
+}
+
+/*
  * check whether this is a '^processor" line in /proc/cpuinfo
  */
 static bool is_processor_line(const char *line)
@@ -3531,7 +3743,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	bool am_printing = false, firstline = true, is_s390x = false;
-	int curcpu = -1, cpu;
+	int curcpu = -1, cpu, max_cpus = 0;
+	bool use_view;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 	FILE *f = NULL;
@@ -3559,6 +3772,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		goto err;
 
+	use_view = use_cpuview(cg);
+
+	if (use_view)
+		max_cpus = max_cpu_count(cg);
+
 	f = fopen("/proc/cpuinfo", "r");
 	if (!f)
 		goto err;
@@ -3576,6 +3794,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		if (strncmp(line, "# processors:", 12) == 0)
 			continue;
 		if (is_processor_line(line)) {
+			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+				break;
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
 				curcpu ++;
@@ -3597,6 +3817,8 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			continue;
 		} else if (is_s390x && sscanf(line, "processor %d:", &cpu) == 1) {
 			char *p;
+			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+				break;
 			if (!cpu_in_cpuset(cpu, cpuset))
 				continue;
 			curcpu ++;
@@ -3822,9 +4044,9 @@ static uint64_t get_reaper_age(pid_t pid)
  * It is the caller's responsibility to free `return_usage`, unless this
  * function returns an error.
  */
-static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage)
+static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage, int *size)
 {
-	int cpucount = get_nprocs();
+	int cpucount = get_nprocs_conf();
 	struct cpuacct_usage *cpu_usage;
 	int rv = 0, i, j, ret, read_pos = 0, read_cnt;
 	int cg_cpu;
@@ -3876,9 +4098,6 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 		read_pos += read_cnt;
 
-		if (!cpu_in_cpuset(i, cpuset))
-			continue;
-
 		/* Convert the time from nanoseconds to USER_HZ */
 		cpu_usage[j].user = cg_user / 1000.0 / 1000 / 1000 * ticks_per_sec;
 		cpu_usage[j].system = cg_system / 1000.0 / 1000 / 1000 * ticks_per_sec;
@@ -3887,6 +4106,7 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 	rv = 0;
 	*return_usage = cpu_usage;
+	*size = cpucount;
 
 err:
 	if (usage_str)
@@ -3897,6 +4117,644 @@ err:
 		*return_usage = NULL;
 	}
 
+	return rv;
+}
+
+static unsigned long diff_cpu_usage(struct cpuacct_usage *older, struct cpuacct_usage *newer, struct cpuacct_usage *diff, int cpu_count)
+{
+	int i;
+	unsigned long sum = 0;
+
+	for (i = 0; i < cpu_count; i++) {
+		if (!newer[i].online)
+			continue;
+
+		/* When cpuset is changed on the fly, the CPUs might get reordered.
+		 * We could either reset all counters, or check that the substractions
+		 * below will return expected results.
+		 */
+		if (newer[i].user > older[i].user)
+			diff[i].user = newer[i].user - older[i].user;
+		else
+			diff[i].user = 0;
+
+		if (newer[i].system > older[i].system)
+			diff[i].system = newer[i].system - older[i].system;
+		else
+			diff[i].system = 0;
+
+		if (newer[i].idle > older[i].idle)
+			diff[i].idle = newer[i].idle - older[i].idle;
+		else
+			diff[i].idle = 0;
+
+		sum += diff[i].user;
+		sum += diff[i].system;
+		sum += diff[i].idle;
+	}
+
+	return sum;
+}
+
+static void add_cpu_usage(unsigned long *surplus, struct cpuacct_usage *usage, unsigned long *counter, unsigned long threshold)
+{
+	unsigned long free_space, to_add;
+
+	free_space = threshold - usage->user - usage->system;
+
+	if (free_space > usage->idle)
+		free_space = usage->idle;
+
+	to_add = free_space > *surplus ? *surplus : free_space;
+
+	*counter += to_add;
+	usage->idle -= to_add;
+	*surplus -= to_add;
+}
+
+static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
+{
+	struct cg_proc_stat *first = NULL, *prev, *tmp;
+
+	for (prev = NULL; node; ) {
+		if (!cgfs_param_exist("cpu", node->cg, "cpu.shares")) {
+			tmp = node;
+			lxcfs_debug("Removing stat node for %s\n", node->cg);
+
+			if (prev)
+				prev->next = node->next;
+			else
+				first = node->next;
+
+			node = node->next;
+			free_proc_stat_node(tmp);
+		} else {
+			if (!first)
+				first = node;
+			prev = node;
+			node = node->next;
+		}
+	}
+
+	return first;
+}
+
+#define PROC_STAT_PRUNE_INTERVAL 10
+static void prune_proc_stat_history(void)
+{
+	int i;
+	time_t now = time(NULL);
+
+	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+		pthread_rwlock_wrlock(&proc_stat_history[i]->lock);
+
+		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now) {
+			pthread_rwlock_unlock(&proc_stat_history[i]->lock);
+			return;
+		}
+
+		if (proc_stat_history[i]->next) {
+			proc_stat_history[i]->next = prune_proc_stat_list(proc_stat_history[i]->next);
+			proc_stat_history[i]->lastcheck = now;
+		}
+
+		pthread_rwlock_unlock(&proc_stat_history[i]->lock);
+	}
+}
+
+static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head, const char *cg)
+{
+	struct cg_proc_stat *node;
+
+	pthread_rwlock_rdlock(&head->lock);
+
+	if (!head->next) {
+		pthread_rwlock_unlock(&head->lock);
+		return NULL;
+	}
+
+	node = head->next;
+
+	do {
+		if (strcmp(cg, node->cg) == 0)
+			goto out;
+	} while ((node = node->next));
+
+	node = NULL;
+
+out:
+	pthread_rwlock_unlock(&head->lock);
+	prune_proc_stat_history();
+	return node;
+}
+
+static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+{
+	struct cg_proc_stat *node;
+	int i;
+
+	node = malloc(sizeof(struct cg_proc_stat));
+	if (!node)
+		goto err;
+
+	node->cg = NULL;
+	node->usage = NULL;
+	node->view = NULL;
+
+	node->cg = malloc(strlen(cg) + 1);
+	if (!node->cg)
+		goto err;
+
+	strcpy(node->cg, cg);
+
+	node->usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	if (!node->usage)
+		goto err;
+
+	memcpy(node->usage, usage, sizeof(struct cpuacct_usage) * cpu_count);
+
+	node->view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	if (!node->view)
+		goto err;
+
+	node->cpu_count = cpu_count;
+	node->next = NULL;
+
+	if (pthread_mutex_init(&node->lock, NULL) != 0) {
+		lxcfs_error("%s\n", "Failed to initialize node lock");
+		goto err;
+	}
+
+	for (i = 0; i < cpu_count; i++) {
+		node->view[i].user = 0;
+		node->view[i].system = 0;
+		node->view[i].idle = 0;
+	}
+
+	return node;
+
+err:
+	if (node && node->cg)
+		free(node->cg);
+	if (node && node->usage)
+		free(node->usage);
+	if (node && node->view)
+		free(node->view);
+	if (node)
+		free(node);
+
+	return NULL;
+}
+
+static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
+{
+	int hash = calc_hash(new_node->cg) % CPUVIEW_HASH_SIZE;
+	struct cg_proc_stat_head *head = proc_stat_history[hash];
+	struct cg_proc_stat *node, *rv = new_node;
+
+	pthread_rwlock_wrlock(&head->lock);
+
+	if (!head->next) {
+		head->next = new_node;
+		goto out;
+	}
+
+	node = head->next;
+
+	for (;;) {
+		if (strcmp(node->cg, new_node->cg) == 0) {
+			/* The node is already present, return it */
+			free_proc_stat_node(new_node);
+			rv = node;
+			goto out;
+		}
+
+		if (node->next) {
+			node = node->next;
+			continue;
+		}
+
+		node->next = new_node;
+		goto out;
+	}
+
+out:
+	pthread_rwlock_unlock(&head->lock);
+	return rv;
+}
+
+static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
+{
+	struct cpuacct_usage *new_usage, *new_view;
+	int i;
+
+	/* Allocate new memory */
+	new_usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	if (!new_usage)
+		return false;
+
+	new_view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	if (!new_view) {
+		free(new_usage);
+		return false;
+	}
+
+	/* Copy existing data & initialize new elements */
+	for (i = 0; i < cpu_count; i++) {
+		if (i < node->cpu_count) {
+			new_usage[i].user = node->usage[i].user;
+			new_usage[i].system = node->usage[i].system;
+			new_usage[i].idle = node->usage[i].idle;
+
+			new_view[i].user = node->view[i].user;
+			new_view[i].system = node->view[i].system;
+			new_view[i].idle = node->view[i].idle;
+		} else {
+			new_usage[i].user = 0;
+			new_usage[i].system = 0;
+			new_usage[i].idle = 0;
+
+			new_view[i].user = 0;
+			new_view[i].system = 0;
+			new_view[i].idle = 0;
+		}
+	}
+
+	free(node->usage);
+	free(node->view);
+
+	node->usage = new_usage;
+	node->view = new_view;
+	node->cpu_count = cpu_count;
+
+	return true;
+}
+
+static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+{
+	int hash = calc_hash(cg) % CPUVIEW_HASH_SIZE;
+	struct cg_proc_stat_head *head = proc_stat_history[hash];
+	struct cg_proc_stat *node;
+
+	node = find_proc_stat_node(head, cg);
+
+	if (!node) {
+		node = new_proc_stat_node(usage, cpu_count, cg);
+		if (!node)
+			return NULL;
+
+		node = add_proc_stat_node(node);
+		lxcfs_debug("New stat node (%d) for %s\n", cpu_count, cg);
+	}
+
+	pthread_mutex_lock(&node->lock);
+
+	/* If additional CPUs on the host have been enabled, CPU usage counter
+	 * arrays have to be expanded */
+	if (node->cpu_count < cpu_count) {
+		lxcfs_debug("Expanding stat node %d->%d for %s\n",
+				node->cpu_count, cpu_count, cg);
+
+		if (!expand_proc_stat_node(node, cpu_count)) {
+			pthread_mutex_unlock(&node->lock);
+			lxcfs_debug("Unable to expand stat node %d->%d for %s\n",
+					node->cpu_count, cpu_count, cg);
+			return NULL;
+		}
+	}
+
+	return node;
+}
+
+static void reset_proc_stat_node(struct cg_proc_stat *node, struct cpuacct_usage *usage, int cpu_count)
+{
+	int i;
+
+	lxcfs_debug("Resetting stat node for %s\n", node->cg);
+	memcpy(node->usage, usage, sizeof(struct cpuacct_usage) * cpu_count);
+
+	for (i = 0; i < cpu_count; i++) {
+		node->view[i].user = 0;
+		node->view[i].system = 0;
+		node->view[i].idle = 0;
+	}
+
+	node->cpu_count = cpu_count;
+}
+
+static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_usage *cg_cpu_usage, int cg_cpu_usage_size, FILE *f, char *buf, size_t buf_size)
+{
+	char *line = NULL;
+	size_t linelen = 0, total_len = 0, rv = 0, l;
+	int curcpu = -1; /* cpu numbering starts at 0 */
+	int physcpu, i;
+	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
+	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
+	unsigned long user_sum = 0, system_sum = 0, idle_sum = 0;
+	unsigned long user_surplus = 0, system_surplus = 0;
+	unsigned long total_sum, threshold;
+	struct cg_proc_stat *stat_node;
+	struct cpuacct_usage *diff = NULL;
+	int nprocs = get_nprocs_conf();
+
+	if (cg_cpu_usage_size < nprocs)
+		nprocs = cg_cpu_usage_size;
+
+	/* Read all CPU stats and stop when we've encountered other lines */
+	while (getline(&line, &linelen, f) != -1) {
+		int ret;
+		char cpu_char[10]; /* That's a lot of cores */
+		uint64_t all_used, cg_used;
+
+		if (strlen(line) == 0)
+			continue;
+		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
+			/* not a ^cpuN line containing a number N */
+			break;
+		}
+
+		if (sscanf(cpu_char, "%d", &physcpu) != 1)
+			continue;
+
+		if (physcpu >= cg_cpu_usage_size)
+			continue;
+
+		curcpu ++;
+		cpu_cnt ++;
+
+		if (!cpu_in_cpuset(physcpu, cpuset)) {
+			for (i = curcpu; i <= physcpu; i++) {
+				cg_cpu_usage[i].online = false;
+			}
+			continue;
+		}
+
+		if (curcpu < physcpu) {
+			/* Some CPUs may be disabled */
+			for (i = curcpu; i < physcpu; i++)
+				cg_cpu_usage[i].online = false;
+
+			curcpu = physcpu;
+		}
+
+		cg_cpu_usage[curcpu].online = true;
+
+		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+			   &user,
+			   &nice,
+			   &system,
+			   &idle,
+			   &iowait,
+			   &irq,
+			   &softirq,
+			   &steal,
+			   &guest,
+			   &guest_nice);
+
+		if (ret != 10)
+			continue;
+
+		all_used = user + nice + system + iowait + irq + softirq + steal + guest + guest_nice;
+		cg_used = cg_cpu_usage[curcpu].user + cg_cpu_usage[curcpu].system;
+
+		if (all_used >= cg_used) {
+			cg_cpu_usage[curcpu].idle = idle + (all_used - cg_used);
+
+		} else {
+			lxcfs_error("cpu%d from %s has unexpected cpu time: %lu in /proc/stat, "
+					"%lu in cpuacct.usage_all; unable to determine idle time\n",
+					curcpu, cg, all_used, cg_used);
+			cg_cpu_usage[curcpu].idle = idle;
+		}
+	}
+
+	/* Cannot use more CPUs than is available due to cpuset */
+	if (max_cpus > cpu_cnt)
+		max_cpus = cpu_cnt;
+
+	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
+
+	if (!stat_node) {
+		lxcfs_error("unable to find/create stat node for %s\n", cg);
+		rv = 0;
+		goto err;
+	}
+
+	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
+	if (!diff) {
+		rv = 0;
+		goto err;
+	}
+
+	/*
+	 * If the new values are LOWER than values stored in memory, it means
+	 * the cgroup has been reset/recreated and we should reset too.
+	 */
+	for (curcpu = 0; curcpu < nprocs; curcpu++) {
+		if (!cg_cpu_usage[curcpu].online)
+			continue;
+
+		if (cg_cpu_usage[curcpu].user < stat_node->usage[curcpu].user)
+			reset_proc_stat_node(stat_node, cg_cpu_usage, nprocs);
+
+		break;
+	}
+
+	total_sum = diff_cpu_usage(stat_node->usage, cg_cpu_usage, diff, nprocs);
+
+	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+		stat_node->usage[curcpu].online = cg_cpu_usage[curcpu].online;
+
+		if (!stat_node->usage[curcpu].online)
+			continue;
+
+		i++;
+
+		stat_node->usage[curcpu].user += diff[curcpu].user;
+		stat_node->usage[curcpu].system += diff[curcpu].system;
+		stat_node->usage[curcpu].idle += diff[curcpu].idle;
+
+		if (max_cpus > 0 && i >= max_cpus) {
+			user_surplus += diff[curcpu].user;
+			system_surplus += diff[curcpu].system;
+		}
+	}
+
+	/* Calculate usage counters of visible CPUs */
+	if (max_cpus > 0) {
+		/* threshold = maximum usage per cpu, including idle */
+		threshold = total_sum / cpu_cnt * max_cpus;
+
+		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+			if (i == max_cpus)
+				break;
+
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
+			i++;
+
+			if (diff[curcpu].user + diff[curcpu].system >= threshold)
+				continue;
+
+			/* Add user */
+			add_cpu_usage(
+					&user_surplus,
+					&diff[curcpu],
+					&diff[curcpu].user,
+					threshold);
+
+			if (diff[curcpu].user + diff[curcpu].system >= threshold)
+				continue;
+
+			/* If there is still room, add system */
+			add_cpu_usage(
+					&system_surplus,
+					&diff[curcpu],
+					&diff[curcpu].system,
+					threshold);
+		}
+
+		if (user_surplus > 0)
+			lxcfs_debug("leftover user: %lu for %s\n", user_surplus, cg);
+		if (system_surplus > 0)
+			lxcfs_debug("leftover system: %lu for %s\n", system_surplus, cg);
+
+		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+			if (i == max_cpus)
+				break;
+
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
+			i++;
+
+			stat_node->view[curcpu].user += diff[curcpu].user;
+			stat_node->view[curcpu].system += diff[curcpu].system;
+			stat_node->view[curcpu].idle += diff[curcpu].idle;
+
+			user_sum += stat_node->view[curcpu].user;
+			system_sum += stat_node->view[curcpu].system;
+			idle_sum += stat_node->view[curcpu].idle;
+		}
+
+	} else {
+		for (curcpu = 0; curcpu < nprocs; curcpu++) {
+			if (!stat_node->usage[curcpu].online)
+				continue;
+
+			stat_node->view[curcpu].user = stat_node->usage[curcpu].user;
+			stat_node->view[curcpu].system = stat_node->usage[curcpu].system;
+			stat_node->view[curcpu].idle = stat_node->usage[curcpu].idle;
+
+			user_sum += stat_node->view[curcpu].user;
+			system_sum += stat_node->view[curcpu].system;
+			idle_sum += stat_node->view[curcpu].idle;
+		}
+	}
+
+	/* Render the file */
+	/* cpu-all */
+	l = snprintf(buf, buf_size, "cpu  %lu 0 %lu %lu 0 0 0 0 0 0\n",
+			user_sum,
+			system_sum,
+			idle_sum);
+
+	if (l < 0) {
+		perror("Error writing to cache");
+		rv = 0;
+		goto err;
+
+	}
+	if (l >= buf_size) {
+		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
+		rv = 0;
+		goto err;
+	}
+
+	buf += l;
+	buf_size -= l;
+	total_len += l;
+
+	/* Render visible CPUs */
+	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+		if (!stat_node->usage[curcpu].online)
+			continue;
+
+		i++;
+
+		if (max_cpus > 0 && i == max_cpus)
+			break;
+
+		l = snprintf(buf, buf_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
+				i,
+				stat_node->view[curcpu].user,
+				stat_node->view[curcpu].system,
+				stat_node->view[curcpu].idle);
+
+		if (l < 0) {
+			perror("Error writing to cache");
+			rv = 0;
+			goto err;
+
+		}
+		if (l >= buf_size) {
+			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
+			rv = 0;
+			goto err;
+		}
+
+		buf += l;
+		buf_size -= l;
+		total_len += l;
+	}
+
+	/* Pass the rest of /proc/stat, start with the last line read */
+	l = snprintf(buf, buf_size, "%s", line);
+
+	if (l < 0) {
+		perror("Error writing to cache");
+		rv = 0;
+		goto err;
+
+	}
+	if (l >= buf_size) {
+		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
+		rv = 0;
+		goto err;
+	}
+
+	buf += l;
+	buf_size -= l;
+	total_len += l;
+
+	/* Pass the rest of the host's /proc/stat */
+	while (getline(&line, &linelen, f) != -1) {
+		l = snprintf(buf, buf_size, "%s", line);
+		if (l < 0) {
+			perror("Error writing to cache");
+			rv = 0;
+			goto err;
+		}
+		if (l >= buf_size) {
+			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
+			rv = 0;
+			goto err;
+		}
+		buf += l;
+		buf_size -= l;
+		total_len += l;
+	}
+
+	rv = total_len;
+
+err:
+	if (stat_node)
+		pthread_mutex_unlock(&stat_node->lock);
+	if (line)
+		free(line);
+	if (diff)
+		free(diff);
 	return rv;
 }
 
@@ -3911,6 +4769,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
+	int physcpu = 0;
 	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
 					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
@@ -3920,6 +4779,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	FILE *f = NULL;
 	struct cpuacct_usage *cg_cpu_usage = NULL;
+	int cg_cpu_usage_size = 0;
 
 	if (offset){
 		if (offset > d->size)
@@ -3949,7 +4809,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
 	 * CPU usage. If not, values from the host's /proc/stat are used.
 	 */
-	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage) != 0) {
+	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0) {
 		lxcfs_debug("%s\n", "proc_stat_read failed to read from cpuacct, "
 				"falling back to the host's /proc/stat");
 	}
@@ -3964,9 +4824,14 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		goto err;
 	}
 
+	if (use_cpuview(cg) && cg_cpu_usage) {
+		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, cg_cpu_usage_size,
+				f, d->buf, d->buflen);
+		goto out;
+	}
+
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
-		int cpu;
 		char cpu_char[10]; /* That's a lot of cores */
 		char *c;
 		uint64_t all_used, cg_used, new_idle;
@@ -3993,9 +4858,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		}
 
-		if (sscanf(cpu_char, "%d", &cpu) != 1)
+		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
-		if (!cpu_in_cpuset(cpu, cpuset))
+		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
 		curcpu ++;
 
@@ -4037,8 +4902,11 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		}
 
 		if (cg_cpu_usage) {
+			if (physcpu >= cg_cpu_usage_size)
+				break;
+
 			all_used = user + nice + system + iowait + irq + softirq + steal + guest + guest_nice;
-			cg_used = cg_cpu_usage[curcpu].user + cg_cpu_usage[curcpu].system;
+			cg_used = cg_cpu_usage[physcpu].user + cg_cpu_usage[physcpu].system;
 
 			if (all_used >= cg_used) {
 				new_idle = idle + (all_used - cg_used);
@@ -4051,7 +4919,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			}
 
 			l = snprintf(cache, cache_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-					curcpu, cg_cpu_usage[curcpu].user, cg_cpu_usage[curcpu].system,
+					curcpu, cg_cpu_usage[physcpu].user, cg_cpu_usage[physcpu].system,
 					new_idle);
 
 			if (l < 0) {
@@ -4070,8 +4938,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			cache_size -= l;
 			total_len += l;
 
-			user_sum += cg_cpu_usage[curcpu].user;
-			system_sum += cg_cpu_usage[curcpu].system;
+			user_sum += cg_cpu_usage[physcpu].user;
+			system_sum += cg_cpu_usage[physcpu].system;
 			idle_sum += new_idle;
 
 		} else {
@@ -4112,6 +4980,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	memmove(cache, d->buf + CPUALL_MAX_SIZE, total_len);
 	total_len += cpuall_len;
+
+out:
 	d->cached = 1;
 	d->size = total_len;
 	if (total_len > size)
@@ -4752,7 +5622,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/loadavg", buf, size, d);
 
 	prune_init_slice(cg);
-	hash = calc_hash(cg);
+	hash = calc_hash(cg) % LOAD_SIZE;
 	n = locate_node(cg, hash);
 
 	/* First time */
@@ -5412,6 +6282,11 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	if (!cret || chdir(cwd) < 0)
 		lxcfs_debug("Could not change back to original working directory: %s.\n", strerror(errno));
 
+	if (!init_cpuview()) {
+		lxcfs_error("%s\n", "failed to init CPU view");
+		goto out;
+	}
+
 	print_subsystems();
 
 out:
@@ -5435,6 +6310,7 @@ static void __attribute__((destructor)) free_subsystems(void)
 	}
 	free(hierarchies);
 	free(fd_hierarchies);
+	free_cpuview();
 
 	if (cgroup_mount_ns_fd >= 0)
 		close(cgroup_mount_ns_fd);
