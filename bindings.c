@@ -1797,7 +1797,7 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 		goto out;
 	}
 
-	for (i = 0; list[i]; i++) {
+	for (i = 0; list && list[i]; i++) {
 		if (filler(buf, list[i]->name, NULL, 0) != 0) {
 			ret = -EIO;
 			goto out;
