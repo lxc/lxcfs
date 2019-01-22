@@ -2169,16 +2169,11 @@ out:
 	return ret;
 }
 
-static pthread_mutex_t do_release_file_info_lock = PTHREAD_MUTEX_INITIALIZER;
-
 static void do_release_file_info(struct fuse_file_info *fi)
 {
-	lock_mutex(&do_release_file_info_lock);
-
 	struct file_info *f = (struct file_info *)fi->fh;
 
 	if (!f)
-		unlock_mutex(&do_release_file_info_lock);
 		return;
 
 	fi->fh = 0;
@@ -2193,8 +2188,6 @@ static void do_release_file_info(struct fuse_file_info *fi)
 	f->buf = NULL;
 	free(f);
 	f = NULL;
-
-	unlock_mutex(&do_release_file_info_lock);
 }
 
 int cg_releasedir(const char *path, struct fuse_file_info *fi)
