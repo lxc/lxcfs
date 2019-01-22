@@ -83,6 +83,13 @@ case "$1" in
         status_of_proc -p ${PIDFILE} "${DAEMON}" lxcfs
     ;;
 
+    reload)
+        if init_is_upstart; then
+            exit 1
+        fi
+        kill -USR1 $(cat ${PIDFILE})
+    ;;
+
     restart|force-reload)
         if init_is_upstart; then
             exit 1
