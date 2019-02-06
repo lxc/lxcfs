@@ -33,6 +33,7 @@ bin_PROGRAMS = lxcfs
 
 EXTRA_DIST = \
 	lxcfs.man.add
+	lxcfs.spec
 
 if HAVE_HELP2MAN
 man_MANS = lxcfs.1

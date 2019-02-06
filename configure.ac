@@ -11,6 +11,7 @@ AC_GNU_SOURCE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([
 	Makefile
+	lxcfs.spec
 	config/Makefile
 	config/init/Makefile
 	config/init/systemd/Makefile
