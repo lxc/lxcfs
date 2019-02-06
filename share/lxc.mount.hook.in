@@ -1,5 +1,16 @@
 #!/bin/sh -e
 
+# Parse command flags
+while [ ! $# -eq 0 ]
+do
+	case "$1" in
+		--skip-cgroup-mounts )
+			SKIP_CGROUP_MOUNTS=1
+			;;
+	esac
+	shift
+done
+
 # We're dealing with mount entries, so expand any symlink
 LXC_ROOTFS_MOUNT=$(readlink -f ${LXC_ROOTFS_MOUNT})
 
@@ -26,6 +37,11 @@ if touch ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs; then
     rm ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs
 else
     exit 0
+fi
+
+# Skip mounting cgroup tree if requested.
+if [ "${SKIP_CGROUP_MOUNTS}" == "1" ]; then
+        exit 0
 fi
 
 # /sys/fs/cgroup files
