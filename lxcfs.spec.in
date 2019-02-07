@@ -1,0 +1,77 @@
+# Set with_systemd on distros that use it, so we can install the service
+# file, otherwise the sysvinit script will be installed
+%if 0%{?fedora} >= 14 || 0%{?rhel} >= 7 || 0%{?suse_version} >= 1210
+%global with_systemd 1
+%define init_script systemd
+#
+# BuildRequires systemd-units on fedora and rhel
+%if 0%{?fedora} >= 14 || 0%{?rhel} >= 7
+BuildRequires: systemd-units
+%endif
+#
+# BuildRequires systemd on openSUSE and SUSE
+%if 0%{?suse_version} >= 1210
+BuildRequires: systemd
+%endif
+%else
+%global with_systemd 0
+%define init_script sysvinit
+%endif
+
+Summary: Linux Containers File System
+Name: @PACKAGE@
+Version: @PACKAGE_VERSION@
+Release: 1%{?dist}
+URL: https://linuxcontainers.org/lxcfs/downloads/
+Source0: %{name}-%{version}.tar.gz
+License: Apache 2.0
+Group: System Environment/Libraries
+BuildRoot: %{_tmppath}/%{name}-root
+
+BuildRequires: gcc
+BuildRequires: libtool
+BuildRequires: docbook2X
+BuildRequires: doxygen
+BuildRequires: fuse-devel
+Requires: fuse-libs
+
+%description
+LXCFS is a simple userspace filesystem designed to work around some current limitations of the Linux kernel.
+
+%prep
+%setup -q
+
+%build
+%configure \
+	--with-init-script=%{init_script}
+%{make_build}
+
+#Modify mount hook command if running on RHEL 7 to skip cgroup mounts for stability reasons.
+%if 0%{?rhel} == 7
+sed -i 's/\/lxc.mount.hook/\/lxc.mount.hook --skip-cgroup-mounts/g' share/00-lxcfs.conf
+%endif
+
+%install
+[ %{buildroot} != "/" ] && rm -rf %{buildroot}
+make install DESTDIR=%{buildroot}
+mkdir -p %{buildroot}/%{_sharedstatedir}/%{name}
+
+%clean
+[ %{buildroot} != "/" ] && rm -rf %{buildroot}
+
+%files
+%defattr(-,root,root,-)
+%dir %{_sharedstatedir}/%{name}
+%if %{with_systemd}
+/lib/systemd/system/%{name}.service
+%endif
+%{_bindir}/%{name}
+%config(noreplace) %{_datarootdir}/lxc/config/common.conf.d/00-%{name}.conf
+%{_datarootdir}/%{name}/lxc.mount.hook
+%{_datarootdir}/%{name}/lxc.reboot.hook
+%{_libdir}/%{name}/liblxcfs.la
+%{_libdir}/%{name}/liblxcfs.so
+
+%changelog
+* Wed Jan 30 2019 Tom Parrott <tomp@tomp.uk> - 3.1.0
+- Initial RPM release.
