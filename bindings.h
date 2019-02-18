@@ -7,6 +7,10 @@
 #define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
 #define ROOTDIR RUNTIME_PATH "/lxcfs/root"
 
+struct lxcfs_opts {
+	bool swap_off;
+};
+
 extern int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi);
 extern int cg_mkdir(const char *path, mode_t mode);

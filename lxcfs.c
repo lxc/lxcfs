@@ -792,9 +792,10 @@ static void usage()
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs [-f|-d] -l [-p pidfile] mountpoint\n");
+	fprintf(stderr, "lxcfs [-f|-d] -u -l -n [-p pidfile] mountpoint\n");
 	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
 	fprintf(stderr, "  -l use loadavg \n");
+	fprintf(stderr, "  -u no swap \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
 	exit(1);
@@ -904,12 +905,23 @@ int main(int argc, char *argv[])
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
 
+	struct lxcfs_opts *opts;
+	opts = malloc(sizeof(struct lxcfs_opts));
+	if (opts == NULL) {
+		fprintf(stderr, "Error allocating memory for options.\n");
+		goto out;
+	}
+	opts->swap_off = false;
+
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
 	swallow_arg(&argc, argv, "-f");
 	debug = swallow_arg(&argc, argv, "-d");
 	if (swallow_arg(&argc, argv, "-l")) {
 		load_use = true;
+	}
+	if (swallow_arg(&argc, argv, "-u")) {
+		opts->swap_off = true;
 	}
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
@@ -967,7 +979,7 @@ int main(int argc, char *argv[])
 	if (load_use && start_loadavg() != 0)
 		goto out;
 
-	if (!fuse_main(nargs, newargv, &lxcfs_ops, NULL))
+	if (!fuse_main(nargs, newargv, &lxcfs_ops, opts))
 		ret = EXIT_SUCCESS;
 	if (load_use)
 		stop_loadavg();
