@@ -3437,6 +3437,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *) fuse_get_context()->private_data;
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
 	char *memusage_str = NULL, *memstat_str = NULL,
@@ -3517,17 +3518,23 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "MemAvailable:")) {
 			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage + cached);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && memswlimit > 0) {
+		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts->swap_off == false) {
 			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
 			if (hostswtotal < memswlimit)
 				memswlimit = hostswtotal;
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit);
 			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0) {
+		} else if (startswith(line, "SwapTotal:") && opts->swap_off == true) {
+			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", 0UL);
+			printme = lbuf;
+		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0 && opts->swap_off == false) {
 			unsigned long swaptotal = memswlimit,
 					swapusage = memswusage - memusage,
 					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
+			printme = lbuf;
+		} else if (startswith(line, "SwapFree:") && opts->swap_off == true) {
+			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", 0UL);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
 			snprintf(lbuf, 100, "Slab:        %8lu kB\n", 0UL);
