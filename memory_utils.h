@@ -30,21 +30,26 @@
 
 #include "macro.h"
 
-static inline void __auto_free__(void *p)
+static inline void __free_move__(void *p)
 {
 	free(*(void **)p);
+	*(void **)p = NULL;
 }
 
-static inline void __auto_fclose__(FILE **f)
+static inline void __fclose_move__(FILE **f)
 {
-	if (*f)
+	if (*f) {
 		fclose(*f);
+		*f = NULL;
+	}
 }
 
-static inline void __auto_closedir__(DIR **d)
+static inline void __closedir_move__(DIR **d)
 {
-	if (*d)
+	if (*d) {
 		closedir(*d);
+		*d = NULL;
+	}
 }
 
 #define close_prot_errno_disarm(fd) \
@@ -55,15 +60,15 @@ static inline void __auto_closedir__(DIR **d)
 		fd = -EBADF;        \
 	}
 
-static inline void __auto_close__(int *fd)
+static inline void __close_move__(int *fd)
 {
 	close_prot_errno_disarm(*fd);
 }
 
-#define __do_close_prot_errno __attribute__((__cleanup__(__auto_close__)))
-#define __do_free __attribute__((__cleanup__(__auto_free__)))
-#define __do_fclose __attribute__((__cleanup__(__auto_fclose__)))
-#define __do_closedir __attribute__((__cleanup__(__auto_closedir__)))
+#define __do_close_prot_errno __attribute__((__cleanup__(__close_move__)))
+#define __do_free __attribute__((__cleanup__(__free_move__)))
+#define __do_fclose __attribute__((__cleanup__(__fclose_move__)))
+#define __do_closedir __attribute__((__cleanup__(__closedir_move__)))
 
 #define move_ptr(ptr)                                 \
 	({                                            \
