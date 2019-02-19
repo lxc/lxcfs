@@ -25,7 +25,7 @@ sodir=$(libdir)
 lxcfs_LTLIBRARIES = liblxcfs.la
 EXTRA_LTLIBRARIES = liblxcfstest.la
 
-lxcfs_SOURCES = lxcfs.c
+lxcfs_SOURCES = lxcfs.c memory_utils.h
 lxcfs_LDADD = -ldl
 lxcfs_CFLAGS = $(AM_CFLAGS)
 lxcfs_LDFLAGS = $(AM_LDFLAGS)
