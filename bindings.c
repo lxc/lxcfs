@@ -4048,6 +4048,49 @@ static uint64_t get_reaper_age(pid_t pid)
 
 /*
  * Returns 0 on success.
+ * Complement of read_cpuacct_usage_all.
+ */
+static inline int read_cpuacct_usage_from_percpu(
+	char *cg, char *cpuset, struct cpuacct_usage *cpu_usage, int cpucount, long ticks_per_sec)
+{
+	char *usage_str = NULL;
+	char *delim = " ";
+	char *token = NULL;
+	int j = 0;
+	uint64_t usage;
+	int rv;
+
+	if (!cpu_usage) {
+		return -1;
+	}
+
+	if (!cgfs_get_value("cpuacct", cg, "cpuacct.usage_percpu", &usage_str)) {
+		rv = -1;
+		goto err;
+	}
+
+	// usage_str format, 4 cores:
+	// 120190269376599 151483821809073 145465919648605 14450503259981
+	token = strtok(usage_str, delim);
+	while (NULL != token && j < cpucount)  {
+		sscanf(token,"%lu", &usage);
+		cpu_usage[j].user = usage / 1000.0 / 1000 / 1000 * ticks_per_sec;
+		cpu_usage[j].system = 0;
+		token = strtok(NULL, delim);
+		j++;
+	}
+
+	rv = 0;
+
+err:
+	if (usage_str)
+		free(usage_str);
+
+	return rv;
+}
+
+/*
+ * Returns 0 on success.
  * It is the caller's responsibility to free `return_usage`, unless this
  * function returns an error.
  */
@@ -4072,12 +4115,16 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 	}
 
 	cpu_usage = malloc(sizeof(struct cpuacct_usage) * cpucount);
+	bzero(cpu_usage,sizeof(struct cpuacct_usage) * cpucount);
 	if (!cpu_usage)
 		return -ENOMEM;
 
 	if (!cgfs_get_value("cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
-		rv = -1;
-		goto err;
+		if (read_cpuacct_usage_from_percpu(cg, cpuset, cpu_usage, cpucount, ticks_per_sec) != 0){
+			rv = -1;
+			goto err;
+		}
+		goto suc;
 	}
 
 	if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0) {
@@ -4111,6 +4158,7 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 		j++;
 	}
 
+suc: 
 	rv = 0;
 	*return_usage = cpu_usage;
 	*size = cpucount;
