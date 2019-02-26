@@ -15,4 +15,9 @@
 #define lxcfs_debug(format, ...)
 #endif /* DEBUG */
 
+#define lxcfs_iterate_parts(__iterator, __splitme, __separators)            \
+	for (char *__p = NULL, *__it = strtok_r(__splitme, __separators, &__p); \
+			(__iterator = __it);                                            \
+			__iterator = __it = strtok_r(NULL, __separators, &__p))
+
 #endif /* __LXCFS_MACRO_H */

@@ -4071,12 +4071,16 @@ static inline int read_cpuacct_usage_from_percpu(
 
 	// usage_str format, 4 cores:
 	// 120190269376599 151483821809073 145465919648605 14450503259981
-	token = strtok(usage_str, delim);
-	while (NULL != token && j < cpucount)  {
-		sscanf(token,"%lu", &usage);
+	j = 0;
+	lxcfs_iterate_parts(token, usage_str, delim){
+		if (j >= cpucount) {
+			break;
+		};
+		if (sscanf(token,"%lu", &usage) != 1 ) {
+			goto err;
+		}
 		cpu_usage[j].user = usage / 1000.0 / 1000 / 1000 * ticks_per_sec;
 		cpu_usage[j].system = 0;
-		token = strtok(NULL, delim);
 		j++;
 	}
 
