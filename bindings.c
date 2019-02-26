@@ -4077,6 +4077,7 @@ static inline int read_cpuacct_usage_from_percpu(
 			break;
 		};
 		if (sscanf(token,"%lu", &usage) != 1 ) {
+			rv = -1;
 			goto err;
 		}
 		cpu_usage[j].user = usage / 1000.0 / 1000 / 1000 * ticks_per_sec;
