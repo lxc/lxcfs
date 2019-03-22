@@ -39,9 +39,6 @@
 #include "bindings.h"
 #include "config.h" // for VERSION
 
-/* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
-#define LXCFS_NUMSTRLEN64 21
-
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
 static int pivot_root(const char * new_root, const char * put_old)
@@ -56,29 +53,6 @@ return -1;
 #else
 extern int pivot_root(const char * new_root, const char * put_old);
 #endif
-
-enum {
-	LXC_TYPE_CGDIR,
-	LXC_TYPE_CGFILE,
-	LXC_TYPE_PROC_MEMINFO,
-	LXC_TYPE_PROC_CPUINFO,
-	LXC_TYPE_PROC_UPTIME,
-	LXC_TYPE_PROC_STAT,
-	LXC_TYPE_PROC_DISKSTATS,
-	LXC_TYPE_PROC_SWAPS,
-	LXC_TYPE_PROC_LOADAVG,
-};
-
-struct file_info {
-	char *controller;
-	char *cgroup;
-	char *file;
-	int type;
-	char *buf;  // unused as of yet
-	int buflen;
-	int size; //actual data size
-	int cached;
-};
 
 struct cpuacct_usage {
 	uint64_t user;
@@ -395,9 +369,6 @@ static void free_cpuview()
 			cpuview_free_head(proc_stat_history[i]);
 	}
 }
-
-/* Reserve buffer size to account for file size changes. */
-#define BUF_RESERVE_SIZE 512
 
 /*
  * A table caching which pid is init for a pid namespace.
@@ -1416,7 +1387,7 @@ out:
 	return ret;
 }
 
-static pid_t lookup_initpid_in_store(pid_t qpid)
+pid_t lookup_initpid_in_store(pid_t qpid)
 {
 	pid_t answer = 0;
 	struct stat sb;
@@ -1645,7 +1616,7 @@ static void stripnewline(char *x)
 		x[l-1] = '\0';
 }
 
-static char *get_pid_cgroup(pid_t pid, const char *contrl)
+char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
 	int cfd;
 	char fnam[PROCLEN];
@@ -1732,7 +1703,7 @@ out:
 }
 
 #define INITSCOPE "/init.scope"
-static void prune_init_slice(char *cg)
+void prune_init_slice(char *cg)
 {
 	char *point;
 	size_t cg_len = strlen(cg), initscope_len = strlen(INITSCOPE);
@@ -2169,7 +2140,7 @@ out:
 	return ret;
 }
 
-static void do_release_file_info(struct fuse_file_info *fi)
+void do_release_file_info(struct fuse_file_info *fi)
 {
 	struct file_info *f = (struct file_info *)fi->fh;
 
@@ -3358,8 +3329,7 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *
 	}
 }
 
-static int read_file(const char *path, char *buf, size_t size,
-		     struct file_info *d)
+int read_file(const char *path, char *buf, size_t size, struct file_info *d)
 {
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *line = NULL;
@@ -3629,7 +3599,7 @@ err:
  * Read the cpuset.cpus for cg
  * Return the answer in a newly allocated string which must be freed
  */
-static char *get_cpuset(const char *cg)
+char *get_cpuset(const char *cg)
 {
 	char *answer;
 

@@ -205,6 +205,21 @@ static int do_proc_getattr(const char *path, struct stat *sb)
 	return proc_getattr(path, sb);
 }
 
+static int do_sys_getattr(const char *path, struct stat *sb)
+{
+	int (*sys_getattr)(const char *path, struct stat *sb);
+	char *error;
+	dlerror();    /* Clear any existing error */
+	sys_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "sys_getattr");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_getattr(path, sb);
+}
+
 static int do_cg_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
@@ -239,6 +254,24 @@ static int do_proc_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 
 	return proc_read(path, buf, size, offset, fi);
+}
+
+static int do_sys_read(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi)
+{
+	int (*sys_read)(const char *path, char *buf, size_t size, off_t offset,
+		struct fuse_file_info *fi);
+	char *error;
+
+	dlerror();    /* Clear any existing error */
+	sys_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_read");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_read(path, buf, size, offset, fi);
 }
 
 static int do_cg_write(const char *path, const char *buf, size_t size, off_t offset,
@@ -354,6 +387,25 @@ static int do_proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
 	return proc_readdir(path, buf, filler, offset, fi);
 }
 
+static int do_sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+		struct fuse_file_info *fi)
+{
+	int (*sys_readdir)(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+		struct fuse_file_info *fi);
+	char *error;
+
+	dlerror();    /* Clear any existing error */
+	sys_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_readdir");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_readdir(path, buf, filler, offset, fi);
+}
+
+
 static int do_cg_open(const char *path, struct fuse_file_info *fi)
 {
 	int (*cg_open)(const char *path, struct fuse_file_info *fi);
@@ -414,6 +466,37 @@ static int do_proc_access(const char *path, int mode)
 	return proc_access(path, mode);
 }
 
+static int do_sys_open(const char *path, struct fuse_file_info *fi)
+{
+	int (*sys_open)(const char *path, struct fuse_file_info *fi);
+	char *error;
+	dlerror();    /* Clear any existing error */
+	sys_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "sys_open");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_open(path, fi);
+}
+
+static int do_sys_access(const char *path, int mode)
+{
+	int (*sys_access)(const char *path, int mode);
+	char *error;
+	dlerror();    /* Clear any existing error */
+	sys_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "sys_access");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_access(path, mode);
+}
+
+
 static int do_cg_release(const char *path, struct fuse_file_info *fi)
 {
 	int (*cg_release)(const char *path, struct fuse_file_info *fi);
@@ -444,6 +527,21 @@ static int do_proc_release(const char *path, struct fuse_file_info *fi)
 	return proc_release(path, fi);
 }
 
+static int do_sys_release(const char *path, struct fuse_file_info *fi)
+{
+	int (*sys_release)(const char *path, struct fuse_file_info *fi);
+	char *error;
+	dlerror();    /* Clear any existing error */
+	sys_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_release");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_release(path, fi);
+}
+
 static int do_cg_opendir(const char *path, struct fuse_file_info *fi)
 {
 	int (*cg_opendir)(const char *path, struct fuse_file_info *fi);
@@ -472,6 +570,21 @@ static int do_cg_releasedir(const char *path, struct fuse_file_info *fi)
 	}
 
 	return cg_releasedir(path, fi);
+}
+
+static int do_sys_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	int (*sys_releasedir)(const char *path, struct fuse_file_info *fi);
+	char *error;
+	dlerror();    /* Clear any existing error */
+	sys_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_releasedir");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return sys_releasedir(path, fi);
 }
 
 /*
@@ -508,6 +621,12 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 		down_users();
 		return ret;
 	}
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_getattr(path, sb);
+		down_users();
+		return ret;
+	}
 	return -ENOENT;
 }
 
@@ -525,6 +644,9 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	}
 	if (strcmp(path, "/proc") == 0)
 		return 0;
+	if (strncmp(path, "/sys", 4) == 0)
+		return 0;
+
 	return -ENOENT;
 }
 
@@ -536,6 +658,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 		if (filler(buf, ".", NULL, 0) != 0 ||
 		    filler(buf, "..", NULL, 0) != 0 ||
 		    filler(buf, "proc", NULL, 0) != 0 ||
+		    filler(buf, "sys", NULL, 0) != 0 ||
 		    filler(buf, "cgroup", NULL, 0) != 0)
 			return -ENOMEM;
 		return 0;
@@ -552,6 +675,14 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 		down_users();
 		return ret;
 	}
+
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_readdir(path, buf, filler, offset, fi);
+		down_users();
+		return ret;
+	}
+
 	return -ENOENT;
 }
 
@@ -574,6 +705,13 @@ static int lxcfs_access(const char *path, int mode)
 		down_users();
 		return ret;
 	}
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_access(path, mode);
+		down_users();
+		return ret;
+	}
+
 
 	return -EACCES;
 }
@@ -591,6 +729,13 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 	}
 	if (strcmp(path, "/proc") == 0)
 		return 0;
+	if (strncmp(path, "/sys", 4) == 0){
+		up_users();
+		ret = do_sys_releasedir(path, fi);
+		down_users();
+		return ret;
+	}
+
 	return -EINVAL;
 }
 
@@ -609,6 +754,13 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 		down_users();
 		return ret;
 	}
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_open(path, fi);
+		down_users();
+		return ret;
+	}
+
 
 	return -EACCES;
 }
@@ -629,6 +781,13 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 		down_users();
 		return ret;
 	}
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_read(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
 
 	return -EINVAL;
 }
@@ -667,6 +826,13 @@ static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 		down_users();
 		return ret;
 	}
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_release(path, fi);
+		down_users();
+		return ret;
+	}
+
 
 	return -EINVAL;
 }
@@ -702,6 +868,8 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 	if (strncmp(path, "/proc", 5) == 0)
 		return -EPERM;
 
+	if (strncmp(path, "/sys", 4) == 0) 
+		return -EPERM;
 	return -ENOENT;
 }
 
@@ -740,6 +908,9 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	}
 
 	if (strncmp(path, "/proc", 5) == 0)
+		return -EPERM;
+
+	if (strncmp(path, "/sys", 4) == 0)
 		return -EPERM;
 
 	return -ENOENT;

@@ -15,6 +15,7 @@ such as:
 /proc/stat
 /proc/swaps
 /proc/uptime
+/sys/devices/system/cpu/online
 ```
 
 are container aware such that the values displayed (e.g. in `/proc/uptime`)
