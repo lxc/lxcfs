@@ -298,14 +298,11 @@ int sys_read(const char *path, char *buf, size_t size, off_t offset,
 	struct file_info *f = (struct file_info *)fi->fh;
 
 	switch (f->type) {
-	case LXC_TYPE_SYS_DEVICES:
-		return sys_devices_read(buf, size, offset, fi);
-	case LXC_TYPE_SYS_DEVICES_SYSTEM:
-		return sys_devices_system_read(buf, size, offset, fi);
-	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-		return sys_devices_system_cpu_read(buf, size, offset, fi);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
 		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES:
+	case LXC_TYPE_SYS_DEVICES_SYSTEM:
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
 	default:
 		return -EINVAL;
 	}
