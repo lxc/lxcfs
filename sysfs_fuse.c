@@ -34,40 +34,6 @@
 #include "config.h" // for VERSION
 #include "sysfs_fuse.h"
 
-static int sys_devices_system_cpu_read(char *buf, size_t size, off_t offset,
-				       struct fuse_file_info *fi)
-{
-	struct file_info *d = (struct file_info *)fi->fh;
-	char *cache = d->buf;
-	ssize_t total_len = 0;
-
-	if (offset) {
-		if (!d->cached)
-			return 0;
-		if (offset > d->size)
-			return -EINVAL;
-		int left = d->size - offset;
-		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
-		return total_len;
-	}
-
-	total_len = snprintf(d->buf, d->buflen, "0-1\n");
-	if (total_len < 0 || total_len >= d->buflen) {
-		lxcfs_error("%s\n", "failed to write to cache");
-		return 0;
-	}
-
-	d->size = (int)total_len;
-	d->cached = 1;
-
-	if (total_len > size)
-		total_len = size;
-
-	memcpy(buf, d->buf, total_len);
-	return total_len;
-}
-
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,
 					      struct fuse_file_info *fi)
