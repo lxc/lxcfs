@@ -11,15 +11,19 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
-liblxcfs_la_SOURCES = macro.h bindings.c cpuset.c bindings.h
+liblxcfs_la_SOURCES = bindings.c bindings.h \
+		      cpuset.c \
+		      sysfs_fuse.c syfs_fuse.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-liblxcfstest_la_SOURCES = bindings.c cpuset.c bindings.h macro.h
+liblxcfstest_la_SOURCES = bindings.c bindings.h \
+			  cpuset.c \
+			  sysfs_fuse.c syfs_fuse.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h macro.h
+noinst_HEADERS = bindings.h macro.h sysfs_fuse.h
 
 sodir=$(libdir)
 lxcfs_LTLIBRARIES = liblxcfs.la
