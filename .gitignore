@@ -35,3 +35,4 @@ lxcfs-*.tar.gz
 .libs
 *.lo
 *.la
+.vscode
