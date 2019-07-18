@@ -4010,10 +4010,11 @@ static uint64_t get_reaper_start_time(pid_t pid)
 	return starttime;
 }
 
-static uint64_t get_reaper_start_time_in_sec(pid_t pid)
+static double get_reaper_start_time_in_sec(pid_t pid)
 {
-	uint64_t clockticks;
-	int64_t ticks_per_sec;
+	uint64_t clockticks, ticks_per_sec;
+	int64_t ret;
+	double res = 0;
 
 	clockticks = get_reaper_start_time(pid);
 	if (clockticks == 0 && errno == EINVAL) {
@@ -4021,20 +4022,23 @@ static uint64_t get_reaper_start_time_in_sec(pid_t pid)
 		return 0;
 	}
 
-	ticks_per_sec = sysconf(_SC_CLK_TCK);
-	if (ticks_per_sec < 0 && errno == EINVAL) {
+	ret = sysconf(_SC_CLK_TCK);
+	if (ret < 0 && errno == EINVAL) {
 		lxcfs_debug(
 		    "%s\n",
 		    "failed to determine number of clock ticks in a second");
 		return 0;
 	}
 
-	return (clockticks /= ticks_per_sec);
+	ticks_per_sec = (uint64_t)ret;
+	res = (double)clockticks / ticks_per_sec;
+	return res;
 }
 
-static uint64_t get_reaper_age(pid_t pid)
+static double get_reaper_age(pid_t pid)
 {
-	uint64_t procstart, uptime, procage;
+	uint64_t uptime_ms;
+	double procstart, procage;
 
 	/* We need to substract the time the process has started since system
 	 * boot minus the time when the system has started to get the actual
@@ -4049,13 +4053,14 @@ static uint64_t get_reaper_age(pid_t pid)
 		ret = clock_gettime(CLOCK_BOOTTIME, &spec);
 		if (ret < 0)
 			return 0;
+
 		/* We could make this more precise here by using the tv_nsec
 		 * field in the timespec struct and convert it to milliseconds
 		 * and then create a double for the seconds and milliseconds but
 		 * that seems more work than it is worth.
 		 */
-		uptime = spec.tv_sec;
-		procage = uptime - procstart;
+		uptime_ms = (spec.tv_sec * 1000) + (spec.tv_nsec * 1e-6);
+		procage = (uptime_ms - (procstart * 1000)) / 1000;
 	}
 
 	return procage;
@@ -4102,7 +4107,7 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 		// convert cpuacct.usage_percpu into cpuacct.usage_all
 		lxcfs_v("converting cpuacct.usage_percpu into cpuacct.usage_all\n%s", "");
-		
+
 		char *data = NULL;
 		size_t sz = 0, asz = 0;
 
@@ -4713,7 +4718,7 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 			lxcfs_v("idle_sum before: %lu\n", idle_sum);
 			idle_sum = idle_sum > delta ? idle_sum - delta : 0;
 			lxcfs_v("idle_sum after: %lu\n", idle_sum);
-			
+
 			curcpu = max_diff_idle_index;
 			lxcfs_v("curcpu: %d, idle before: %lu\n", curcpu, stat_node->view[curcpu].idle);
 			stat_node->view[curcpu].idle = stat_node->view[curcpu].idle > delta ? stat_node->view[curcpu].idle - delta : 0;
@@ -5092,11 +5097,12 @@ err:
  * account as well. If someone has a clever solution for this please send a
  * patch!
  */
-static unsigned long get_reaper_busy(pid_t task)
+static double get_reaper_busy(pid_t task)
 {
 	pid_t initpid = lookup_initpid_in_store(task);
 	char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
+	double res = 0;
 
 	if (initpid <= 0)
 		return 0;
@@ -5108,12 +5114,12 @@ static unsigned long get_reaper_busy(pid_t task)
 	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		goto out;
 	usage = strtoul(usage_str, NULL, 10);
-	usage /= 1000000000;
+	res = (double)usage / 1000000000;
 
 out:
 	free(cgroup);
 	free(usage_str);
-	return usage;
+	return res;
 }
 
 #if RELOADTEST
@@ -5137,10 +5143,10 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	unsigned long int busytime = get_reaper_busy(fc->pid);
+	double busytime = get_reaper_busy(fc->pid);
 	char *cache = d->buf;
 	ssize_t total_len = 0;
-	uint64_t idletime, reaperage;
+	double idletime, reaperage;
 
 #if RELOADTEST
 	iwashere();
@@ -5165,7 +5171,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	if (reaperage >= busytime)
 		idletime = reaperage - busytime;
 
-	total_len = snprintf(d->buf, d->buflen, "%"PRIu64".00 %"PRIu64".00\n", reaperage, idletime);
+	total_len = snprintf(d->buf, d->buflen, "%.2lf %.2lf\n", reaperage, idletime);
 	if (total_len < 0 || total_len >=  d->buflen){
 		lxcfs_error("%s\n", "failed to write to cache");
 		return 0;
