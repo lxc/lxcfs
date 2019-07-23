@@ -15,4 +15,10 @@
 #define lxcfs_debug(format, ...)
 #endif /* DEBUG */
 
+#ifdef VERBOSE
+#define lxcfs_v(format, ...) lxcfs_error(format, __VA_ARGS__);
+#else
+#define lxcfs_v(format, ...)
+#endif /* VERBOSE */
+
 #endif /* __LXCFS_MACRO_H */
