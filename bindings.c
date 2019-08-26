@@ -4883,6 +4883,16 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	lxcfs_v("initpid: %d\n", initpid);
 	if (initpid <= 0)
 		initpid = fc->pid;
+
+	/*
+	 * when container run with host pid namespace initpid == 1, cgroup will "/"
+	 * we should return host os's /proc contents.
+	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
+	 */
+	if (initpid == 1) {
+	    return read_file("/proc/stat", buf, size, d);
+	}
+
 	cg = get_pid_cgroup(initpid, "cpuset");
 	lxcfs_v("cg: %s\n", cg);
 	if (!cg)
