@@ -3322,6 +3322,45 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 	}
 }
 
+static bool get_blk_device_name(unsigned int major, unsigned int minor,
+								char *device, size_t n)
+{
+	char path[PATH_MAX] = {0}, name[DISK_NAME_LEN] = {0};
+	char *line = NULL;
+	FILE *file = NULL;
+	bool retval = false;
+	size_t len = 0;
+
+	len = snprintf(path, sizeof(path),
+			"/sys/dev/block/%u:%u/uevent", major, minor);
+	if (len < 0) {
+		lxcfs_error("Internal error: path is too long\n");
+		goto out;
+	}
+
+	file = fopen(path, "r");
+	if (file == NULL) {
+		lxcfs_error("Error opening '%s': %s\n", path, strerror(errno));
+		goto out;
+	}
+
+	len = 0;
+	while (getline(&line, &len, file) != -1) {
+		if (sscanf(line, "DEVNAME=%s", name) != 1)
+			continue;
+
+		snprintf(device, n, "%s", name);
+		retval = true;
+		break;
+	}
+
+	free(line);
+	fclose(file);
+
+out:
+	return retval;
+}
+
 static void get_blkio_io_value(char *str, int major, int minor,
 							   char *iotype, unsigned long *v)
 {
@@ -5204,11 +5243,10 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
-	char *line = NULL;
-	size_t linelen = 0, total_len = 0, rv = 0;
+	size_t total_len = 0, rv = 0;
 	int major = 0, minor = 0;
-	int i = 0;
-	FILE *f = NULL;
+	ssize_t l = 0;
+	char lbuf[256] = {0};
 
 	if (offset){
 		if (offset > d->size)
@@ -5231,6 +5269,12 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
 		goto err;
+
+	if (sscanf(io_serviced_str, "%d:%d", &major, &minor) != 2)
+		goto err;
+	if (!get_blk_device_name(major, minor, dev_name, sizeof(dev_name)))
+		goto err;
+
 	if (!cgfs_get_value("blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
 		goto err;
 	if (!cgfs_get_value("blkio", cg, "blkio.io_service_bytes_recursive", &io_service_bytes_str))
@@ -5240,69 +5284,51 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	if (!cgfs_get_value("blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
 		goto err;
 
+	get_blkio_io_value(io_serviced_str, major, minor, "Read", &read);
+	get_blkio_io_value(io_serviced_str, major, minor, "Write", &write);
+	get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
+	get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
+	get_blkio_io_value(io_service_bytes_str, major, minor, "Read", &read_sectors);
+	read_sectors = read_sectors/512;
+	get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
+	write_sectors = write_sectors/512;
 
-	f = fopen("/proc/diskstats", "r");
-	if (!f)
+	get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
+	rd_svctm = rd_svctm/1000000;
+	get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
+	rd_wait = rd_wait/1000000;
+	read_ticks = rd_svctm + rd_wait;
+
+	get_blkio_io_value(io_service_time_str, major, minor, "Write", &wr_svctm);
+	wr_svctm =  wr_svctm/1000000;
+	get_blkio_io_value(io_wait_time_str, major, minor, "Write", &wr_wait);
+	wr_wait =  wr_wait/1000000;
+	write_ticks = wr_svctm + wr_wait;
+
+	get_blkio_io_value(io_service_time_str, major, minor, "Total", &tot_ticks);
+	tot_ticks =  tot_ticks/1000000;
+
+	snprintf(lbuf, 256, "%4d %7d %s %lu %lu %lu "
+			 "%lu %lu %lu %lu %lu %lu %lu %lu\n",
+			 major, minor, dev_name,
+			 read, read_merged, read_sectors, read_ticks,
+			 write, write_merged, write_sectors, write_ticks,
+			 ios_pgr, tot_ticks, rq_ticks);
+
+	l = snprintf(cache, cache_size, "%s", lbuf);
+	if (l < 0) {
+		perror("Error writing to fuse buf");
+		rv = 0;
 		goto err;
-
-	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l;
-		char lbuf[256];
-
-		i = sscanf(line, "%u %u %71s", &major, &minor, dev_name);
-		if (i != 3)
-			continue;
-
-		get_blkio_io_value(io_serviced_str, major, minor, "Read", &read);
-		get_blkio_io_value(io_serviced_str, major, minor, "Write", &write);
-		get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
-		get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
-		get_blkio_io_value(io_service_bytes_str, major, minor, "Read", &read_sectors);
-		read_sectors = read_sectors/512;
-		get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
-		write_sectors = write_sectors/512;
-
-		get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
-		rd_svctm = rd_svctm/1000000;
-		get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
-		rd_wait = rd_wait/1000000;
-		read_ticks = rd_svctm + rd_wait;
-
-		get_blkio_io_value(io_service_time_str, major, minor, "Write", &wr_svctm);
-		wr_svctm =  wr_svctm/1000000;
-		get_blkio_io_value(io_wait_time_str, major, minor, "Write", &wr_wait);
-		wr_wait =  wr_wait/1000000;
-		write_ticks = wr_svctm + wr_wait;
-
-		get_blkio_io_value(io_service_time_str, major, minor, "Total", &tot_ticks);
-		tot_ticks =  tot_ticks/1000000;
-
-		memset(lbuf, 0, 256);
-		if (read || write || read_merged || write_merged || read_sectors || write_sectors || read_ticks || write_ticks)
-			snprintf(lbuf, 256, "%4d %7d %s %lu %lu %lu "
-					 "%lu %lu %lu %lu %lu %lu %lu %lu\n",
-					 major, minor, dev_name,
-					 read, read_merged, read_sectors, read_ticks,
-					 write, write_merged, write_sectors, write_ticks,
-					 ios_pgr, tot_ticks, rq_ticks);
-		else
-			continue;
-
-		l = snprintf(cache, cache_size, "%s", lbuf);
-		if (l < 0) {
-			perror("Error writing to fuse buf");
-			rv = 0;
-			goto err;
-		}
-		if (l >= cache_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
-		}
-		cache += l;
-		cache_size -= l;
-		total_len += l;
 	}
+	if (l >= cache_size) {
+		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
+		rv = 0;
+		goto err;
+	}
+	cache += l;
+	cache_size -= l;
+	total_len += l;
 
 	d->cached = 1;
 	d->size = total_len;
@@ -5310,11 +5336,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	memcpy(buf, d->buf, total_len);
 
 	rv = total_len;
+
 err:
 	free(cg);
-	if (f)
-		fclose(f);
-	free(line);
 	free(io_serviced_str);
 	free(io_merged_str);
 	free(io_service_bytes_str);
