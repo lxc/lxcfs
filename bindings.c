@@ -3322,6 +3322,62 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 	}
 }
 
+static bool get_blk_sched_name(unsigned int major, unsigned int minor,
+				char *scheduler, size_t n)
+{
+	char path[PATH_MAX] = {0};
+	char *line = NULL, *alpha;
+	size_t len = 0, i = 0;
+	FILE *file = NULL;
+	bool retval = false;
+
+	len = snprintf(path, sizeof(path),
+			"/sys/dev/block/%u:%u/queue/scheduler", major, minor);
+	if (len < 0) {
+		lxcfs_error("Internal error: path is too long\n");
+		goto out;
+	}
+
+	file = fopen(path, "r");
+	if (file == NULL) {
+		lxcfs_error("Error opening '%s': %s\n", path, strerror(errno));
+		goto out;
+	}
+
+	len = 0;
+	if ((getline(&line, &len, file)) != -1) {
+		if ((alpha = strstr(line, "[")) == NULL) {
+			lxcfs_error("Internal error: "
+						"couldn't find scheduler name from '%s'\n", line);
+			goto error;
+		}
+
+		i = 0;
+		alpha += 1;
+		while (i < n-1 && *alpha != '\0' && *alpha != ']') {
+			scheduler[i] = *alpha;
+			alpha += 1;
+			i += 1;
+		}
+		if (i < n-1 && *alpha != '\0') {
+			scheduler[i] = '\0';
+			retval = true;
+		} else if (i == n-1) {
+			lxcfs_error("Internal error: "
+						"cloudn't store scheduler name, buffer is full.\n");
+		} else {
+			lxcfs_error("Internal error: "
+						"couldn't find scheduler name from '%s'\n", line);
+		}
+	}
+
+error:
+	free(line);
+	fclose(file);
+out:
+	return retval;
+}
+
 static bool get_blk_sector_size(unsigned int major, unsigned int minor,
 					int *sector_size)
 {
@@ -5260,6 +5316,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 {
 	char dev_name[DISK_NAME_LEN];
 	int sector_size = 512;
+	char scheduler[64] = {0};
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
@@ -5297,7 +5354,13 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/diskstats", buf, size, d);
 	prune_init_slice(cg);
 
-	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
+	if (!cgfs_get_value("blkio", cg,
+						"blkio.throttle.io_serviced_recursive",
+						&io_serviced_str))
+		goto err;
+	if (!cgfs_get_value("blkio", cg,
+						"blkio.throttle.io_service_bytes_recursive",
+						&io_service_bytes_str))
 		goto err;
 
 	if (sscanf(io_serviced_str, "%d:%d", &major, &minor) != 2)
@@ -5306,39 +5369,42 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		goto err;
 	if (!get_blk_sector_size(major, minor, &sector_size))
 		goto err;
-
-	if (!cgfs_get_value("blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
-		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_service_bytes_recursive", &io_service_bytes_str))
-		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_wait_time_recursive", &io_wait_time_str))
-		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
+	if (!get_blk_sched_name(major, minor, scheduler, sizeof(scheduler)))
 		goto err;
 
 	get_blkio_io_value(io_serviced_str, major, minor, "Read", &read);
 	get_blkio_io_value(io_serviced_str, major, minor, "Write", &write);
-	get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
-	get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
 	get_blkio_io_value(io_service_bytes_str, major, minor, "Read", &read_sectors);
 	read_sectors = read_sectors / sector_size;
 	get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
 	write_sectors = write_sectors / sector_size;
 
-	get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
-	rd_svctm = rd_svctm/1000000;
-	get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
-	rd_wait = rd_wait/1000000;
-	read_ticks = rd_svctm + rd_wait;
+	if (strcmp(scheduler, "cfq") == 0) {
+		if (!cgfs_get_value("blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
+			goto err;
+		if (!cgfs_get_value("blkio", cg, "blkio.io_wait_time_recursive", &io_wait_time_str))
+			goto err;
+		if (!cgfs_get_value("blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
+			goto err;
 
-	get_blkio_io_value(io_service_time_str, major, minor, "Write", &wr_svctm);
-	wr_svctm =  wr_svctm/1000000;
-	get_blkio_io_value(io_wait_time_str, major, minor, "Write", &wr_wait);
-	wr_wait =  wr_wait/1000000;
-	write_ticks = wr_svctm + wr_wait;
+		get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
+		get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
 
-	get_blkio_io_value(io_service_time_str, major, minor, "Total", &tot_ticks);
-	tot_ticks =  tot_ticks/1000000;
+		get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
+		rd_svctm = rd_svctm/1000000;
+		get_blkio_io_value(io_wait_time_str, major, minor, "Read", &rd_wait);
+		rd_wait = rd_wait/1000000;
+		read_ticks = rd_svctm + rd_wait;
+
+		get_blkio_io_value(io_service_time_str, major, minor, "Write", &wr_svctm);
+		wr_svctm =  wr_svctm/1000000;
+		get_blkio_io_value(io_wait_time_str, major, minor, "Write", &wr_wait);
+		wr_wait =  wr_wait/1000000;
+		write_ticks = wr_svctm + wr_wait;
+
+		get_blkio_io_value(io_service_time_str, major, minor, "Total", &tot_ticks);
+		tot_ticks =  tot_ticks/1000000;
+	}
 
 	snprintf(lbuf, 256, "%4d %7d %s %lu %lu %lu "
 			 "%lu %lu %lu %lu %lu %lu %lu %lu\n",
