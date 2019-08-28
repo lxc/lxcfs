@@ -3322,13 +3322,14 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 	}
 }
 
-static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *iotype, unsigned long *v)
+static void get_blkio_io_value(char *str, int major, int minor,
+							   char *iotype, unsigned long *v)
 {
 	char *eol;
 	char key[32];
 
 	memset(key, 0, 32);
-	snprintf(key, 32, "%u:%u %s", major, minor, iotype);
+	snprintf(key, 32, "%d:%d %s", major, minor, iotype);
 
 	size_t len = strlen(key);
 	*v = 0;
@@ -5189,7 +5190,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	char dev_name[72];
+	char dev_name[DISK_NAME_LEN];
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
@@ -5205,7 +5206,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
-	unsigned int major = 0, minor = 0;
+	int major = 0, minor = 0;
 	int i = 0;
 	FILE *f = NULL;
 
@@ -5278,9 +5279,12 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 		memset(lbuf, 0, 256);
 		if (read || write || read_merged || write_merged || read_sectors || write_sectors || read_ticks || write_ticks)
-			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-				major, minor, dev_name, read, read_merged, read_sectors, read_ticks,
-				write, write_merged, write_sectors, write_ticks, ios_pgr, tot_ticks, rq_ticks);
+			snprintf(lbuf, 256, "%4d %7d %s %lu %lu %lu "
+					 "%lu %lu %lu %lu %lu %lu %lu %lu\n",
+					 major, minor, dev_name,
+					 read, read_merged, read_sectors, read_ticks,
+					 write, write_merged, write_sectors, write_ticks,
+					 ios_pgr, tot_ticks, rq_ticks);
 		else
 			continue;
 

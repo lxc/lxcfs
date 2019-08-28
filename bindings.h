@@ -14,6 +14,9 @@
 /* Reserve buffer size to account for file size changes. */
 #define BUF_RESERVE_SIZE 512
 
+/* Maximun length of device name */
+#define DISK_NAME_LEN 32
+
 enum lxcfs_virt_t {
 	LXC_TYPE_CGDIR,
 	LXC_TYPE_CGFILE,
