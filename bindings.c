@@ -3322,6 +3322,35 @@ static void parse_memstat(char *memstat, unsigned long *cached,
 	}
 }
 
+static bool get_blk_sector_size(unsigned int major, unsigned int minor,
+					int *sector_size)
+{
+	char path[PATH_MAX] = {0};
+	FILE *file;
+	size_t len;
+	bool retval = false;
+
+	len = snprintf(path, sizeof(path),
+			"/sys/dev/block/%u:%u/queue/hw_sector_size", major, minor);
+	if (len < 0) {
+		lxcfs_error("Internal error: path is too long\n");
+		goto out;
+	}
+
+	file = fopen(path, "r");
+	if (file == NULL) {
+		lxcfs_error("Error opening '%s': %s\n", path, strerror(errno));
+		goto out;
+	}
+
+	if (fscanf(file, "%d", sector_size) == 1)
+		retval = true;
+
+	fclose(file);
+out:
+	return retval;
+}
+
 static bool get_blk_device_name(unsigned int major, unsigned int minor,
 								char *device, size_t n)
 {
@@ -5230,6 +5259,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	char dev_name[DISK_NAME_LEN];
+	int sector_size = 512;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
 	char *cg;
@@ -5274,6 +5304,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		goto err;
 	if (!get_blk_device_name(major, minor, dev_name, sizeof(dev_name)))
 		goto err;
+	if (!get_blk_sector_size(major, minor, &sector_size))
+		goto err;
 
 	if (!cgfs_get_value("blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
 		goto err;
@@ -5289,9 +5321,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	get_blkio_io_value(io_merged_str, major, minor, "Read", &read_merged);
 	get_blkio_io_value(io_merged_str, major, minor, "Write", &write_merged);
 	get_blkio_io_value(io_service_bytes_str, major, minor, "Read", &read_sectors);
-	read_sectors = read_sectors/512;
+	read_sectors = read_sectors / sector_size;
 	get_blkio_io_value(io_service_bytes_str, major, minor, "Write", &write_sectors);
-	write_sectors = write_sectors/512;
+	write_sectors = write_sectors / sector_size;
 
 	get_blkio_io_value(io_service_time_str, major, minor, "Read", &rd_svctm);
 	rd_svctm = rd_svctm/1000000;
