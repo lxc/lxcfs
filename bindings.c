@@ -5356,11 +5356,17 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 	if (!cgfs_get_value("blkio", cg,
 						"blkio.throttle.io_serviced_recursive",
-						&io_serviced_str))
+						&io_serviced_str)
+		&& !cgfs_get_value("blkio", cg,
+						   "blkio.throttle.io_serviced",
+						   &io_serviced_str))
 		goto err;
 	if (!cgfs_get_value("blkio", cg,
 						"blkio.throttle.io_service_bytes_recursive",
-						&io_service_bytes_str))
+						&io_service_bytes_str)
+		&& !cgfs_get_value("blkio", cg,
+						   "blkio.throttle.io_service_bytes",
+						   &io_service_bytes_str))
 		goto err;
 
 	if (sscanf(io_serviced_str, "%d:%d", &major, &minor) != 2)
