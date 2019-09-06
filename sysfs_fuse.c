@@ -46,6 +46,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	bool use_view;
 
 	int max_cpus = 0;
+	int max_cpus_in_cpuset = 0;
 	pid_t initpid;
 	ssize_t total_len = 0;
 
@@ -76,6 +77,11 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
+
+	max_cpus_in_cpuset = cpu_number_in_cpuset(cpuset);
+	// use min value in cpu quota and cpuset
+	if (max_cpus_in_cpuset > 0)
+		max_cpus = max_cpus_in_cpuset > max_cpus ? max_cpus : max_cpus_in_cpuset;
 
 	if (max_cpus == 0)
 		return read_file("/sys/devices/system/cpu/online", buf, size, d);

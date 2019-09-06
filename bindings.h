@@ -82,5 +82,6 @@ extern char *get_cpuset(const char *cg);
 extern bool use_cpuview(const char *cg);
 extern int max_cpu_count(const char *cg);
 extern void do_release_file_info(struct fuse_file_info *fi);
+extern int cpu_number_in_cpuset(const char *cpuset);
 
 #endif /* __LXCFS_BINDINGS_H */
