@@ -3382,6 +3382,8 @@ int read_file(const char *path, char *buf, size_t size, struct file_info *d)
   err:
 	fclose(f);
 	free(line);
+	if (d->size > rv)
+		d->cached = d->size - rv;
 	return rv;
 }
 
