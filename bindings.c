@@ -38,7 +38,8 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
-#include "config.h" // for VERSION
+#include "memory_utils.h"
+#include "config.h"
 
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
@@ -660,6 +661,87 @@ static char *slurp_file(const char *from, int fd)
 		drop_trailing_newlines(contents);
 	free(line);
 	return contents;
+}
+
+static int preserve_ns(const int pid, const char *ns)
+{
+	int ret;
+/* 5 /proc + 21 /int_as_str + 3 /ns + 20 /NS_NAME + 1 \0 */
+#define __NS_PATH_LEN 50
+	char path[__NS_PATH_LEN];
+
+	/* This way we can use this function to also check whether namespaces
+	 * are supported by the kernel by passing in the NULL or the empty
+	 * string.
+	 */
+	ret = snprintf(path, __NS_PATH_LEN, "/proc/%d/ns%s%s", pid,
+		       !ns || strcmp(ns, "") == 0 ? "" : "/",
+		       !ns || strcmp(ns, "") == 0 ? "" : ns);
+	if (ret < 0 || (size_t)ret >= __NS_PATH_LEN) {
+		errno = EFBIG;
+		return -1;
+	}
+
+	return open(path, O_RDONLY | O_CLOEXEC);
+}
+
+/**
+ * in_same_namespace - Check whether two processes are in the same namespace.
+ * @pid1 - PID of the first process.
+ * @pid2 - PID of the second process.
+ * @ns   - Name of the namespace to check. Must correspond to one of the names
+ *         for the namespaces as shown in /proc/<pid/ns/
+ *
+ * If the two processes are not in the same namespace returns an fd to the
+ * namespace of the second process identified by @pid2. If the two processes are
+ * in the same namespace returns -EINVAL, -1 if an error occurred.
+ */
+static int in_same_namespace(pid_t pid1, pid_t pid2, const char *ns)
+{
+	__do_close_prot_errno int ns_fd1 = -1, ns_fd2 = -1;
+	int ret = -1;
+	struct stat ns_st1, ns_st2;
+
+	ns_fd1 = preserve_ns(pid1, ns);
+	if (ns_fd1 < 0) {
+		/* The kernel does not support this namespace. This is not an
+		 * error.
+		 */
+		if (errno == ENOENT)
+			return -EINVAL;
+
+		return -1;
+	}
+
+	ns_fd2 = preserve_ns(pid2, ns);
+	if (ns_fd2 < 0)
+		return -1;
+
+	ret = fstat(ns_fd1, &ns_st1);
+	if (ret < 0)
+		return -1;
+
+	ret = fstat(ns_fd2, &ns_st2);
+	if (ret < 0)
+		return -1;
+
+	/* processes are in the same namespace */
+	if ((ns_st1.st_dev == ns_st2.st_dev) && (ns_st1.st_ino == ns_st2.st_ino))
+		return -EINVAL;
+
+	/* processes are in different namespaces */
+	return move_fd(ns_fd2);
+}
+
+static bool is_shared_pidns(pid_t pid)
+{
+	if (pid != 1)
+		return false;
+
+	if (in_same_namespace(pid, getpid(), "pid") == -EINVAL)
+		return true;
+
+	return false;
 }
 
 static bool write_string(const char *fnam, const char *string, int fd)
@@ -1963,7 +2045,7 @@ int cg_getattr(const char *path, struct stat *sb)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
 	 * Then check that caller's cgroup is under path if last is a child
@@ -2048,7 +2130,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (cgroup) {
 		if (!caller_may_see_dir(initpid, controller, cgroup))
@@ -2108,7 +2190,7 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
@@ -2219,7 +2301,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 	free_key(k);
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
@@ -2297,7 +2379,7 @@ int cg_access(const char *path, int mode)
 	free_key(k);
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
@@ -3188,7 +3270,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		path1 = cgdir;
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, path1, &next)) {
 		if (!next)
@@ -3246,7 +3328,7 @@ int cg_rmdir(const char *path)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
 		if (!last || (next && (strcmp(next, last) == 0)))
@@ -3452,7 +3534,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
@@ -3799,7 +3881,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
@@ -5247,7 +5329,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
@@ -5369,7 +5451,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
@@ -5731,7 +5813,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/loadavg", buf, size, d);
 
 	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpu");
 	if (!cg)
