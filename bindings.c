@@ -738,7 +738,7 @@ static bool is_shared_pidns(pid_t pid)
 	if (pid != 1)
 		return false;
 
-	if (in_same_ns(pid, getpid(), "pid") == -EINVAL)
+	if (in_same_namespace(pid, getpid(), "pid") == -EINVAL)
 		return true;
 
 	return false;
@@ -2045,7 +2045,7 @@ int cg_getattr(const char *path, struct stat *sb)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	/* check that cgcopy is either a child cgroup of cgdir, or listed in its keys.
 	 * Then check that caller's cgroup is under path if last is a child
@@ -2130,7 +2130,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (cgroup) {
 		if (!caller_may_see_dir(initpid, controller, cgroup))
@@ -2190,7 +2190,7 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
@@ -2301,7 +2301,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 	free_key(k);
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
@@ -2379,7 +2379,7 @@ int cg_access(const char *path, int mode)
 	free_key(k);
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_may_see_dir(initpid, controller, path1)) {
 		ret = -ENOENT;
@@ -3270,7 +3270,7 @@ int cg_mkdir(const char *path, mode_t mode)
 		path1 = cgdir;
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, path1, &next)) {
 		if (!next)
@@ -3328,7 +3328,7 @@ int cg_rmdir(const char *path)
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, controller, cgroup, &next)) {
 		if (!last || (next && (strcmp(next, last) == 0)))
@@ -3532,7 +3532,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
@@ -3879,7 +3879,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
@@ -5327,7 +5327,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
@@ -5449,7 +5449,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
@@ -5811,7 +5811,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		return read_file("/proc/loadavg", buf, size, d);
 
 	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0 || is_shared_pidns(initpid))
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpu");
 	if (!cg)
