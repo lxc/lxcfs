@@ -28,6 +28,17 @@ only had access to cgroups underneath it's own cgroups and thus provided
 additional safety. For systems without support for cgroup namespaces `LXCFS`
 will still provide this feature.
 
+## Building
+Build lxcfs as follows:
+
+    yum install fuse fuse-lib fuse-devel
+    git clone git://github.com/lxc/lxcfs
+    cd lxcfs
+    ./bootstrap.sh
+    ./configure
+    make
+    make install
+
 ## Usage
 The recommended command to run lxcfs is:
 

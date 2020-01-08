@@ -969,6 +969,7 @@ static void usage()
 	fprintf(stderr, "  -u no swap \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
+	fprintf(stderr, "lxcfs -v\n");
 	exit(1);
 }
 
@@ -978,6 +979,16 @@ static bool is_help(char *w)
 			strcmp(w, "--help") == 0 ||
 			strcmp(w, "-help") == 0 ||
 			strcmp(w, "help") == 0)
+		return true;
+	return false;
+}
+
+static bool is_version(char *w)
+{
+	if (strcmp(w, "-v") == 0 ||
+			strcmp(w, "--version") == 0 ||
+			strcmp(w, "-version") == 0 ||
+			strcmp(w, "version") == 0)
 		return true;
 	return false;
 }
@@ -1113,10 +1124,11 @@ int main(int argc, char *argv[])
 	if (swallow_option(&argc, argv, "-p", &v))
 		pidfile = v;
 
-	if (argc == 2  && strcmp(argv[1], "--version") == 0) {
+	if (argc == 2  && is_version(argv[1])) {
 		fprintf(stderr, "%s\n", VERSION);
 		exit(EXIT_SUCCESS);
 	}
+
 	if (argc != 2 || is_help(argv[1]))
 		usage();
 
