@@ -63,6 +63,28 @@ struct cpuacct_usage {
 	bool online;
 };
 
+struct memory_stat {
+	unsigned long long hierarchical_memory_limit;
+	unsigned long long hierarchical_memsw_limit;
+	unsigned long long total_cache;
+	unsigned long long total_rss;
+	unsigned long long total_rss_huge;
+	unsigned long long total_shmem;
+	unsigned long long total_mapped_file;
+	unsigned long long total_dirty;
+	unsigned long long total_writeback;
+	unsigned long long total_swap;
+	unsigned long long total_pgpgin;
+	unsigned long long total_pgpgout;
+	unsigned long long total_pgfault;
+	unsigned long long total_pgmajfault;
+	unsigned long long total_inactive_anon;                                                                                     
+	unsigned long long total_active_anon;
+	unsigned long long total_inactive_file;
+	unsigned long long total_active_file;
+	unsigned long long total_unevictable;
+};
+
 /* The function of hash table.*/
 #define LOAD_SIZE 100 /*the size of hash_table */
 #define FLUSH_TIME 5  /*the flush rate */
@@ -1229,6 +1251,82 @@ void free_keys(struct cgfs_files **keys)
 		free_key(keys[i]);
 	}
 	free(keys);
+}
+
+bool cgfs_get_mstat(const char *controller, const char *cgroup,
+                     const char *file, struct memory_stat *mstat)
+{
+	int ret, fd, cfd;
+	size_t len = 0;
+	char *fnam, *tmpc;
+
+	tmpc = find_mounted_controller(controller, &cfd);
+	if (!tmpc)
+		return false;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	fd = openat(cfd, fnam, O_RDONLY);
+	if (fd < 0)
+		return false;
+
+	FILE *f = fdopen(fd, "r");
+	len = 0;
+	char *line = NULL;
+	ssize_t linelen;
+
+	if (!f)
+		return NULL;
+
+	while ((linelen = getline(&line, &len, f)) != -1) {
+        if (strncmp(line, "hierarchical_memory_limit", 25) == 0) {
+            sscanf(line, "hierarchical_memory_limit %llu", &(mstat->hierarchical_memory_limit));
+        } else if (strncmp(line, "hierarchical_memsw_limit", 24) == 0) {
+            sscanf(line, "hierarchical_memsw_limit %llu", &(mstat->hierarchical_memsw_limit));
+        } else if (strncmp(line, "total_cache", 11) == 0) {
+            sscanf(line, "total_cache %llu", &(mstat->total_cache));
+        } else if (strncmp(line, "total_rss", 9) == 0) {
+            sscanf(line, "total_rss %llu", &(mstat->total_rss));
+        } else if (strncmp(line, "total_rss_huge", 14) == 0) {
+            sscanf(line, "total_rss_huge %llu", &(mstat->total_rss_huge));
+        } else if (strncmp(line, "total_shmem", 11) == 0) {
+            sscanf(line, "total_shmem %llu", &(mstat->total_shmem));
+        } else if (strncmp(line, "total_mapped_file", 17) == 0) {
+            sscanf(line, "total_mapped_file %llu", &(mstat->total_mapped_file));
+        } else if (strncmp(line, "total_dirty", 11) == 0) {
+            sscanf(line, "total_dirty %llu", &(mstat->total_dirty));
+        } else if (strncmp(line, "total_writeback", 15) == 0) {
+            sscanf(line, "total_writeback %llu", &(mstat->total_writeback));
+        } else if (strncmp(line, "total_swap", 10) == 0) {
+            sscanf(line, "total_swap %llu", &(mstat->total_swap));
+        } else if (strncmp(line, "total_pgpgin", 12) == 0) {
+            sscanf(line, "total_pgpgin %llu", &(mstat->total_pgpgin));
+        } else if (strncmp(line, "total_pgpgout", 13) == 0) {
+            sscanf(line, "total_pgpgout %llu", &(mstat->total_pgpgout));
+        } else if (strncmp(line, "total_pgfault", 13) == 0) {
+            sscanf(line, "total_pgfault %llu", &(mstat->total_pgfault));
+        } else if (strncmp(line, "total_pgmajfault", 16) == 0) {
+            sscanf(line, "total_pgmajfault %llu", &(mstat->total_pgmajfault));
+        } else if (strncmp(line, "total_inactive_anon", 19) == 0) {
+            sscanf(line, "total_inactive_anon %llu", &(mstat->total_inactive_anon));
+        } else if (strncmp(line, "total_active_anon", 17) == 0) {
+            sscanf(line, "total_active_anon %llu", &(mstat->total_active_anon));
+        } else if (strncmp(line, "total_inactive_file", 19) == 0) {
+            sscanf(line, "total_inactive_file %llu", &(mstat->total_inactive_file));
+        } else if (strncmp(line, "total_active_file", 17) == 0) {
+            sscanf(line, "total_active_file %llu", &(mstat->total_active_file));
+        } else if (strncmp(line, "total_unevictable", 17) == 0) {
+            sscanf(line, "total_unevictable %llu", &(mstat->total_unevictable));
+        }
+	}
+    return true;
 }
 
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
@@ -3367,43 +3465,6 @@ static bool startswith(const char *line, const char *pref)
 	return false;
 }
 
-static void parse_memstat(char *memstat, unsigned long *cached,
-		unsigned long *active_anon, unsigned long *inactive_anon,
-		unsigned long *active_file, unsigned long *inactive_file,
-		unsigned long *unevictable, unsigned long *shmem)
-{
-	char *eol;
-
-	while (*memstat) {
-		if (startswith(memstat, "total_cache")) {
-			sscanf(memstat + 11, "%lu", cached);
-			*cached /= 1024;
-		} else if (startswith(memstat, "total_active_anon")) {
-			sscanf(memstat + 17, "%lu", active_anon);
-			*active_anon /= 1024;
-		} else if (startswith(memstat, "total_inactive_anon")) {
-			sscanf(memstat + 19, "%lu", inactive_anon);
-			*inactive_anon /= 1024;
-		} else if (startswith(memstat, "total_active_file")) {
-			sscanf(memstat + 17, "%lu", active_file);
-			*active_file /= 1024;
-		} else if (startswith(memstat, "total_inactive_file")) {
-			sscanf(memstat + 19, "%lu", inactive_file);
-			*inactive_file /= 1024;
-		} else if (startswith(memstat, "total_unevictable")) {
-			sscanf(memstat + 17, "%lu", unevictable);
-			*unevictable /= 1024;
-		} else if (startswith(memstat, "total_shmem")) {
-			sscanf(memstat + 11, "%lu", shmem);
-			*shmem /= 1024;
-		}
-		eol = strchr(memstat, '\n');
-		if (!eol)
-			return;
-		memstat = eol+1;
-	}
-}
-
 static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *iotype, unsigned long *v)
 {
 	char *eol;
@@ -3512,10 +3573,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	char *cg;
 	char *memusage_str = NULL, *memstat_str = NULL,
 		*memswlimit_str = NULL, *memswusage_str = NULL;
-	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		cached = 0, hosttotal = 0, active_anon = 0, inactive_anon = 0,
-		active_file = 0, inactive_file = 0, unevictable = 0, shmem = 0,
-		hostswtotal = 0;
+	unsigned long long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
+		hosttotal=0;
+	struct memory_stat *mstat = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *cache = d->buf;
@@ -3544,7 +3604,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
 	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
-	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
+
+	mstat = malloc(sizeof(struct memory_stat));
+	if (!cgfs_get_mstat("memory", cg, "memory.stat", mstat))
 		goto err;
 
 	// Following values are allowed to fail, because swapaccount might be turned
@@ -3563,10 +3625,6 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit /= 1024;
 	memusage /= 1024;
 
-	parse_memstat(memstat_str, &cached, &active_anon,
-			&inactive_anon, &active_file, &inactive_file,
-			&unevictable, &shmem);
-
 	f = fopen("/proc/meminfo", "r");
 	if (!f)
 		goto err;
@@ -3577,84 +3635,112 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 		memset(lbuf, 0, 100);
 		if (startswith(line, "MemTotal:")) {
-			sscanf(line+sizeof("MemTotal:")-1, "%lu", &hosttotal);
+			sscanf(line+sizeof("MemTotal:")-1, "%llu", &hosttotal);
 			if (hosttotal < memlimit)
 				memlimit = hosttotal;
-			snprintf(lbuf, 100, "MemTotal:       %8lu kB\n", memlimit);
+			snprintf(lbuf, 100, "MemTotal:       %8llu kB\n", memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "MemFree:")) {
-			snprintf(lbuf, 100, "MemFree:        %8lu kB\n", memlimit - memusage);
+			snprintf(lbuf, 100, "MemFree:        %8llu kB\n", memlimit - memusage);
 			printme = lbuf;
 		} else if (startswith(line, "MemAvailable:")) {
-			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage + cached);
+			snprintf(lbuf, 100, "MemAvailable:   %8llu kB\n", memlimit - memusage +
+								   	(mstat->total_cache)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
-			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
-			if (hostswtotal < memswlimit)
-				memswlimit = hostswtotal;
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit);
+			memswlimit -= memlimit;
+			snprintf(lbuf, 100, "SwapTotal:      %8llu kB\n", memswlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapTotal:      %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0 && opts && opts->swap_off == false) {
-			unsigned long swaptotal = memswlimit,
+			unsigned long long swaptotal = memswlimit,
 					swapusage = memusage > memswusage ? 0 : memswusage - memusage,
 					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
+			snprintf(lbuf, 100, "SwapFree:       %8llu kB\n", swapfree);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && opts && opts->swap_off == true) {
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapFree:       %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
-			snprintf(lbuf, 100, "Slab:        %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "Slab:           %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "Buffers:")) {
-			snprintf(lbuf, 100, "Buffers:        %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "Buffers:        %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "Cached:")) {
-			snprintf(lbuf, 100, "Cached:         %8lu kB\n", cached);
+			snprintf(lbuf, 100, "Cached:         %8llu kB\n",
+                                    (mstat->total_cache)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapCached:")) {
-			snprintf(lbuf, 100, "SwapCached:     %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapCached:     %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "Active:")) {
-			snprintf(lbuf, 100, "Active:         %8lu kB\n",
-					active_anon + active_file);
+			snprintf(lbuf, 100, "Active:         %8llu kB\n",
+					(mstat->total_active_anon + mstat->total_active_file)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive:")) {
-			snprintf(lbuf, 100, "Inactive:       %8lu kB\n",
-					inactive_anon + inactive_file);
+			snprintf(lbuf, 100, "Inactive:       %8llu kB\n",
+					(mstat->total_inactive_anon + mstat->total_inactive_file)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Active(anon)")) {
-			snprintf(lbuf, 100, "Active(anon):   %8lu kB\n", active_anon);
+			snprintf(lbuf, 100, "Active(anon):   %8llu kB\n", 
+                                    (mstat->total_active_anon)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive(anon)")) {
-			snprintf(lbuf, 100, "Inactive(anon): %8lu kB\n", inactive_anon);
+			snprintf(lbuf, 100, "Inactive(anon): %8llu kB\n",
+                                    (mstat->total_inactive_anon)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Active(file)")) {
-			snprintf(lbuf, 100, "Active(file):   %8lu kB\n", active_file);
+			snprintf(lbuf, 100, "Active(file):   %8llu kB\n",
+                                    (mstat->total_active_file)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive(file)")) {
-			snprintf(lbuf, 100, "Inactive(file): %8lu kB\n", inactive_file);
+			snprintf(lbuf, 100, "Inactive(file): %8llu kB\n",
+                                    (mstat->total_inactive_file)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "Unevictable")) {
-			snprintf(lbuf, 100, "Unevictable:    %8lu kB\n", unevictable);
+			snprintf(lbuf, 100, "Unevictable:    %8llu kB\n",
+                                    (mstat->total_unevictable)/1024);
+			printme = lbuf;
+		} else if (startswith(line, "Dirty")) {
+			snprintf(lbuf, 100, "Dirty:          %8llu kB\n",
+                                    (mstat->total_dirty)/1024);
+			printme = lbuf;
+		} else if (startswith(line, "Writeback")) {
+			snprintf(lbuf, 100, "Writeback:      %8llu kB\n",
+                                    (mstat->total_writeback)/1024);
+			printme = lbuf;
+		} else if (startswith(line, "AnonPages")) {
+			snprintf(lbuf, 100, "AnonPages:      %8llu kB\n",
+                                    (mstat->total_active_anon
+                                     + mstat->total_inactive_anon
+                                     - mstat->total_shmem)/1024);
+			printme = lbuf;
+		} else if (startswith(line, "Mapped")) {
+			snprintf(lbuf, 100, "Mapped:         %8llu kB\n",
+                                    (mstat->total_mapped_file)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "SReclaimable")) {
-			snprintf(lbuf, 100, "SReclaimable:   %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SReclaimable:   %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "SUnreclaim")) {
-			snprintf(lbuf, 100, "SUnreclaim:     %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SUnreclaim:     %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "Shmem:")) {
-			snprintf(lbuf, 100, "Shmem:          %8lu kB\n", shmem);
+			snprintf(lbuf, 100, "Shmem:          %8llu kB\n",
+                                    (mstat->total_shmem)/1024);
 			printme = lbuf;
 		} else if (startswith(line, "ShmemHugePages")) {
-			snprintf(lbuf, 100, "ShmemHugePages: %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "ShmemHugePages: %8llu kB\n", 0ULL);
 			printme = lbuf;
 		} else if (startswith(line, "ShmemPmdMapped")) {
-			snprintf(lbuf, 100, "ShmemPmdMapped: %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "ShmemPmdMapped: %8llu kB\n", 0ULL);
+			printme = lbuf;
+		} else if (startswith(line, "AnonHugePages")) {
+			snprintf(lbuf, 100, "AnonHugePages:  %8llu kB\n",
+                                    (mstat->total_rss_huge)/1024);
 			printme = lbuf;
 		} else
 			printme = line;
@@ -3692,6 +3778,7 @@ err:
 	free(memswlimit_str);
 	free(memswusage_str);
 	free(memstat_str);
+	free(mstat);
 	return rv;
 }
 
@@ -5698,12 +5785,15 @@ static int refresh_load(struct load_node *p, char *path)
 			if (f != NULL) {
 				while (getline(&line, &linelen, f) != -1) {
 					/* Find State */
-					if ((line[0] == 'S') && (line[1] == 't'))
-						break;
+					if (strncmp(line, "State", 5) == 0) {
+					    if (strncmp(line, "State R", 7) == 0 ||
+                                     strncmp(line, "State D", 7) == 0) {
+				            run_pid++;
+                        }
+                        break;
+                    }
 				}
-			if ((line[7] == 'R') || (line[7] == 'D'))
-				run_pid++;
-			fclose(f);
+			    fclose(f);
 			}
 		}
 		closedir(dp);
