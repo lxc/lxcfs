@@ -3599,7 +3599,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0 && opts && opts->swap_off == false) {
 			unsigned long swaptotal = memswlimit,
-					swapusage = memswusage - memusage,
+					swapusage = memusage > memswusage ? 0 : memswusage - memusage,
 					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
 			printme = lbuf;
