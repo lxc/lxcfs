@@ -13,6 +13,10 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c bindings.h \
+		      cgroups/cgfsng.c \
+		      cgroups/cgroup.c cgroups/cgroup.h \
+		      cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
+		      cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 		      cpuset.c \
 		      memory_utils.h \
 		      sysfs_fuse.c sysfs_fuse.h
@@ -20,13 +24,17 @@ liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 liblxcfstest_la_SOURCES = bindings.c bindings.h \
+			  cgroups/cgfsng.c \
+			  cgroups/cgroup.c cgroups/cgroup.h \
+			  cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
+			  cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 			  cpuset.c \
 			  memory_utils.h \
 			  sysfs_fuse.c sysfs_fuse.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h macro.h memory_utils.h sysfs_fuse.h
+noinst_HEADERS = bindings.h cgroups/cgroup.h cgroups/cgroup2_devices.h cgroups/cgroup_utils.h macro.h memory_utils.h sysfs_fuse.h
 
 sodir=$(libdir)
 lxcfs_LTLIBRARIES = liblxcfs.la

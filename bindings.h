@@ -75,8 +75,8 @@ extern int stop_load_daemon(pthread_t pid);
 
 extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern char *get_pid_cgroup(pid_t pid, const char *contrl);
-extern int read_file(const char *path, char *buf, size_t size,
-		     struct file_info *d);
+extern int read_file_fuse(const char *path, char *buf, size_t size,
+			  struct file_info *d);
 extern void prune_init_slice(char *cg);
 extern char *get_cpuset(const char *cg);
 extern bool use_cpuview(const char *cg);

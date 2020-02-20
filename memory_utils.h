@@ -67,4 +67,6 @@ static inline void __auto_close__(int *fd)
 		__internal_fd__;            \
 	})
 
+#define zalloc(__size__) (calloc(1, __size__))
+
 #endif /* __LXCFS_MEMORY_UTILS_H */

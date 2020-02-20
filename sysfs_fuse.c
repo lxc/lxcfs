@@ -65,7 +65,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
-		return read_file("/sys/devices/system/cpu/online", buf, size, d);
+		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
 	prune_init_slice(cg);
 
 	cpuset = get_cpuset(cg);
@@ -78,7 +78,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		max_cpus = max_cpu_count(cg);
 
 	if (max_cpus == 0)
-		return read_file("/sys/devices/system/cpu/online", buf, size, d);
+		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
 	if (max_cpus > 1)
 		total_len = snprintf(d->buf, d->buflen, "0-%d\n", max_cpus - 1);
 	else
