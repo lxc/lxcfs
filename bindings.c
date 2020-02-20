@@ -38,6 +38,8 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
+#include "cgroups/cgroup.h"
+#include "cgroups/cgroup_utils.h"
 #include "memory_utils.h"
 #include "config.h"
 
@@ -410,25 +412,8 @@ static void lock_mutex(pthread_mutex_t *l)
 	}
 }
 
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Number of hierarchies mounted. */
-static int num_hierarchies;
+static struct cgroup_ops *cgroup_ops;
 
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Hierachies mounted {cpuset, blkio, ...}:
- * Initialized via __constructor__ collect_and_mount_subsystems(). */
-static char **hierarchies;
-
-/* READ-ONLY after __constructor__ collect_and_mount_subsystems() has run.
- * Open file descriptors:
- * @fd_hierarchies[i] refers to cgroup @hierarchies[i]. They are mounted in a
- * private mount namespace.
- * Initialized via __constructor__ collect_and_mount_subsystems().
- * @fd_hierarchies[i] can be used to perform file operations on the cgroup
- * mounts and respective files in the private namespace even when located in
- * another namespace using the *at() family of functions
- * {openat(), fchownat(), ...}. */
-static int *fd_hierarchies;
 static int cgroup_mount_ns_fd = -1;
 
 static void unlock_mutex(pthread_mutex_t *l)
@@ -599,70 +584,6 @@ static int is_dir(const char *path, int fd)
 	return 0;
 }
 
-static char *must_copy_string(const char *str)
-{
-	char *dup = NULL;
-	if (!str)
-		return NULL;
-	do {
-		dup = strdup(str);
-	} while (!dup);
-
-	return dup;
-}
-
-static inline void drop_trailing_newlines(char *s)
-{
-	int l;
-
-	for (l=strlen(s); l>0 && s[l-1] == '\n'; l--)
-		s[l-1] = '\0';
-}
-
-#define BATCH_SIZE 50
-static void dorealloc(char **mem, size_t oldlen, size_t newlen)
-{
-	int newbatches = (newlen / BATCH_SIZE) + 1;
-	int oldbatches = (oldlen / BATCH_SIZE) + 1;
-
-	if (!*mem || newbatches > oldbatches) {
-		char *tmp;
-		do {
-			tmp = realloc(*mem, newbatches * BATCH_SIZE);
-		} while (!tmp);
-		*mem = tmp;
-	}
-}
-static void append_line(char **contents, size_t *len, char *line, ssize_t linelen)
-{
-	size_t newlen = *len + linelen;
-	dorealloc(contents, *len, newlen + 1);
-	memcpy(*contents + *len, line, linelen+1);
-	*len = newlen;
-}
-
-static char *slurp_file(const char *from, int fd)
-{
-	char *line = NULL;
-	char *contents = NULL;
-	FILE *f = fdopen(fd, "r");
-	size_t len = 0, fulllen = 0;
-	ssize_t linelen;
-
-	if (!f)
-		return NULL;
-
-	while ((linelen = getline(&line, &len, f)) != -1) {
-		append_line(&contents, &fulllen, line, linelen);
-	}
-	fclose(f);
-
-	if (contents)
-		drop_trailing_newlines(contents);
-	free(line);
-	return contents;
-}
-
 static int preserve_ns(const int pid, const char *ns)
 {
 	int ret;
@@ -776,54 +697,16 @@ struct cgfs_files {
 	uint32_t mode;
 };
 
-#define ALLOC_NUM 20
-static bool store_hierarchy(char *stridx, char *h)
-{
-	if (num_hierarchies % ALLOC_NUM == 0) {
-		size_t n = (num_hierarchies / ALLOC_NUM) + 1;
-		n *= ALLOC_NUM;
-		char **tmp = realloc(hierarchies, n * sizeof(char *));
-		if (!tmp) {
-			lxcfs_error("%s\n", strerror(errno));
-			exit(1);
-		}
-		hierarchies = tmp;
-	}
-
-	hierarchies[num_hierarchies++] = must_copy_string(h);
-	return true;
-}
-
 static void print_subsystems(void)
 {
-	int i;
+	int i = 0;
 
 	fprintf(stderr, "mount namespace: %d\n", cgroup_mount_ns_fd);
 	fprintf(stderr, "hierarchies:\n");
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i])
-			fprintf(stderr, " %2d: fd: %3d: %s\n", i,
-				fd_hierarchies[i], hierarchies[i]);
+	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
+		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
+		fprintf(stderr, " %2d: fd: %3d: %s\n", i, (*h)->fd, controllers ?: "");
 	}
-}
-
-static bool in_comma_list(const char *needle, const char *haystack)
-{
-	const char *s = haystack, *e;
-	size_t nlen = strlen(needle);
-
-	while (*s && (e = strchr(s, ','))) {
-		if (nlen != e - s) {
-			s = e + 1;
-			continue;
-		}
-		if (strncmp(needle, s, nlen) == 0)
-			return true;
-		s = e + 1;
-	}
-	if (strcmp(needle, s) == 0)
-		return true;
-	return false;
 }
 
 /* do we need to do any massaging here?  I'm not sure... */
@@ -831,24 +714,12 @@ static bool in_comma_list(const char *needle, const char *haystack)
  * referring to the controller mountpoint in the private lxcfs namespace in
  * @cfd.
  */
-static char *find_mounted_controller(const char *controller, int *cfd)
+static int find_mounted_controller(const char *controller)
 {
-	int i;
+	struct hierarchy *h;
 
-	for (i = 0; i < num_hierarchies; i++) {
-		if (!hierarchies[i])
-			continue;
-		if (strcmp(hierarchies[i], controller) == 0) {
-			*cfd = fd_hierarchies[i];
-			return hierarchies[i];
-		}
-		if (in_comma_list(controller, hierarchies[i])) {
-			*cfd = fd_hierarchies[i];
-			return hierarchies[i];
-		}
-	}
-
-	return NULL;
+	h = cgroup_ops->get_hierarchy(cgroup_ops, controller);
+	return h ? h->fd : -EBADF;
 }
 
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
@@ -856,10 +727,10 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 {
 	int ret, fd, cfd;
 	size_t len;
-	char *fnam, *tmpc;
+	char *fnam;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -922,10 +793,10 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
 	int cfd;
 	size_t len;
-	char *dirnam, *tmpc;
+	char *dirnam;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return -EINVAL;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1012,11 +883,11 @@ bool cgfs_remove(const char *controller, const char *cg)
 {
 	int fd, cfd;
 	size_t len;
-	char *dirnam, *tmpc;
+	char *dirnam;
 	bool bret;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1039,10 +910,10 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
 	int cfd;
 	size_t len;
-	char *pathname, *tmpc;
+	char *pathname;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1076,11 +947,11 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 {
 	int cfd;
 	size_t len;
-	char *pathname, *tmpc;
+	char *pathname;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
-		return -EINVAL;
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
+		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
 	 * . + /file + \0
@@ -1102,11 +973,11 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 {
 	int fd, cfd;
 	size_t len;
-	char *pathname, *tmpc;
+	char *pathname;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
-		return NULL;
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
+		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
 	 * . + /cgroup + / "cgroup.procs" + \0
@@ -1128,15 +999,15 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 {
 	int cfd, fd, ret;
 	size_t len;
-	char *cg, *tmpc;
+	char *cg;
 	char pathname[MAXPATHLEN];
 	size_t sz = 0, asz = 0;
 	struct dirent *dirent;
 	DIR *dir;
 
-	tmpc = find_mounted_controller(controller, &cfd);
+	cfd = find_mounted_controller(controller);
 	*list = NULL;
-	if (!tmpc)
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions. */
@@ -1233,12 +1104,12 @@ void free_keys(struct cgfs_files **keys)
 
 bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
 {
-	int ret, fd, cfd;
+	int ret, cfd;
 	size_t len;
-	char *fnam, *tmpc;
+	char *fnam;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1250,11 +1121,7 @@ bool cgfs_get_value(const char *controller, const char *cgroup, const char *file
 	if (ret < 0 || (size_t)ret >= len)
 		return false;
 
-	fd = openat(cfd, fnam, O_RDONLY);
-	if (fd < 0)
-		return false;
-
-	*value = slurp_file(fnam, fd);
+	*value = readat_file(cfd, fnam);
 	return *value != NULL;
 }
 
@@ -1262,10 +1129,10 @@ bool cgfs_param_exist(const char *controller, const char *cgroup, const char *fi
 {
 	int ret, cfd;
 	size_t len;
-	char *fnam, *tmpc;
+	char *fnam;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1284,12 +1151,12 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 {
 	int ret, cfd;
 	size_t len;
-	char *fnam, *tmpc;
+	char *fnam;
 	struct stat sb;
 	struct cgfs_files *newkey;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	if (file && *file == '/')
@@ -1347,12 +1214,12 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 {
 	int cfd;
 	size_t len;
-	char *fnam, *tmpc;
+	char *fnam;
 	int ret;
 	struct stat sb;
 
-	tmpc = find_mounted_controller(controller, &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller(controller);
+	if (cfd < 0)
 		return false;
 
 	/* Make sure we pass a relative path to *at() family of functions.
@@ -1707,58 +1574,18 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 	return start;
 }
 
-static void stripnewline(char *x)
-{
-	size_t l = strlen(x);
-	if (l && x[l-1] == '\n')
-		x[l-1] = '\0';
-}
-
 char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
 	int cfd;
-	char fnam[PROCLEN];
-	FILE *f;
-	char *answer = NULL;
-	char *line = NULL;
-	size_t len = 0;
-	int ret;
-	const char *h = find_mounted_controller(contrl, &cfd);
-	if (!h)
-		return NULL;
 
-	ret = snprintf(fnam, PROCLEN, "/proc/%d/cgroup", pid);
-	if (ret < 0 || ret >= PROCLEN)
-		return NULL;
-	if (!(f = fopen(fnam, "r")))
-		return NULL;
+	cfd = find_mounted_controller(contrl);
+	if (cfd < 0)
+		return false;
 
-	while (getline(&line, &len, f) != -1) {
-		char *c1, *c2;
-		if (!line[0])
-			continue;
-		c1 = strchr(line, ':');
-		if (!c1)
-			goto out;
-		c1++;
-		c2 = strchr(c1, ':');
-		if (!c2)
-			goto out;
-		*c2 = '\0';
-		if (strcmp(c1, h) != 0)
-			continue;
-		c2++;
-		stripnewline(c2);
-		do {
-			answer = strdup(c2);
-		} while (!answer);
-		break;
-	}
+	if (pure_unified_layout(cgroup_ops))
+		return cg_unified_get_current_cgroup(pid);
 
-out:
-	fclose(f);
-	free(line);
-	return answer;
+	return cg_legacy_get_current_cgroup(pid, contrl);
 }
 
 /*
@@ -1939,10 +1766,9 @@ static char *pick_controller_from_path(struct fuse_context *fc, const char *path
 	if (slash)
 		*slash = '\0';
 
-	int i;
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i] && strcmp(hierarchies[i], contr) == 0)
-			return hierarchies[i];
+	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++) {
+		if ((*h)->__controllers && strcmp((*h)->__controllers, contr) == 0)
+			return (*h)->__controllers;
 	}
 	errno = ENOENT;
 	return NULL;
@@ -2005,7 +1831,7 @@ int cg_getattr(const char *path, struct stat *sb)
 	int ret = -ENOENT;
 
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	memset(sb, 0, sizeof(struct stat));
@@ -2110,7 +1936,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 	struct file_info *dir_info;
 	char *controller = NULL;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0) {
@@ -2164,6 +1990,9 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 	struct fuse_context *fc = fuse_get_context();
 	char **clist = NULL;
 
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+		return -EIO;
+
 	if (filler(buf, ".", NULL, 0) != 0 || filler(buf, "..", NULL, 0) != 0)
 		return -EIO;
 
@@ -2172,14 +2001,18 @@ int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 		return -EIO;
 	}
 	if (!d->cgroup && !d->controller) {
-		// ls /var/lib/lxcfs/cgroup - just show list of controllers
-		int i;
+		/*
+		 * ls /var/lib/lxcfs/cgroup - just show list of controllers.
+		 * This only works with the legacy hierarchy.
+		 */
+		for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++) {
+			if (is_unified_hierarchy(*h))
+				continue;
 
-		for (i = 0;  i < num_hierarchies; i++) {
-			if (hierarchies[i] && filler(buf, hierarchies[i], NULL, 0) != 0) {
+			if ((*h)->__controllers && filler(buf, (*h)->__controllers, NULL, 0))
 				return -EIO;
-			}
 		}
+
 		return 0;
 	}
 
@@ -2274,7 +2107,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 	struct fuse_context *fc = fuse_get_context();
 	int ret;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
@@ -2342,11 +2175,11 @@ int cg_access(const char *path, int mode)
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
 
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+		return -EIO;
+
 	if (strcmp(path, "/cgroup") == 0)
 		return 0;
-
-	if (!fc)
-		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
 	if (!controller)
@@ -2758,6 +2591,9 @@ int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	int ret, s;
 	bool r;
 
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+		return -EIO;
+
 	if (f->type != LXC_TYPE_CGFILE) {
 		lxcfs_error("%s\n", "Internal error: directory cache info used in cg_read.");
 		return -EIO;
@@ -2765,9 +2601,6 @@ int cg_read(const char *path, char *buf, size_t size, off_t offset,
 
 	if (offset)
 		return 0;
-
-	if (!fc)
-		return -EIO;
 
 	if (!f->controller)
 		return -EINVAL;
@@ -3068,6 +2901,9 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	struct file_info *f = (struct file_info *)fi->fh;
 	bool r;
 
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+		return -EIO;
+
 	if (f->type != LXC_TYPE_CGFILE) {
 		lxcfs_error("%s\n", "Internal error: directory cache info used in cg_write.");
 		return -EIO;
@@ -3075,9 +2911,6 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 
 	if (offset)
 		return 0;
-
-	if (!fc)
-		return -EIO;
 
 	localbuf = alloca(size+1);
 	localbuf[size] = '\0';
@@ -3118,7 +2951,7 @@ int cg_chown(const char *path, uid_t uid, gid_t gid)
 	const char *cgroup;
 	int ret;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
@@ -3184,7 +3017,7 @@ int cg_chmod(const char *path, mode_t mode)
 	const char *cgroup;
 	int ret;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	if (strcmp(path, "/cgroup") == 0)
@@ -3252,7 +3085,7 @@ int cg_mkdir(const char *path, mode_t mode)
 	const char *cgroup;
 	int ret;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
@@ -3306,7 +3139,7 @@ int cg_rmdir(const char *path)
 	const char *cgroup;
 	int ret;
 
-	if (!fc)
+	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
 	controller = pick_controller_from_path(fc, path);
@@ -3427,7 +3260,7 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *
 	}
 }
 
-int read_file(const char *path, char *buf, size_t size, struct file_info *d)
+int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d)
 {
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *line = NULL;
@@ -3538,7 +3371,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
-		return read_file("/proc/meminfo", buf, size, d);
+		return read_file_fuse("/proc/meminfo", buf, size, d);
 	prune_init_slice(cg);
 
 	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
@@ -3828,14 +3661,13 @@ static double exact_cpu_count(const char *cg)
 bool use_cpuview(const char *cg)
 {
 	int cfd;
-	char *tmpc;
 
-	tmpc = find_mounted_controller("cpu", &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller("cpu");
+	if (cfd < 0)
 		return false;
 
-	tmpc = find_mounted_controller("cpuacct", &cfd);
-	if (!tmpc)
+	cfd = find_mounted_controller("cpuacct");
+	if (cfd < 0)
 		return false;
 
 	return true;
@@ -3885,7 +3717,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
-		return read_file("proc/cpuinfo", buf, size, d);
+		return read_file_fuse("proc/cpuinfo", buf, size, d);
 	prune_init_slice(cg);
 
 	cpuset = get_cpuset(cg);
@@ -4988,13 +4820,13 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
 	 */
 	if (initpid == 1) {
-	    return read_file("/proc/stat", buf, size, d);
+	    return read_file_fuse("/proc/stat", buf, size, d);
 	}
 
 	cg = get_pid_cgroup(initpid, "cpuset");
 	lxcfs_v("cg: %s\n", cg);
 	if (!cg)
-		return read_file("/proc/stat", buf, size, d);
+		return read_file_fuse("/proc/stat", buf, size, d);
 	prune_init_slice(cg);
 
 	cpuset = get_cpuset(cg);
@@ -5333,7 +5165,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
-		return read_file("/proc/diskstats", buf, size, d);
+		return read_file_fuse("/proc/diskstats", buf, size, d);
 	prune_init_slice(cg);
 
 	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
@@ -5455,7 +5287,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
-		return read_file("/proc/swaps", buf, size, d);
+		return read_file_fuse("/proc/swaps", buf, size, d);
 	prune_init_slice(cg);
 
 	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
@@ -5810,14 +5642,14 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 	if (!loadavg)
-		return read_file("/proc/loadavg", buf, size, d);
+		return read_file_fuse("/proc/loadavg", buf, size, d);
 
 	initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 	cg = get_pid_cgroup(initpid, "cpu");
 	if (!cg)
-		return read_file("/proc/loadavg", buf, size, d);
+		return read_file_fuse("/proc/loadavg", buf, size, d);
 
 	prune_init_slice(cg);
 	hash = calc_hash(cg) % LOAD_SIZE;
@@ -5825,7 +5657,8 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 
 	/* First time */
 	if (n == NULL) {
-		if (!find_mounted_controller("cpu", &cfd)) {
+		cfd = find_mounted_controller("cpu");
+		if (cfd >= 0) {
 			/*
 			 * In locate_node() above, pthread_rwlock_unlock() isn't used
 			 * because delete is not allowed before read has ended.
@@ -6068,30 +5901,6 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 /*
  * Functions needed to setup cgroups in the __constructor__.
  */
-
-static bool mkdir_p(const char *dir, mode_t mode)
-{
-	const char *tmp = dir;
-	const char *orig = dir;
-	char *makeme;
-
-	do {
-		dir = tmp + strspn(tmp, "/");
-		tmp = dir + strcspn(dir, "/");
-		makeme = strndup(orig, dir - orig);
-		if (!makeme)
-			return false;
-		if (mkdir(makeme, mode) && errno != EEXIST) {
-			lxcfs_error("Failed to create directory '%s': %s.\n",
-				makeme, strerror(errno));
-			free(makeme);
-			return false;
-		}
-		free(makeme);
-	} while(tmp != dir);
-
-	return true;
-}
 
 static bool umount_if_mounted(void)
 {
@@ -6345,45 +6154,19 @@ static bool cgfs_prepare_mounts(void)
 
 static bool cgfs_mount_hierarchies(void)
 {
-	char *target;
-	size_t clen, len;
-	int i, ret;
+	if (!mkdir_p(BASEDIR DEFAULT_CGROUP_MOUNTPOINT, 0755))
+		return false;
 
-	for (i = 0; i < num_hierarchies; i++) {
-		char *controller = hierarchies[i];
+	if (!cgroup_ops->mount(cgroup_ops, BASEDIR))
+		return false;
 
-		clen = strlen(controller);
-		len = strlen(BASEDIR) + clen + 2;
-		target = malloc(len);
-		if (!target)
+	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++) {
+		__do_free char *path = must_make_path(BASEDIR, (*h)->mountpoint, NULL);
+		(*h)->fd = open(path, O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+		if ((*h)->fd < 0)
 			return false;
-
-		ret = snprintf(target, len, "%s/%s", BASEDIR, controller);
-		if (ret < 0 || ret >= len) {
-			free(target);
-			return false;
-		}
-		if (mkdir(target, 0755) < 0 && errno != EEXIST) {
-			free(target);
-			return false;
-		}
-		if (!strcmp(controller, "unified"))
-			ret = mount("none", target, "cgroup2", 0, NULL);
-		else
-			ret = mount(controller, target, "cgroup", 0, controller);
-		if (ret < 0) {
-			lxcfs_error("Failed mounting cgroup %s: %s\n", controller, strerror(errno));
-			free(target);
-			return false;
-		}
-
-		fd_hierarchies[i] = open(target, O_DIRECTORY);
-		if (fd_hierarchies[i] < 0) {
-			free(target);
-			return false;
-		}
-		free(target);
 	}
+
 	return true;
 }
 
@@ -6405,45 +6188,13 @@ static bool cgfs_setup_controllers(void)
 
 static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 {
-	FILE *f;
-	char *cret, *line = NULL;
+	char *cret;
 	char cwd[MAXPATHLEN];
-	size_t len = 0;
-	int i, init_ns = -1;
-	bool found_unified = false;
+	int init_ns = -1;
 
-	if ((f = fopen("/proc/self/cgroup", "r")) == NULL) {
-		lxcfs_error("Error opening /proc/self/cgroup: %s\n", strerror(errno));
+	cgroup_ops = cgroup_init();
+	if (!cgroup_ops)
 		return;
-	}
-
-	while (getline(&line, &len, f) != -1) {
-		char *idx, *p, *p2;
-
-		p = strchr(line, ':');
-		if (!p)
-			goto out;
-		idx = line;
-		*(p++) = '\0';
-
-		p2 = strrchr(p, ':');
-		if (!p2)
-			goto out;
-		*p2 = '\0';
-
-		/* With cgroupv2 /proc/self/cgroup can contain entries of the
-		 * form: 0::/ This will cause lxcfs to fail the cgroup mounts
-		 * because it parses out the empty string "" and later on passes
-		 * it to mount(). Let's skip such entries.
-		 */
-		if (!strcmp(p, "") && !strcmp(idx, "0") && !found_unified) {
-			found_unified = true;
-			p = "unified";
-		}
-
-		if (!store_hierarchy(line, p))
-			goto out;
-	}
 
 	/* Preserve initial namespace. */
 	init_ns = preserve_mnt_ns(getpid());
@@ -6451,15 +6202,6 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 		lxcfs_error("%s\n", "Failed to preserve initial mount namespace.");
 		goto out;
 	}
-
-	fd_hierarchies = malloc(sizeof(int) * num_hierarchies);
-	if (!fd_hierarchies) {
-		lxcfs_error("%s\n", strerror(errno));
-		goto out;
-	}
-
-	for (i = 0; i < num_hierarchies; i++)
-		fd_hierarchies[i] = -1;
 
 	cret = getcwd(cwd, MAXPATHLEN);
 	if (!cret)
@@ -6488,26 +6230,15 @@ static void __attribute__((constructor)) collect_and_mount_subsystems(void)
 	print_subsystems();
 
 out:
-	free(line);
-	fclose(f);
 	if (init_ns >= 0)
 		close(init_ns);
 }
 
 static void __attribute__((destructor)) free_subsystems(void)
 {
-	int i;
-
 	lxcfs_debug("%s\n", "Running destructor for liblxcfs.");
 
-	for (i = 0; i < num_hierarchies; i++) {
-		if (hierarchies[i])
-			free(hierarchies[i]);
-		if (fd_hierarchies && fd_hierarchies[i] >= 0)
-			close(fd_hierarchies[i]);
-	}
-	free(hierarchies);
-	free(fd_hierarchies);
+	cgroup_exit(cgroup_ops);
 	free_cpuview();
 
 	if (cgroup_mount_ns_fd >= 0)
