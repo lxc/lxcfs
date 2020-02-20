@@ -588,6 +588,21 @@ static bool cgfsng_get_hierarchies(struct cgroup_ops *ops, int n, char ***out)
 	return true;
 }
 
+static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
+		       const char *cgroup, const char *file, char **value)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, controller);
+	if (!h)
+		return false;
+
+	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	*value = readat_file(h->fd, path);
+	return *value != NULL;
+}
+
 /* At startup, parse_hierarchies finds all the info we need about cgroup
  * mountpoints and current cgroups, and stores it in @d.
  */
@@ -776,6 +791,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 		return NULL;
 
 	cgfsng_ops->num_hierarchies = cgfsng_num_hierarchies;
+	cgfsng_ops->get = cgfsng_get;
 	cgfsng_ops->get_hierarchies = cgfsng_get_hierarchies;
 	cgfsng_ops->get_hierarchy = get_hierarchy;
 	cgfsng_ops->driver = "cgfsng";

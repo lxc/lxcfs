@@ -120,6 +120,8 @@ struct cgroup_ops {
 	int (*nrtasks)(struct cgroup_ops *ops);
 	struct hierarchy *(*get_hierarchy)(struct cgroup_ops *ops,
 					   const char *controller);
+	bool (*get)(struct cgroup_ops *ops, const char *controller,
+		    const char *cgroup, const char *file, char **value);
 };
 
 extern struct cgroup_ops *cgroup_init(void);

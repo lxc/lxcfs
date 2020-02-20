@@ -1102,29 +1102,6 @@ void free_keys(struct cgfs_files **keys)
 	free(keys);
 }
 
-bool cgfs_get_value(const char *controller, const char *cgroup, const char *file, char **value)
-{
-	int ret, cfd;
-	size_t len;
-	char *fnam;
-
-	cfd = find_mounted_controller(controller);
-	if (cfd < 0)
-		return false;
-
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + strlen(file) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
-
-	*value = readat_file(cfd, fnam);
-	return *value != NULL;
-}
-
 bool cgfs_param_exist(const char *controller, const char *cgroup, const char *file)
 {
 	int ret, cfd;
@@ -2509,7 +2486,7 @@ bool do_read_pids(pid_t tpid, const char *contrl, const char *cg, const char *fi
 	struct ucred cred;
 	size_t sz = 0, asz = 0;
 
-	if (!cgfs_get_value(contrl, cg, file, &tmpdata))
+	if (!cgroup_ops->get(cgroup_ops, contrl, cg, file, &tmpdata))
 		return false;
 
 	/*
@@ -2623,7 +2600,7 @@ int cg_read(const char *path, char *buf, size_t size, off_t offset,
 		// special case - we have to translate the pids
 		r = do_read_pids(fc->pid, f->controller, f->cgroup, f->file, &data);
 	else
-		r = cgfs_get_value(f->controller, f->cgroup, f->file, &data);
+		r = cgroup_ops->get(cgroup_ops, f->controller, f->cgroup, f->file, &data);
 
 	if (!r) {
 		ret = -EINVAL;
@@ -3311,7 +3288,7 @@ static unsigned long get_memlimit(const char *cgroup, const char *file)
 	char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
 
-	if (cgfs_get_value("memory", cgroup, file, &memlimit_str))
+	if (cgroup_ops->get(cgroup_ops, "memory", cgroup, file, &memlimit_str))
 		memlimit = strtoul(memlimit_str, NULL, 10);
 
 	free(memlimit_str);
@@ -3375,15 +3352,15 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	prune_init_slice(cg);
 
 	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
-	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
+	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
-	if (!cgfs_get_value("memory", cg, "memory.stat", &memstat_str))
+	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.stat", &memstat_str))
 		goto err;
 
 	// Following values are allowed to fail, because swapaccount might be turned
 	// off for current kernel
-	if(cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
-		cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str))
+	if(cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
+		cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str))
 	{
 		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
 		memswusage = strtoul(memswusage_str, NULL, 10);
@@ -3536,7 +3513,7 @@ char *get_cpuset(const char *cg)
 {
 	char *answer;
 
-	if (!cgfs_get_value("cpuset", cg, "cpuset.cpus", &answer))
+	if (!cgroup_ops->get(cgroup_ops, "cpuset", cg, "cpuset.cpus", &answer))
 		return NULL;
 	return answer;
 }
@@ -3564,7 +3541,7 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
 
 	sprintf(file, "cpu.cfs_%s_us", param);
 
-	if (!cgfs_get_value("cpu", cg, file, &str))
+	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		goto err;
 
 	if (sscanf(str, "%ld", value) != 1)
@@ -4026,10 +4003,10 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 		return -ENOMEM;
 
 	memset(cpu_usage, 0, sizeof(struct cpuacct_usage) * cpucount);
-	if (!cgfs_get_value("cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
+	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
 		// read cpuacct.usage_percpu instead
 		lxcfs_v("failed to read cpuacct.usage_all. reading cpuacct.usage_percpu instead\n%s", "");
-		if (!cgfs_get_value("cpuacct", cg, "cpuacct.usage_percpu", &usage_str)) {
+		if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_percpu", &usage_str)) {
 			rv = -1;
 			goto err;
 		}
@@ -5051,7 +5028,7 @@ static double get_reaper_busy(pid_t task)
 	if (!cgroup)
 		goto out;
 	prune_init_slice(cgroup);
-	if (!cgfs_get_value("cpuacct", cgroup, "cpuacct.usage", &usage_str))
+	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		goto out;
 	usage = strtoul(usage_str, NULL, 10);
 	res = (double)usage / 1000000000;
@@ -5168,15 +5145,15 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/diskstats", buf, size, d);
 	prune_init_slice(cg);
 
-	if (!cgfs_get_value("blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
+	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
 		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
+	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
 		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_service_bytes_recursive", &io_service_bytes_str))
+	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_service_bytes_recursive", &io_service_bytes_str))
 		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_wait_time_recursive", &io_wait_time_str))
+	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_wait_time_recursive", &io_wait_time_str))
 		goto err;
-	if (!cgfs_get_value("blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
+	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
 		goto err;
 
 
@@ -5292,13 +5269,13 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
 
-	if (!cgfs_get_value("memory", cg, "memory.usage_in_bytes", &memusage_str))
+	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.usage_in_bytes", &memusage_str))
 		goto err;
 
 	memusage = strtoul(memusage_str, NULL, 10);
 
-	if (cgfs_get_value("memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str) &&
-	    cgfs_get_value("memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str)) {
+	if (cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str) &&
+	    cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str)) {
 
 		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
 		memswusage = strtoul(memswusage_str, NULL, 10);
