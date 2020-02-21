@@ -3285,22 +3285,22 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 
 static unsigned long get_memlimit(const char *cgroup, const char *file)
 {
-	char *memlimit_str = NULL;
+	__do_free char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
 
 	if (cgroup_ops->get(cgroup_ops, "memory", cgroup, file, &memlimit_str))
 		memlimit = strtoul(memlimit_str, NULL, 10);
-
-	free(memlimit_str);
 
 	return memlimit;
 }
 
 static unsigned long get_min_memlimit(const char *cgroup, const char *file)
 {
-	char *copy = strdupa(cgroup);
-	unsigned long memlimit = 0, retlimit;
+	__do_free char *copy = NULL;
+	unsigned long memlimit = 0;
+	unsigned long retlimit;
 
+	copy = strdupa(cgroup);
 	retlimit = get_memlimit(copy, file);
 
 	while (strcmp(copy, "/") != 0) {
@@ -3314,57 +3314,70 @@ static unsigned long get_min_memlimit(const char *cgroup, const char *file)
 }
 
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			     struct fuse_file_info *fi)
 {
+	__do_free char *current_cgroup = NULL, *line = NULL,
+		       *memusage_str = NULL, *memstat_str = NULL,
+		       *memswlimit_str = NULL, *memswusage_str = NULL;
+	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *) fuse_get_context()->private_data;
 	struct file_info *d = (struct file_info *)fi->fh;
-	char *cg;
-	char *memusage_str = NULL, *memstat_str = NULL,
-		*memswlimit_str = NULL, *memswusage_str = NULL;
-	unsigned long memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		cached = 0, hosttotal = 0, active_anon = 0, inactive_anon = 0,
-		active_file = 0, inactive_file = 0, unevictable = 0, shmem = 0,
-		hostswtotal = 0;
-	char *line = NULL;
+	unsigned long memlimit = 0, memusage = 0, memswlimit = 0,
+		      memswusage = 0, cached = 0, hosttotal = 0, active_anon = 0,
+		      inactive_anon = 0, active_file = 0, inactive_file = 0,
+		      unevictable = 0, shmem = 0, hostswtotal = 0;
 	size_t linelen = 0, total_len = 0, rv = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
-	FILE *f = NULL;
 
-	if (offset){
+	if (offset) {
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
-		total_len = left > size ? size: left;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
-	cg = get_pid_cgroup(initpid, "memory");
-	if (!cg)
+
+	current_cgroup = get_pid_cgroup(initpid, "memory");
+	if (!current_cgroup)
 		return read_file_fuse("/proc/meminfo", buf, size, d);
-	prune_init_slice(cg);
 
-	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
-	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.usage_in_bytes", &memusage_str))
-		goto err;
-	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.stat", &memstat_str))
-		goto err;
+	prune_init_slice(current_cgroup);
 
-	// Following values are allowed to fail, because swapaccount might be turned
-	// off for current kernel
-	if(cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str) &&
-		cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str))
-	{
-		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
+	memlimit = get_min_memlimit(current_cgroup, "memory.limit_in_bytes");
+
+	if (!cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
+			     "memory.usage_in_bytes", &memusage_str))
+		return 0;
+
+	if (!cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
+			     "memory.stat", &memstat_str))
+		return 0;
+
+	/*
+	 * Following values are allowed to fail, because swapaccount might be
+	 * turned off for current kernel.
+	 */
+	if (cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
+			    "memory.memsw.limit_in_bytes", &memswlimit_str) &&
+	    cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
+			    "memory.memsw.usage_in_bytes", &memswusage_str)) {
+		memswlimit = get_min_memlimit(current_cgroup,
+					      "memory.memsw.limit_in_bytes");
 		memswusage = strtoul(memswusage_str, NULL, 10);
-
 		memswlimit = memswlimit / 1024;
 		memswusage = memswusage / 1024;
 	}
@@ -3373,13 +3386,12 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit /= 1024;
 	memusage /= 1024;
 
-	parse_memstat(memstat_str, &cached, &active_anon,
-			&inactive_anon, &active_file, &inactive_file,
-			&unevictable, &shmem);
+	parse_memstat(memstat_str, &cached, &active_anon, &inactive_anon,
+		      &active_file, &inactive_file, &unevictable, &shmem);
 
 	f = fopen("/proc/meminfo", "r");
 	if (!f)
-		goto err;
+		return 0;
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
@@ -3398,7 +3410,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "MemAvailable:")) {
 			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage + cached);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
+		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 &&
+			   opts && opts->swap_off == false) {
 			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
 			if (hostswtotal < memswlimit)
 				memswlimit = hostswtotal;
@@ -3407,10 +3420,15 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", 0UL);
 			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0 && opts && opts->swap_off == false) {
+		} else if (startswith(line, "SwapFree:") && memswlimit > 0 &&
+			   memswusage > 0 && opts && opts->swap_off == false) {
 			unsigned long swaptotal = memswlimit,
-					swapusage = memusage > memswusage ? 0 : memswusage - memusage,
-					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
+				      swapusage = memusage > memswusage
+						      ? 0
+						      : memswusage - memusage,
+				      swapfree = swapusage < swaptotal
+						     ? swaptotal - swapusage
+						     : 0;
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && opts && opts->swap_off == true) {
@@ -3472,14 +3490,12 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0) {
 			perror("Error writing to cache");
-			rv = 0;
-			goto err;
+			return 0;
 
 		}
 		if (l >= cache_size) {
 			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 
 		cache += l;
@@ -3494,14 +3510,6 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 	rv = total_len;
 err:
-	if (f)
-		fclose(f);
-	free(line);
-	free(cg);
-	free(memusage_str);
-	free(memswlimit_str);
-	free(memswusage_str);
-	free(memstat_str);
 	return rv;
 }
 
