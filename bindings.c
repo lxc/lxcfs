@@ -3177,33 +3177,53 @@ static bool startswith(const char *line, const char *pref)
 	return false;
 }
 
-static void parse_memstat(char *memstat, unsigned long *cached,
-		unsigned long *active_anon, unsigned long *inactive_anon,
-		unsigned long *active_file, unsigned long *inactive_file,
-		unsigned long *unevictable, unsigned long *shmem)
+/* Note that "memory.stat" in cgroup2 is hierarchical by default. */
+static void parse_memstat(int version,
+			  char *memstat,
+			  unsigned long *cached,
+			  unsigned long *active_anon,
+			  unsigned long *inactive_anon,
+			  unsigned long *active_file,
+			  unsigned long *inactive_file,
+			  unsigned long *unevictable,
+			  unsigned long *shmem)
 {
 	char *eol;
 
 	while (*memstat) {
-		if (startswith(memstat, "total_cache")) {
+		if (startswith(memstat, is_unified_controller(version)
+					    ? "cache"
+					    : "total_cache")) {
 			sscanf(memstat + 11, "%lu", cached);
 			*cached /= 1024;
-		} else if (startswith(memstat, "total_active_anon")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "active_anon"
+						   : "total_active_anon")) {
 			sscanf(memstat + 17, "%lu", active_anon);
 			*active_anon /= 1024;
-		} else if (startswith(memstat, "total_inactive_anon")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "inactive_anon"
+						   : "total_inactive_anon")) {
 			sscanf(memstat + 19, "%lu", inactive_anon);
 			*inactive_anon /= 1024;
-		} else if (startswith(memstat, "total_active_file")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "active_file"
+						   : "total_active_file")) {
 			sscanf(memstat + 17, "%lu", active_file);
 			*active_file /= 1024;
-		} else if (startswith(memstat, "total_inactive_file")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "inactive_file"
+						   : "total_inactive_file")) {
 			sscanf(memstat + 19, "%lu", inactive_file);
 			*inactive_file /= 1024;
-		} else if (startswith(memstat, "total_unevictable")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "unevictable"
+						   : "total_unevictable")) {
 			sscanf(memstat + 17, "%lu", unevictable);
 			*unevictable /= 1024;
-		} else if (startswith(memstat, "total_shmem")) {
+		} else if (startswith(memstat, is_unified_controller(version)
+						   ? "shmem"
+						   : "total_shmem")) {
 			sscanf(memstat + 11, "%lu", shmem);
 			*shmem /= 1024;
 		}
@@ -3283,29 +3303,36 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
  * FUSE ops for /proc
  */
 
-static unsigned long get_memlimit(const char *cgroup, const char *file)
+static unsigned long get_memlimit(const char *cgroup, bool swap)
 {
+	int ret;
 	__do_free char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
 
-	if (cgroup_ops->get(cgroup_ops, "memory", cgroup, file, &memlimit_str))
+	if (swap)
+		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memlimit_str);
+	else
+		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
+	if (ret > 0)
 		memlimit = strtoul(memlimit_str, NULL, 10);
 
 	return memlimit;
 }
 
-static unsigned long get_min_memlimit(const char *cgroup, const char *file)
+static unsigned long get_min_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *copy = NULL;
 	unsigned long memlimit = 0;
 	unsigned long retlimit;
 
-	copy = strdupa(cgroup);
-	retlimit = get_memlimit(copy, file);
+	copy = strdup(cgroup);
+	retlimit = get_memlimit(copy, swap);
 
 	while (strcmp(copy, "/") != 0) {
-		copy = dirname(copy);
-		memlimit = get_memlimit(copy, file);
+		char *it = copy;
+
+		it = dirname(it);
+		memlimit = get_memlimit(it, swap);
 		if (memlimit != -1 && memlimit < retlimit)
 			retlimit = memlimit;
 	};
@@ -3316,7 +3343,7 @@ static unsigned long get_min_memlimit(const char *cgroup, const char *file)
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi)
 {
-	__do_free char *current_cgroup = NULL, *line = NULL,
+	__do_free char *cgroup = NULL, *line = NULL,
 		       *memusage_str = NULL, *memstat_str = NULL,
 		       *memswlimit_str = NULL, *memswusage_str = NULL;
 	__do_fclose FILE *f = NULL;
@@ -3327,9 +3354,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		      memswusage = 0, cached = 0, hosttotal = 0, active_anon = 0,
 		      inactive_anon = 0, active_file = 0, inactive_file = 0,
 		      unevictable = 0, shmem = 0, hostswtotal = 0;
-	size_t linelen = 0, total_len = 0, rv = 0;
+	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
+	int ret;
 
 	if (offset) {
 		int left;
@@ -3351,32 +3379,33 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 
-	current_cgroup = get_pid_cgroup(initpid, "memory");
-	if (!current_cgroup)
+	cgroup = get_pid_cgroup(initpid, "memory");
+	if (!cgroup)
 		return read_file_fuse("/proc/meminfo", buf, size, d);
 
-	prune_init_slice(current_cgroup);
+	prune_init_slice(cgroup);
 
-	memlimit = get_min_memlimit(current_cgroup, "memory.limit_in_bytes");
+	memlimit = get_min_memlimit(cgroup, false);
 
-	if (!cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
-			     "memory.usage_in_bytes", &memusage_str))
+	ret = cgroup_ops->get_memory_current(cgroup_ops, cgroup, &memusage_str);
+	if (ret < 0)
 		return 0;
 
-	if (!cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
-			     "memory.stat", &memstat_str))
+	ret = cgroup_ops->get_memory_stats(cgroup_ops, cgroup, &memstat_str);
+	if (ret < 0)
 		return 0;
+	parse_memstat(ret, memstat_str, &cached, &active_anon, &inactive_anon,
+		      &active_file, &inactive_file, &unevictable, &shmem);
 
 	/*
 	 * Following values are allowed to fail, because swapaccount might be
 	 * turned off for current kernel.
 	 */
-	if (cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
-			    "memory.memsw.limit_in_bytes", &memswlimit_str) &&
-	    cgroup_ops->get(cgroup_ops, "memory", current_cgroup,
-			    "memory.memsw.usage_in_bytes", &memswusage_str)) {
-		memswlimit = get_min_memlimit(current_cgroup,
-					      "memory.memsw.limit_in_bytes");
+	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memswlimit_str);
+	if (ret >= 0)
+		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
+	if (ret >= 0) {
+		memswlimit = get_min_memlimit(cgroup, true);
 		memswusage = strtoul(memswusage_str, NULL, 10);
 		memswlimit = memswlimit / 1024;
 		memswusage = memswusage / 1024;
@@ -3385,9 +3414,6 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memusage = strtoul(memusage_str, NULL, 10);
 	memlimit /= 1024;
 	memusage /= 1024;
-
-	parse_memstat(memstat_str, &cached, &active_anon, &inactive_anon,
-		      &active_file, &inactive_file, &unevictable, &shmem);
 
 	f = fopen("/proc/meminfo", "r");
 	if (!f)
@@ -3508,9 +3534,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 	memcpy(buf, d->buf, total_len);
 
-	rv = total_len;
-err:
-	return rv;
+	return total_len;
 }
 
 /*
@@ -5245,25 +5269,32 @@ err:
 }
 
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			   struct fuse_file_info *fi)
 {
+	__do_free char *cg = NULL, *memswlimit_str = NULL, *memusage_str = NULL,
+		       *memswusage_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	char *cg = NULL;
-	char *memswlimit_str = NULL, *memlimit_str = NULL, *memusage_str = NULL, *memswusage_str = NULL;
-	unsigned long memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0, swap_total = 0, swap_free = 0;
-	ssize_t total_len = 0, rv = 0;
+	unsigned long memswlimit = 0, memlimit = 0, memusage = 0,
+		      memswusage = 0, swap_total = 0, swap_free = 0;
+	ssize_t total_len = 0;
 	ssize_t l = 0;
 	char *cache = d->buf;
+	int ret;
 
 	if (offset) {
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
+
+		left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
@@ -5275,19 +5306,20 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/swaps", buf, size, d);
 	prune_init_slice(cg);
 
-	memlimit = get_min_memlimit(cg, "memory.limit_in_bytes");
+	memlimit = get_min_memlimit(cg, false);
 
-	if (!cgroup_ops->get(cgroup_ops, "memory", cg, "memory.usage_in_bytes", &memusage_str))
-		goto err;
+	ret = cgroup_ops->get_memory_current(cgroup_ops, cg, &memusage_str);
+	if (ret < 0)
+		return 0;
 
 	memusage = strtoul(memusage_str, NULL, 10);
 
-	if (cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.usage_in_bytes", &memswusage_str) &&
-	    cgroup_ops->get(cgroup_ops, "memory", cg, "memory.memsw.limit_in_bytes", &memswlimit_str)) {
-
-		memswlimit = get_min_memlimit(cg, "memory.memsw.limit_in_bytes");
+	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cg, &memswlimit_str);
+	if (ret >= 0)
+		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cg, &memswusage_str);
+	if (ret >= 0) {
+		memswlimit = get_min_memlimit(cg, true);
 		memswusage = strtoul(memswusage_str, NULL, 10);
-
 		swap_total = (memswlimit - memlimit) / 1024;
 		swap_free = (memswusage - memusage) / 1024;
 	}
@@ -5296,23 +5328,20 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 	/* When no mem + swap limit is specified or swapaccount=0*/
 	if (!memswlimit) {
-		char *line = NULL;
+		__do_free char *line = NULL;
+		__do_fclose FILE *f = NULL;
 		size_t linelen = 0;
-		FILE *f = fopen("/proc/meminfo", "r");
 
+		f = fopen("/proc/meminfo", "r");
 		if (!f)
-			goto err;
+			return 0;
 
 		while (getline(&line, &linelen, f) != -1) {
-			if (startswith(line, "SwapTotal:")) {
+			if (startswith(line, "SwapTotal:"))
 				sscanf(line, "SwapTotal:      %8lu kB", &swap_total);
-			} else if (startswith(line, "SwapFree:")) {
+			else if (startswith(line, "SwapFree:"))
 				sscanf(line, "SwapFree:      %8lu kB", &swap_free);
-			}
 		}
-
-		free(line);
-		fclose(f);
 	}
 
 	if (swap_total > 0) {
@@ -5324,8 +5353,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 	if (total_len < 0 || l < 0) {
 		perror("Error writing to cache");
-		rv = 0;
-		goto err;
+		return 0;
 	}
 
 	d->cached = 1;
@@ -5333,16 +5361,9 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 	if (total_len > size) total_len = size;
 	memcpy(buf, d->buf, total_len);
-	rv = total_len;
-
-err:
-	free(cg);
-	free(memswlimit_str);
-	free(memlimit_str);
-	free(memusage_str);
-	free(memswusage_str);
-	return rv;
+	return total_len;
 }
+
 /*
  * Find the process pid from cgroup path.
  * eg:from /sys/fs/cgroup/cpu/docker/containerid/cgroup.procs to find the process pid.

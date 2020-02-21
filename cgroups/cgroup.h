@@ -122,6 +122,18 @@ struct cgroup_ops {
 					   const char *controller);
 	bool (*get)(struct cgroup_ops *ops, const char *controller,
 		    const char *cgroup, const char *file, char **value);
+
+	/* memory */
+	int (*get_memory_stats)(struct cgroup_ops *ops, const char *cgroup,
+				char **value);
+	int (*get_memory_current)(struct cgroup_ops *ops, const char *cgroup,
+				  char **value);
+	int (*get_memory_swap_current)(struct cgroup_ops *ops,
+				       const char *cgroup, char **value);
+	int (*get_memory_max)(struct cgroup_ops *ops, const char *cgroup,
+			      char **value);
+	int (*get_memory_swap_max)(struct cgroup_ops *ops, const char *cgroup,
+				   char **value);
 };
 
 extern struct cgroup_ops *cgroup_init(void);
@@ -147,6 +159,11 @@ static inline bool pure_unified_layout(const struct cgroup_ops *ops)
 static inline bool is_unified_hierarchy(const struct hierarchy *h)
 {
 	return h->version == CGROUP2_SUPER_MAGIC;
+}
+
+static inline bool is_unified_controller(int version)
+{
+	return version == CGROUP2_SUPER_MAGIC;
 }
 
 #endif

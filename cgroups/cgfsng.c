@@ -603,6 +603,69 @@ static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
 	return *value != NULL;
 }
 
+static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
+			     const char *file, char **value)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+	int ret;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return -1;
+
+	if (!is_unified_hierarchy(h)) {
+		if (strcmp(file, "memory.max") == 0)
+			file = "memory.limit_in_bytes";
+		else if (strcmp(file, "memory.swap.max") == 0)
+			file = "memory.memsw.limit_in_bytes";
+		else if (strcmp(file, "memory.swap.current") == 0)
+			file = "memory.memsw.usage_in_bytes";
+		else if (strcmp(file, "memory.current") == 0)
+			file = "memory.usage_in_bytes";
+		ret = CGROUP_SUPER_MAGIC;
+	} else {
+		ret = CGROUP2_SUPER_MAGIC;
+	}
+
+	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	*value = readat_file(h->fd, path);
+	if (!*value)
+		ret = -1;
+
+	return ret;
+}
+
+static int cgfsng_get_memory_current(struct cgroup_ops *ops, const char *cgroup,
+				     char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.current", value);
+}
+
+static int cgfsng_get_memory_swap_current(struct cgroup_ops *ops,
+					  const char *cgroup, char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.swap.current", value);
+}
+
+static int cgfsng_get_memory_max(struct cgroup_ops *ops, const char *cgroup,
+				 char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.max", value);
+}
+
+static int cgfsng_get_memory_swap_max(struct cgroup_ops *ops,
+				      const char *cgroup, char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.swap.max", value);
+}
+
+static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
+				   char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.stat", value);
+}
+
 /* At startup, parse_hierarchies finds all the info we need about cgroup
  * mountpoints and current cgroups, and stores it in @d.
  */
@@ -798,6 +861,14 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->version = "1.0.0";
 	cgfsng_ops->mount = cgfsng_mount;
 	cgfsng_ops->nrtasks = cgfsng_nrtasks;
+
+
+	/* memory */
+	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;
+	cgfsng_ops->get_memory_max = cgfsng_get_memory_max;
+	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;
+	cgfsng_ops->get_memory_current = cgfsng_get_memory_current;
+	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
 
 	return move_ptr(cgfsng_ops);
 }
