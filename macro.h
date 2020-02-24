@@ -75,4 +75,10 @@
 	     (__iterator = __it);                                               \
 	     __iterator = __it = strtok_r(NULL, __separators, &__p))
 
+#define log_exit(format, ...)                           \
+	({                                              \
+		fprintf(stderr, format, ##__VA_ARGS__); \
+		exit(EXIT_FAILURE);                     \
+	})
+
 #endif /* __LXCFS_MACRO_H */

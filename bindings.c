@@ -6109,61 +6109,45 @@ static bool cgfs_setup_controllers(void)
 	return true;
 }
 
-static void __attribute__((constructor)) collect_and_mount_subsystems(void)
+static void __attribute__((constructor)) lxcfs_init(void)
 {
+	__do_close_prot_errno int init_ns = -EBADF;
 	char *cret;
 	char cwd[MAXPATHLEN];
-	int init_ns = -1;
 
 	cgroup_ops = cgroup_init();
 	if (!cgroup_ops)
-		return;
+		log_exit("Failed to initialize cgroup support");
 
 	/* Preserve initial namespace. */
 	init_ns = preserve_mnt_ns(getpid());
-	if (init_ns < 0) {
-		lxcfs_error("%s\n", "Failed to preserve initial mount namespace.");
-		goto out;
-	}
+	if (init_ns < 0)
+		log_exit("Failed to preserve initial mount namespace");
 
 	cret = getcwd(cwd, MAXPATHLEN);
-	if (!cret)
-		lxcfs_debug("Could not retrieve current working directory: %s.\n", strerror(errno));
+		log_exit("%s - Could not retrieve current working directory", strerror(errno));
 
 	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
 	 * to privately mount lxcfs cgroups. */
-	if (!cgfs_setup_controllers()) {
-		lxcfs_error("%s\n", "Failed to setup private cgroup mounts for lxcfs.");
-		goto out;
-	}
+	if (!cgfs_setup_controllers())
+		log_exit("Failed to setup private cgroup mounts for lxcfs");
 
-	if (setns(init_ns, 0) < 0) {
-		lxcfs_error("Failed to switch back to initial mount namespace: %s.\n", strerror(errno));
-		goto out;
-	}
+	if (setns(init_ns, 0) < 0)
+		log_exit("%s - Failed to switch back to initial mount namespace", strerror(errno));
 
 	if (!cret || chdir(cwd) < 0)
-		lxcfs_debug("Could not change back to original working directory: %s.\n", strerror(errno));
+		log_exit("%s - Could not change back to original working directory", strerror(errno));
 
-	if (!init_cpuview()) {
-		lxcfs_error("%s\n", "failed to init CPU view");
-		goto out;
-	}
+	if (!init_cpuview())
+		log_exit("Failed to init CPU view");
 
 	print_subsystems();
-
-out:
-	if (init_ns >= 0)
-		close(init_ns);
 }
 
-static void __attribute__((destructor)) free_subsystems(void)
+static void __attribute__((destructor)) lxcfs_exit(void)
 {
 	lxcfs_debug("%s\n", "Running destructor for liblxcfs.");
-
-	cgroup_exit(cgroup_ops);
 	free_cpuview();
-
-	if (cgroup_mount_ns_fd >= 0)
-		close(cgroup_mount_ns_fd);
+	close_prot_errno_disarm(cgroup_mount_ns_fd);
+	cgroup_exit(cgroup_ops);
 }
