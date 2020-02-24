@@ -214,6 +214,7 @@ static struct load_node *locate_node(char *cg, int locate)
 		f = f->next;
 	return f;
 }
+
 /* Delete the load_node n and return the next node of it. */
 static struct load_node *del_node(struct load_node *n, int locate)
 {
@@ -227,18 +228,17 @@ static struct load_node *del_node(struct load_node *n, int locate)
 		n->next->pre = n->pre;
 	}
 	g = n->next;
-	free(n->cg);
-	free(n);
+	free_disarm(n->cg);
+	free_disarm(n);
 	pthread_rwlock_unlock(&load_hash[locate].rdlock);
 	return g;
 }
 
 static void load_free(void)
 {
-	int i;
 	struct load_node *f, *p;
 
-	for (i = 0; i < LOAD_SIZE; i++) {
+	for (int i = 0; i < LOAD_SIZE; i++) {
 		pthread_mutex_lock(&load_hash[i].lock);
 		pthread_rwlock_wrlock(&load_hash[i].rilock);
 		pthread_rwlock_wrlock(&load_hash[i].rdlock);
@@ -251,12 +251,14 @@ static void load_free(void)
 			pthread_rwlock_destroy(&load_hash[i].rdlock);
 			continue;
 		}
-		for (f = load_hash[i].next; f; ) {
-			free(f->cg);
+
+		for (f = load_hash[i].next; f;) {
+			free_disarm(f->cg);
 			p = f->next;
-			free(f);
+			free_disarm(f);
 			f = p;
 		}
+
 		pthread_mutex_unlock(&load_hash[i].lock);
 		pthread_mutex_destroy(&load_hash[i].lock);
 		pthread_rwlock_unlock(&load_hash[i].rilock);
@@ -302,7 +304,7 @@ static bool cpuview_init_head(struct cg_proc_stat_head **head)
 
 	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
 		lxcfs_error("%s\n", "Failed to initialize list lock");
-		free(*head);
+		free_disarm(*head);
 		return false;
 	}
 
@@ -325,10 +327,8 @@ static bool init_cpuview()
 
 err:
 	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
-		if (proc_stat_history[i]) {
-			free(proc_stat_history[i]);
-			proc_stat_history[i] = NULL;
-		}
+		if (proc_stat_history[i])
+			free_disarm(proc_stat_history[i]);
 	}
 
 	return false;
@@ -337,10 +337,10 @@ err:
 static void free_proc_stat_node(struct cg_proc_stat *node)
 {
 	pthread_mutex_destroy(&node->lock);
-	free(node->cg);
-	free(node->usage);
-	free(node->view);
-	free(node);
+	free_disarm(node->cg);
+	free_disarm(node->usage);
+	free_disarm(node->view);
+	free_disarm(node);
 }
 
 static void cpuview_free_head(struct cg_proc_stat_head *head)
@@ -361,7 +361,7 @@ static void cpuview_free_head(struct cg_proc_stat_head *head)
 	}
 
 	pthread_rwlock_destroy(&head->lock);
-	free(head);
+	free_disarm(head);
 }
 
 static void free_cpuview()
@@ -465,7 +465,7 @@ static void remove_initpid(struct pidns_init_store *e)
 	h = HASH(e->ino);
 	if (pidns_hash_table[h] == e) {
 		pidns_hash_table[h] = e->next;
-		free(e);
+		free_disarm(e);
 		return;
 	}
 
@@ -473,7 +473,7 @@ static void remove_initpid(struct pidns_init_store *e)
 	while (tmp) {
 		if (tmp->next == e) {
 			tmp->next = e->next;
-			free(e);
+			free_disarm(e);
 			return;
 		}
 		tmp = tmp->next;
@@ -514,7 +514,7 @@ static void prune_initpid_store(void)
 				else
 					pidns_hash_table[i] = e->next;
 				e = e->next;
-				free(delme);
+				free_disarm(delme);
 			} else {
 				prev = e;
 				e = e->next;
@@ -1086,8 +1086,8 @@ void free_key(struct cgfs_files *k)
 {
 	if (!k)
 		return;
-	free(k->name);
-	free(k);
+	free_disarm(k->name);
+	free_disarm(k);
 }
 
 void free_keys(struct cgfs_files **keys)
@@ -1099,7 +1099,7 @@ void free_keys(struct cgfs_files **keys)
 	for (i = 0; keys[i]; i++) {
 		free_key(keys[i]);
 	}
-	free(keys);
+	free_disarm(keys);
 }
 
 bool cgfs_param_exist(const char *controller, const char *cgroup, const char *file)
@@ -2057,16 +2057,11 @@ void do_release_file_info(struct fuse_file_info *fi)
 
 	fi->fh = 0;
 
-	free(f->controller);
-	f->controller = NULL;
-	free(f->cgroup);
-	f->cgroup = NULL;
-	free(f->file);
-	f->file = NULL;
-	free(f->buf);
-	f->buf = NULL;
-	free(f);
-	f = NULL;
+	free_disarm(f->controller);
+	free_disarm(f->cgroup);
+	free_disarm(f->file);
+	free_disarm(f->buf);
+	free_disarm(f);
 }
 
 int cg_releasedir(const char *path, struct fuse_file_info *fi)
@@ -3259,11 +3254,13 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor, char *
 
 int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d)
 {
-	size_t linelen = 0, total_len = 0, rv = 0;
-	char *line = NULL;
+	__do_free char *line = NULL;
+	__do_fclose FILE *f = NULL;
+	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
-	FILE *f = fopen(path, "r");
+
+	f = fopen(path, "r");
 	if (!f)
 		return 0;
 
@@ -3271,13 +3268,11 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0) {
 			perror("Error writing to cache");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		if (l >= cache_size) {
 			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		cache += l;
 		cache_size -= l;
@@ -3290,13 +3285,10 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
-	rv = total_len;
-  err:
-	fclose(f);
-	free(line);
-	if (d->size > rv)
-		d->cached = d->size - rv;
-	return rv;
+
+	if (d->size > total_len)
+		d->cached = d->size - total_len;
+	return total_len;
 }
 
 /*
@@ -3570,24 +3562,18 @@ static bool cpuline_in_cpuset(const char *line, const char *cpuset)
  */
 static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
 {
-	bool rv = false;
-	char file[11 + 6 + 1]; // cpu.cfs__us + quota/period + \0
-	char *str = NULL;
+	__do_free char *str = NULL;
+	char file[11 + 6 + 1]; /* cpu.cfs__us + quota/period + \0 */
 
-	sprintf(file, "cpu.cfs_%s_us", param);
+	snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
 
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
-		goto err;
+		return false;
 
 	if (sscanf(str, "%ld", value) != 1)
-		goto err;
+		return false;
 
-	rv = true;
-
-err:
-	if (str)
-		free(str);
-	return rv;
+	return true;
 }
 
 /*
@@ -3680,29 +3666,32 @@ static bool is_processor_line(const char *line)
 }
 
 static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			     struct fuse_file_info *fi)
 {
+	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	char *cg;
-	char *cpuset = NULL;
-	char *line = NULL;
-	size_t linelen = 0, total_len = 0, rv = 0;
+	size_t linelen = 0, total_len = 0;
 	bool am_printing = false, firstline = true, is_s390x = false;
 	int curcpu = -1, cpu, max_cpus = 0;
 	bool use_view;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
-	FILE *f = NULL;
 
 	if (offset){
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
+
+		left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
@@ -3716,7 +3705,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
-		goto err;
+		return 0;
 
 	use_view = cgroup_ops->can_use_cpuview(cgroup_ops);
 	if (use_view)
@@ -3724,7 +3713,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	f = fopen("/proc/cpuinfo", "r");
 	if (!f)
-		goto err;
+		return 0;
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
@@ -3747,13 +3736,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
 				if (l < 0) {
 					perror("Error writing to cache");
-					rv = 0;
-					goto err;
+					return 0;
 				}
 				if (l >= cache_size) {
 					lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-					rv = 0;
-					goto err;
+					return 0;
 				}
 				cache += l;
 				cache_size -= l;
@@ -3769,18 +3756,16 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			curcpu ++;
 			p = strchr(line, ':');
 			if (!p || !*p)
-				goto err;
+				return 0;
 			p++;
 			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
 			if (l < 0) {
 				perror("Error writing to cache");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			if (l >= cache_size) {
 				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			cache += l;
 			cache_size -= l;
@@ -3792,13 +3777,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
 				perror("Error writing to cache");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			if (l >= cache_size) {
 				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			cache += l;
 			cache_size -= l;
@@ -3807,34 +3790,35 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (is_s390x) {
-		char *origcache = d->buf;
+		__do_free char *origcache = d->buf;
 		ssize_t l;
-		do {
-			d->buf = malloc(d->buflen);
-		} while (!d->buf);
+
+		d->buf = malloc(d->buflen);
+		if (!d->buf) {
+			d->buf = move_ptr(origcache);
+			return 0;
+		}
+
 		cache = d->buf;
 		cache_size = d->buflen;
 		total_len = 0;
 		l = snprintf(cache, cache_size, "vendor_id       : IBM/S390\n");
-		if (l < 0 || l >= cache_size) {
-			free(origcache);
-			goto err;
-		}
+		if (l < 0 || l >= cache_size)
+			return 0;
+
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "# processors    : %d\n", curcpu + 1);
-		if (l < 0 || l >= cache_size) {
-			free(origcache);
-			goto err;
-		}
+		if (l < 0 || l >= cache_size)
+			return 0;
+
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "%s", origcache);
-		free(origcache);
 		if (l < 0 || l >= cache_size)
-			goto err;
+			return 0;
 		total_len += l;
 	}
 
@@ -3844,14 +3828,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
-	rv = total_len;
-err:
-	if (f)
-		fclose(f);
-	free(line);
-	free(cpuset);
-	free(cg);
-	return rv;
+	return total_len;
 }
 
 static uint64_t get_reaper_start_time(pid_t pid)
@@ -3996,13 +3973,14 @@ static double get_reaper_age(pid_t pid)
  */
 static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage **return_usage, int *size)
 {
+	__do_free char *usage_str = NULL;
+	__do_free struct cpuacct_usage *cpu_usage = NULL;
 	int cpucount = get_nprocs_conf();
-	struct cpuacct_usage *cpu_usage;
-	int rv = 0, i, j, ret;
+	int read_pos = 0, read_cnt=0;
+	int i, j, ret;
 	int cg_cpu;
 	uint64_t cg_user, cg_system;
 	int64_t ticks_per_sec;
-	char *usage_str = NULL;
 
 	ticks_per_sec = sysconf(_SC_CLK_TCK);
 
@@ -4020,23 +3998,21 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 
 	memset(cpu_usage, 0, sizeof(struct cpuacct_usage) * cpucount);
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
-		// read cpuacct.usage_percpu instead
+		char *data = NULL;
+		int i = 0, read_pos = 0, read_cnt=0;
+		size_t sz = 0, asz = 0;
+
+		/* read cpuacct.usage_percpu instead. */
 		lxcfs_v("failed to read cpuacct.usage_all. reading cpuacct.usage_percpu instead\n%s", "");
-		if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_percpu", &usage_str)) {
-			rv = -1;
-			goto err;
-		}
+		if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_percpu", &usage_str))
+			return -1;
 		lxcfs_v("usage_str: %s\n", usage_str);
 
-		// convert cpuacct.usage_percpu into cpuacct.usage_all
+		/* convert cpuacct.usage_percpu into cpuacct.usage_all. */
 		lxcfs_v("converting cpuacct.usage_percpu into cpuacct.usage_all\n%s", "");
-
-		char *data = NULL;
-		size_t sz = 0, asz = 0;
 
 		must_strcat(&data, &sz, &asz, "cpu user system\n");
 
-		int i = 0, read_pos = 0, read_cnt=0;
 		while (sscanf(usage_str + read_pos, "%lu %n", &cg_user, &read_cnt) > 0) {
 			lxcfs_debug("i: %d, cg_user: %lu, read_pos: %d, read_cnt: %d\n", i, cg_user, read_pos, read_cnt);
 			must_strcat(&data, &sz, &asz, "%d %lu 0\n", i, cg_user);
@@ -4044,18 +4020,15 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 			read_pos += read_cnt;
 		}
 
-		free(usage_str);
 		usage_str = data;
 
 		lxcfs_v("usage_str: %s\n", usage_str);
 	}
 
-	int read_pos = 0, read_cnt=0;
 	if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0) {
 		lxcfs_error("read_cpuacct_usage_all reading first line from "
 				"%s/cpuacct.usage_all failed.\n", cg);
-		rv = -1;
-		goto err;
+		return -1;
 	}
 
 	read_pos += read_cnt;
@@ -4070,8 +4043,7 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 		if (ret != 3) {
 			lxcfs_error("read_cpuacct_usage_all reading from %s/cpuacct.usage_all "
 					"failed.\n", cg);
-			rv = -1;
-			goto err;
+			return -1;
 		}
 
 		read_pos += read_cnt;
@@ -4082,20 +4054,9 @@ static int read_cpuacct_usage_all(char *cg, char *cpuset, struct cpuacct_usage *
 		j++;
 	}
 
-	rv = 0;
-	*return_usage = cpu_usage;
+	*return_usage = move_ptr(cpu_usage);
 	*size = cpucount;
-
-err:
-	if (usage_str)
-		free(usage_str);
-
-	if (rv != 0) {
-		free(cpu_usage);
-		*return_usage = NULL;
-	}
-
-	return rv;
+	return 0;
 }
 
 static unsigned long diff_cpu_usage(struct cpuacct_usage *older, struct cpuacct_usage *newer, struct cpuacct_usage *diff, int cpu_count)
@@ -4323,8 +4284,7 @@ out:
 
 static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 {
-	struct cpuacct_usage *new_usage, *new_view;
-	int i;
+	__do_free struct cpuacct_usage *new_usage = NULL, *new_view = NULL;
 
 	/* Allocate new memory */
 	new_usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
@@ -4332,13 +4292,11 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 		return false;
 
 	new_view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
-	if (!new_view) {
-		free(new_usage);
+	if (!new_view)
 		return false;
-	}
 
 	/* Copy existing data & initialize new elements */
-	for (i = 0; i < cpu_count; i++) {
+	for (int i = 0; i < cpu_count; i++) {
 		if (i < node->cpu_count) {
 			new_usage[i].user = node->usage[i].user;
 			new_usage[i].system = node->usage[i].system;
@@ -4359,10 +4317,10 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 	}
 
 	free(node->usage);
-	free(node->view);
+	node->usage = move_ptr(new_usage);
 
-	node->usage = new_usage;
-	node->view = new_view;
+	free(node->view);
+	node->view = move_ptr(new_view);
 	node->cpu_count = cpu_count;
 
 	return true;
@@ -4420,19 +4378,23 @@ static void reset_proc_stat_node(struct cg_proc_stat *node, struct cpuacct_usage
 	node->cpu_count = cpu_count;
 }
 
-static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_usage *cg_cpu_usage, int cg_cpu_usage_size, FILE *f, char *buf, size_t buf_size)
+static int cpuview_proc_stat(const char *cg, const char *cpuset,
+			     struct cpuacct_usage *cg_cpu_usage,
+			     int cg_cpu_usage_size, FILE *f, char *buf,
+			     size_t buf_size)
 {
-	char *line = NULL;
-	size_t linelen = 0, total_len = 0, rv = 0, l;
+	__do_free char *line = NULL;
+	__do_free struct cpuacct_usage *diff = NULL;
+	size_t linelen = 0, total_len = 0, l;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu, i;
 	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
-	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
+	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0,
+		      irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	unsigned long user_sum = 0, system_sum = 0, idle_sum = 0;
 	unsigned long user_surplus = 0, system_surplus = 0;
 	unsigned long total_sum, threshold;
 	struct cg_proc_stat *stat_node;
-	struct cpuacct_usage *diff = NULL;
 	int nprocs = get_nprocs_conf();
 
 	if (cg_cpu_usage_size < nprocs)
@@ -4446,10 +4408,10 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 		if (strlen(line) == 0)
 			continue;
-		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
-			/* not a ^cpuN line containing a number N */
+
+		/* not a ^cpuN line containing a number N */
+		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1)
 			break;
-		}
 
 		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
@@ -4461,9 +4423,8 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		cpu_cnt ++;
 
 		if (!cpu_in_cpuset(physcpu, cpuset)) {
-			for (i = curcpu; i <= physcpu; i++) {
+			for (i = curcpu; i <= physcpu; i++)
 				cg_cpu_usage[i].online = false;
-			}
 			continue;
 		}
 
@@ -4514,14 +4475,12 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 	if (!stat_node) {
 		lxcfs_error("unable to find/create stat node for %s\n", cg);
-		rv = 0;
-		goto err;
+		return 0;
 	}
 
 	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
 	if (!diff) {
-		rv = 0;
-		goto err;
+		return 0;
 	}
 
 	/*
@@ -4560,6 +4519,13 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 	/* Calculate usage counters of visible CPUs */
 	if (max_cpus > 0) {
+		unsigned long diff_user = 0;
+		unsigned long diff_system = 0;
+		unsigned long diff_idle = 0;
+		unsigned long max_diff_idle = 0;
+		unsigned long max_diff_idle_index = 0;
+		double exact_cpus;
+
 		/* threshold = maximum usage per cpu, including idle */
 		threshold = total_sum / cpu_cnt * max_cpus;
 
@@ -4576,21 +4542,15 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 				continue;
 
 			/* Add user */
-			add_cpu_usage(
-					&user_surplus,
-					&diff[curcpu],
-					&diff[curcpu].user,
-					threshold);
+			add_cpu_usage(&user_surplus, &diff[curcpu],
+				      &diff[curcpu].user, threshold);
 
 			if (diff[curcpu].user + diff[curcpu].system >= threshold)
 				continue;
 
 			/* If there is still room, add system */
-			add_cpu_usage(
-					&system_surplus,
-					&diff[curcpu],
-					&diff[curcpu].system,
-					threshold);
+			add_cpu_usage(&system_surplus, &diff[curcpu],
+				      &diff[curcpu].system, threshold);
 		}
 
 		if (user_surplus > 0)
@@ -4598,11 +4558,6 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		if (system_surplus > 0)
 			lxcfs_debug("leftover system: %lu for %s\n", system_surplus, cg);
 
-		unsigned long diff_user = 0;
-		unsigned long diff_system = 0;
-		unsigned long diff_idle = 0;
-		unsigned long max_diff_idle = 0;
-		unsigned long max_diff_idle_index = 0;
 		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
 			if (!stat_node->usage[curcpu].online)
 				continue;
@@ -4632,11 +4587,12 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		}
 		lxcfs_v("total. diff_user: %lu, diff_system: %lu, diff_idle: %lu\n", diff_user, diff_system, diff_idle);
 
-		// revise cpu usage view to support partial cpu case
-		double exact_cpus = exact_cpu_count(cg);
+		/* revise cpu usage view to support partial cpu case. */
+		exact_cpus = exact_cpu_count(cg);
 		if (exact_cpus < (double)max_cpus){
-			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
 			unsigned long delta = (unsigned long)((double)(diff_user + diff_system + diff_idle) * (1 - exact_cpus / (double)max_cpus));
+
+			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
 			lxcfs_v("delta: %lu\n", delta);
 			lxcfs_v("idle_sum before: %lu\n", idle_sum);
 			idle_sum = idle_sum > delta ? idle_sum - delta : 0;
@@ -4672,13 +4628,11 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 	if (l < 0) {
 		perror("Error writing to cache");
-		rv = 0;
-		goto err;
+		return 0;
 	}
 	if (l >= buf_size) {
 		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-		rv = 0;
-		goto err;
+		return 0;
 	}
 
 	buf += l;
@@ -4704,14 +4658,12 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 		if (l < 0) {
 			perror("Error writing to cache");
-			rv = 0;
-			goto err;
+			return 0;
 
 		}
 		if (l >= buf_size) {
 			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 
 		buf += l;
@@ -4724,14 +4676,12 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 
 	if (l < 0) {
 		perror("Error writing to cache");
-		rv = 0;
-		goto err;
+		return 0;
 
 	}
 	if (l >= buf_size) {
 		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-		rv = 0;
-		goto err;
+		return 0;
 	}
 
 	buf += l;
@@ -4743,52 +4693,43 @@ static int cpuview_proc_stat(const char *cg, const char *cpuset, struct cpuacct_
 		l = snprintf(buf, buf_size, "%s", line);
 		if (l < 0) {
 			perror("Error writing to cache");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		if (l >= buf_size) {
 			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		buf += l;
 		buf_size -= l;
 		total_len += l;
 	}
 
-	rv = total_len;
-
-err:
 	if (stat_node)
 		pthread_mutex_unlock(&stat_node->lock);
-	if (line)
-		free(line);
-	if (diff)
-		free(diff);
-	return rv;
+	return total_len;
 }
 
 #define CPUALL_MAX_SIZE (BUF_RESERVE_SIZE / 2)
 static int proc_stat_read(char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			  struct fuse_file_info *fi)
 {
+	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_free struct cpuacct_usage *cg_cpu_usage = NULL;
+	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	char *cg;
-	char *cpuset = NULL;
-	char *line = NULL;
-	size_t linelen = 0, total_len = 0, rv = 0;
+	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu = 0;
-	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
-	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0, iowait_sum = 0,
-					irq_sum = 0, softirq_sum = 0, steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
+	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0,
+		      irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
+	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0,
+		      iowait_sum = 0, irq_sum = 0, softirq_sum = 0,
+		      steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
 	char cpuall[CPUALL_MAX_SIZE];
 	/* reserve for cpu all */
 	char *cache = d->buf + CPUALL_MAX_SIZE;
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
-	FILE *f = NULL;
-	struct cpuacct_usage *cg_cpu_usage = NULL;
 	int cg_cpu_usage_size = 0;
 
 	if (offset){
@@ -4824,7 +4765,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
-		goto err;
+		return 0;
 
 	/*
 	 * Read cpuacct.usage_all for all CPUs.
@@ -4838,12 +4779,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	f = fopen("/proc/stat", "r");
 	if (!f)
-		goto err;
+		return 0;
 
 	//skip first line
 	if (getline(&line, &linelen, f) < 0) {
 		lxcfs_error("%s\n", "proc_stat_read read first line failed.");
-		goto err;
+		return 0;
 	}
 
 	if (cgroup_ops->can_use_cpuview(cgroup_ops) && cg_cpu_usage) {
@@ -4866,13 +4807,11 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
 				perror("Error writing to cache");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			if (l >= cache_size) {
 				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 			cache += l;
 			cache_size -= l;
@@ -4905,14 +4844,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
 			if (l < 0) {
 				perror("Error writing to cache");
-				rv = 0;
-				goto err;
+				return 0;
 
 			}
 			if (l >= cache_size) {
 				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 
 			cache += l;
@@ -4946,14 +4883,12 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 			if (l < 0) {
 				perror("Error writing to cache");
-				rv = 0;
-				goto err;
+				return 0;
 
 			}
 			if (l >= cache_size) {
 				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				rv = 0;
-				goto err;
+				return 0;
 			}
 
 			cache += l;
@@ -5010,17 +4945,7 @@ out:
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
-	rv = total_len;
-
-err:
-	if (f)
-		fclose(f);
-	if (cg_cpu_usage)
-		free(cg_cpu_usage);
-	free(line);
-	free(cpuset);
-	free(cg);
-	return rv;
+	return total_len;
 }
 
 /* This function retrieves the busy time of a group of tasks by looking at
@@ -5032,27 +4957,24 @@ err:
  */
 static double get_reaper_busy(pid_t task)
 {
-	pid_t initpid = lookup_initpid_in_store(task);
-	char *cgroup = NULL, *usage_str = NULL;
+	__do_free char *cgroup = NULL, *usage_str = NULL;
 	unsigned long usage = 0;
-	double res = 0;
+	pid_t initpid;
 
+	initpid = lookup_initpid_in_store(task);
 	if (initpid <= 0)
 		return 0;
 
 	cgroup = get_pid_cgroup(initpid, "cpuacct");
 	if (!cgroup)
-		goto out;
+		return 0;
 	prune_init_slice(cgroup);
-	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
-		goto out;
-	usage = strtoul(usage_str, NULL, 10);
-	res = (double)usage / 1000000000;
+	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage",
+			     &usage_str))
+		return 0;
 
-out:
-	free(cgroup);
-	free(usage_str);
-	return res;
+	usage = strtoul(usage_str, NULL, 10);
+	return ((double)usage / 1000000000);
 }
 
 #if RELOADTEST
@@ -5370,81 +5292,79 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
  */
 static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 {
-	DIR *dir;
-	int fd;
+	__do_free char *path = NULL;
+	__do_close_prot_errno int fd = -EBADF;
+	__do_fclose FILE *f = NULL;
+	__do_closedir DIR *dir = NULL;
 	struct dirent *file;
-	FILE *f = NULL;
 	size_t linelen = 0;
 	char *line = NULL;
 	int pd;
-	char *path_dir, *path;
 	char **pid;
 
 	/* path = dpath + "/cgroup.procs" + /0 */
-	do {
-		path = malloc(strlen(dpath) + 20);
-	} while (!path);
+	path = malloc(strlen(dpath) + 20);
+	if (!path)
+		return sum;
 
 	strcpy(path, dpath);
-	fd = openat(cfd, path, O_RDONLY);
+	fd = openat(cfd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	if (fd < 0)
-		goto out;
+		return sum;
 
-	dir = fdopendir(fd);
-	if (dir == NULL) {
-		close(fd);
-		goto out;
-	}
+	dir = fdopendir(move_fd(fd));
+	if (!dir)
+		return sum;
 
 	while (((file = readdir(dir)) != NULL) && depth > 0) {
-		if (strncmp(file->d_name, ".", 1) == 0)
+		if (strcmp(file->d_name, ".") == 0)
 			continue;
-		if (strncmp(file->d_name, "..", 1) == 0)
+
+		if (strcmp(file->d_name, "..") == 0)
 			continue;
+
 		if (file->d_type == DT_DIR) {
+			__do_free char *path_dir = NULL;
+
 			/* path + '/' + d_name +/0 */
-			do {
-				path_dir = malloc(strlen(path) + 2 + sizeof(file->d_name));
-			} while (!path_dir);
+			path_dir = malloc(strlen(path) + 2 + sizeof(file->d_name));
+			if (!path_dir)
+				return sum;
+
 			strcpy(path_dir, path);
 			strcat(path_dir, "/");
 			strcat(path_dir, file->d_name);
 			pd = depth - 1;
 			sum = calc_pid(pid_buf, path_dir, pd, sum, cfd);
-			free(path_dir);
 		}
 	}
-	closedir(dir);
 
 	strcat(path, "/cgroup.procs");
 	fd = openat(cfd, path, O_RDONLY);
 	if (fd < 0)
-		goto out;
+		return sum;
 
-	f = fdopen(fd, "r");
-	if (!f) {
-		close(fd);
-		goto out;
-	}
+	f = fdopen(move_fd(fd), "r");
+	if (!f)
+		return sum;
 
 	while (getline(&line, &linelen, f) != -1) {
-		do {
-			pid = realloc(*pid_buf, sizeof(char *) * (sum + 1));
-		} while (!pid);
+		pid = realloc(*pid_buf, sizeof(char *) * (sum + 1));
+		if (!pid)
+			return sum;
 		*pid_buf = pid;
-		do {
-			*(*pid_buf + sum) = malloc(strlen(line) + 1);
-		} while (*(*pid_buf + sum) == NULL);
+
+		*(*pid_buf + sum) = malloc(strlen(line) + 1);
+		if (!*(*pid_buf + sum))
+			return sum;
+
 		strcpy(*(*pid_buf + sum), line);
 		sum++;
 	}
-	fclose(f);
-out:
-	if (line)
-		free(line);
-	free(path);
+
 	return sum;
 }
+
 /*
  * calc_load calculates the load according to the following formula:
  * load1 = load0 * exp + active * (1 - exp)
@@ -5474,25 +5394,26 @@ calc_load(unsigned long load, unsigned long exp, unsigned long active)
  */
 static int refresh_load(struct load_node *p, char *path)
 {
-	FILE *f = NULL;
+	__do_free char *line = NULL;
 	char **idbuf;
 	char proc_path[256];
 	int i, ret, run_pid = 0, total_pid = 0, last_pid = 0;
-	char *line = NULL;
 	size_t linelen = 0;
 	int sum, length;
-	DIR *dp;
 	struct dirent *file;
 
-	do {
-		idbuf = malloc(sizeof(char *));
-	} while (!idbuf);
+	idbuf = malloc(sizeof(char *));
+	if (!idbuf)
+		return -1;
+
 	sum = calc_pid(&idbuf, path, DEPTH_DIR, 0, p->cfd);
 	/*  normal exit  */
 	if (sum == 0)
 		goto out;
 
 	for (i = 0; i < sum; i++) {
+		__do_closedir DIR *dp = NULL;
+
 		/*clean up '\n' */
 		length = strlen(idbuf[i])-1;
 		idbuf[i][length] = '\0';
@@ -5510,6 +5431,8 @@ static int refresh_load(struct load_node *p, char *path)
 			continue;
 		}
 		while ((file = readdir(dp)) != NULL) {
+			__do_fclose FILE *f = NULL;
+
 			if (strncmp(file->d_name, ".", 1) == 0)
 				continue;
 			if (strncmp(file->d_name, "..", 1) == 0)
@@ -5524,9 +5447,9 @@ static int refresh_load(struct load_node *p, char *path)
 				lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
 				i = sum;
 				sum = -1;
-				closedir(dp);
 				goto err_out;
 			}
+
 			f = fopen(proc_path, "r");
 			if (f != NULL) {
 				while (getline(&line, &linelen, f) != -1) {
@@ -5534,12 +5457,11 @@ static int refresh_load(struct load_node *p, char *path)
 					if ((line[0] == 'S') && (line[1] == 't'))
 						break;
 				}
+
 			if ((line[7] == 'R') || (line[7] == 'D'))
 				run_pid++;
-			fclose(f);
 			}
 		}
-		closedir(dp);
 	}
 	/*Calculate the loadavg.*/
 	p->avenrun[0] = calc_load(p->avenrun[0], EXP_1, run_pid);
@@ -5549,7 +5471,6 @@ static int refresh_load(struct load_node *p, char *path)
 	p->total_pid = total_pid;
 	p->last_pid = last_pid;
 
-	free(line);
 err_out:
 	for (; i > 0; i--)
 		free(idbuf[i-1]);
@@ -5557,13 +5478,13 @@ out:
 	free(idbuf);
 	return sum;
 }
+
 /*
  * Traverse the hash table and update it.
  */
 void *load_begin(void *arg)
 {
 
-	char *path = NULL;
 	int i, sum, length, ret;
 	struct load_node *f;
 	int first_node;
@@ -5583,11 +5504,13 @@ void *load_begin(void *arg)
 			f = load_hash[i].next;
 			first_node = 1;
 			while (f) {
+				__do_free char *path = NULL;
+
 				length = strlen(f->cg) + 2;
-				do {
 					/* strlen(f->cg) + '.' or '' + \0 */
-					path = malloc(length);
-				} while (!path);
+				path = malloc(length);
+				if  (!path)
+					goto out;
 
 				ret = snprintf(path, length, "%s%s", dot_or_empty(f->cg), f->cg);
 				if (ret < 0 || ret > length - 1) {
@@ -5595,13 +5518,12 @@ void *load_begin(void *arg)
 					lxcfs_error("Refresh node %s failed for snprintf().\n", f->cg);
 					goto out;
 				}
+
 				sum = refresh_load(f, path);
-				if (sum == 0) {
+				if (sum == 0)
 					f = del_node(f, i);
-				} else {
+				else
 out:					f = f->next;
-				}
-				free(path);
 				/* load_hash[i].lock locks only on the first node.*/
 				if (first_node == 1) {
 					first_node = 0;
