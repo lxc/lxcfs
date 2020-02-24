@@ -412,7 +412,7 @@ static void lock_mutex(pthread_mutex_t *l)
 	}
 }
 
-static struct cgroup_ops *cgroup_ops;
+struct cgroup_ops *cgroup_ops;
 
 static int cgroup_mount_ns_fd = -1;
 
@@ -3668,24 +3668,6 @@ static double exact_cpu_count(const char *cg)
 }
 
 /*
- * Determine whether CPU views should be used or not.
- */
-bool use_cpuview(const char *cg)
-{
-	int cfd;
-
-	cfd = find_mounted_controller("cpu");
-	if (cfd < 0)
-		return false;
-
-	cfd = find_mounted_controller("cpuacct");
-	if (cfd < 0)
-		return false;
-
-	return true;
-}
-
-/*
  * check whether this is a '^processor" line in /proc/cpuinfo
  */
 static bool is_processor_line(const char *line)
@@ -3736,8 +3718,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		goto err;
 
-	use_view = use_cpuview(cg);
-
+	use_view = cgroup_ops->can_use_cpuview(cgroup_ops);
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 
@@ -4865,7 +4846,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		goto err;
 	}
 
-	if (use_cpuview(cg) && cg_cpu_usage) {
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && cg_cpu_usage) {
 		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, cg_cpu_usage_size,
 				f, d->buf, d->buflen);
 		goto out;

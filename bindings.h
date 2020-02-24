@@ -79,7 +79,6 @@ extern int read_file_fuse(const char *path, char *buf, size_t size,
 			  struct file_info *d);
 extern void prune_init_slice(char *cg);
 extern char *get_cpuset(const char *cg);
-extern bool use_cpuview(const char *cg);
 extern int max_cpu_count(const char *cg);
 extern void do_release_file_info(struct fuse_file_info *fi);
 extern int cpu_number_in_cpuset(const char *cpuset);
