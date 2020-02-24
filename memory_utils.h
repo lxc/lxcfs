@@ -37,6 +37,14 @@ static inline void __auto_closedir__(DIR **d)
 		fd = -EBADF;        \
 	}
 
+#define close_prot_errno_replace(fd, new_fd) \
+	if (fd >= 0) {                       \
+		int _e_ = errno;             \
+		close(fd);                   \
+		errno = _e_;                 \
+		fd = new_fd;                 \
+	}
+
 #define free_disarm(ptr)       \
 	({                     \
 		free(ptr);     \

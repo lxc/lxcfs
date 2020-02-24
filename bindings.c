@@ -3543,11 +3543,14 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
  */
 char *get_cpuset(const char *cg)
 {
-	char *answer;
+	char *value = NULL;
+	int ret;
 
-	if (!cgroup_ops->get(cgroup_ops, "cpuset", cg, "cpuset.cpus", &answer))
+	ret = cgroup_ops->get_cpuset_cpus(cgroup_ops, cg, &value);
+	if (ret < 0)
 		return NULL;
-	return answer;
+
+	return value;
 }
 
 bool cpu_in_cpuset(int cpu, const char *cpuset);

@@ -62,6 +62,23 @@ int unified_cgroup_hierarchy(void)
 	return 0;
 }
 
+bool is_cgroup_fd(int fd)
+{
+
+	int ret;
+	struct statfs fs;
+
+	ret = fstatfs(fd, &fs);
+	if (ret)
+		return false;
+
+	if (is_fs_type(&fs, CGROUP2_SUPER_MAGIC) ||
+	    is_fs_type(&fs, CGROUP_SUPER_MAGIC))
+		return true;
+
+	return false;
+}
+
 void *must_realloc(void *orig, size_t sz)
 {
 	void *ret;

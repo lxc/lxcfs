@@ -134,6 +134,10 @@ struct cgroup_ops {
 			      char **value);
 	int (*get_memory_swap_max)(struct cgroup_ops *ops, const char *cgroup,
 				   char **value);
+
+	/* cpuset */
+	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
+			       char **value);
 };
 
 extern struct cgroup_ops *cgroup_init(void);
