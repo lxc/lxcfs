@@ -598,7 +598,7 @@ static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
 	if (!h)
 		return false;
 
-	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	*value = readat_file(h->fd, path);
 	return *value != NULL;
 }
@@ -628,7 +628,7 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 		ret = CGROUP2_SUPER_MAGIC;
 	}
 
-	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	*value = readat_file(h->fd, path);
 	if (!*value)
 		ret = -1;
@@ -701,7 +701,7 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 		ret = CGROUP2_SUPER_MAGIC;
 
 	*value = NULL;
-	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, NULL);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, NULL);
 	cgroup_fd = openat_safe(h->fd, path);
 	if (cgroup_fd < 0) {
 		return -1;

@@ -76,4 +76,9 @@ static inline int openat_safe(int fd, const char *path)
 	return openat(fd, path, O_DIRECTORY | O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
+static inline const char *dot_or_empty(const char *s)
+{
+	return (*s == '/') ? (const char *){"."} : (const char *){""};
+}
+
 #endif /* __LXC_CGROUP_UTILS_H */
