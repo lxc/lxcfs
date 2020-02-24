@@ -138,6 +138,18 @@ struct cgroup_ops {
 	/* cpuset */
 	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
 			       char **value);
+
+	/* io */
+	int (*get_io_service_bytes)(struct cgroup_ops *ops, const char *cgroup,
+				    char **value);
+	int (*get_io_service_time)(struct cgroup_ops *ops, const char *cgroup,
+				   char **value);
+	int (*get_io_serviced)(struct cgroup_ops *ops, const char *cgroup,
+			       char **value);
+	int (*get_io_merged)(struct cgroup_ops *ops, const char *cgroup,
+			     char **value);
+	int (*get_io_wait_time)(struct cgroup_ops *ops, const char *cgroup,
+				char **value);
 };
 
 extern struct cgroup_ops *cgroup_init(void);
