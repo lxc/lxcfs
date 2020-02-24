@@ -31,7 +31,8 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
-#include "config.h" // for VERSION
+#include "cgroups/cgroup.h"
+#include "config.h"
 #include "sysfs_fuse.h"
 
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
@@ -72,8 +73,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	if (!cpuset)
 		goto err;
 
-	use_view = use_cpuview(cg);
-
+	use_view = cgroup_ops->can_use_cpuview(cgroup_ops);
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 

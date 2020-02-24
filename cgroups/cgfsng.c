@@ -794,6 +794,24 @@ static int cgfsng_get_io_wait_time(struct cgroup_ops *ops, const char *cgroup,
 	return cgfsng_get_io(ops, cgroup, "blkio.io_wait_time_recursive", value);
 }
 
+static bool cgfsng_can_use_cpuview(struct cgroup_ops *ops)
+{
+	struct hierarchy *cpu, *cpuacct;
+
+	if (pure_unified_layout(ops))
+		return false;
+
+	cpu = ops->get_hierarchy(ops, "cpu");
+	if (!cpu || is_unified_hierarchy(cpu))
+		return false;
+
+	cpuacct = ops->get_hierarchy(ops, "cpuacct");
+	if (!cpuacct || is_unified_hierarchy(cpuacct))
+		return false;
+
+	return true;
+}
+
 /* At startup, parse_hierarchies finds all the info we need about cgroup
  * mountpoints and current cgroups, and stores it in @d.
  */
@@ -999,6 +1017,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
+	cgfsng_ops->can_use_cpuview = cgfsng_can_use_cpuview;
 
 	/* blkio */
 	cgfsng_ops->get_io_service_bytes	= cgfsng_get_io_service_bytes;

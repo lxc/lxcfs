@@ -138,6 +138,7 @@ struct cgroup_ops {
 	/* cpuset */
 	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
 			       char **value);
+	bool (*can_use_cpuview)(struct cgroup_ops *ops);
 
 	/* io */
 	int (*get_io_service_bytes)(struct cgroup_ops *ops, const char *cgroup,
@@ -151,6 +152,8 @@ struct cgroup_ops {
 	int (*get_io_wait_time)(struct cgroup_ops *ops, const char *cgroup,
 				char **value);
 };
+
+extern struct cgroup_ops *cgroup_ops;
 
 extern struct cgroup_ops *cgroup_init(void);
 extern void cgroup_exit(struct cgroup_ops *ops);
