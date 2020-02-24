@@ -737,6 +737,63 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 	return -1;
 }
 
+static int cgfsng_get_io(struct cgroup_ops *ops, const char *cgroup,
+			 const char *file, char **value)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+	int ret;
+
+	h = ops->get_hierarchy(ops, "blkio");
+	if (!h)
+		return -1;
+
+	if (!is_unified_hierarchy(h))
+		ret = CGROUP_SUPER_MAGIC;
+	else
+		ret = CGROUP2_SUPER_MAGIC;
+
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
+	*value = readat_file(h->fd, path);
+	if (!*value) {
+		if (errno == ENOENT)
+			errno = EOPNOTSUPP;
+		return ret_errno(errno);
+	}
+
+	return ret;
+}
+
+static int cgfsng_get_io_service_bytes(struct cgroup_ops *ops,
+				       const char *cgroup, char **value)
+{
+	return cgfsng_get_io(ops, cgroup, "blkio.io_service_bytes_recursive", value);
+}
+
+static int cgfsng_get_io_service_time(struct cgroup_ops *ops,
+				      const char *cgroup, char **value)
+{
+	return cgfsng_get_io(ops, cgroup, "blkio.io_service_time_recursive", value);
+}
+
+static int cgfsng_get_io_serviced(struct cgroup_ops *ops, const char *cgroup,
+				  char **value)
+{
+	return cgfsng_get_io(ops, cgroup, "blkio.io_serviced_recursive", value);
+}
+
+static int cgfsng_get_io_merged(struct cgroup_ops *ops, const char *cgroup,
+				char **value)
+{
+	return cgfsng_get_io(ops, cgroup, "blkio.io_merged_recursive", value);
+}
+
+static int cgfsng_get_io_wait_time(struct cgroup_ops *ops, const char *cgroup,
+				   char **value)
+{
+	return cgfsng_get_io(ops, cgroup, "blkio.io_wait_time_recursive", value);
+}
+
 /* At startup, parse_hierarchies finds all the info we need about cgroup
  * mountpoints and current cgroups, and stores it in @d.
  */
@@ -942,6 +999,14 @@ struct cgroup_ops *cgfsng_ops_init(void)
 
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
+
+	/* blkio */
+	cgfsng_ops->get_io_service_bytes	= cgfsng_get_io_service_bytes;
+	cgfsng_ops->get_io_service_time		= cgfsng_get_io_service_time;
+	cgfsng_ops->get_io_serviced		= cgfsng_get_io_serviced;
+	cgfsng_ops->get_io_merged		= cgfsng_get_io_merged;
+	cgfsng_ops->get_io_wait_time		= cgfsng_get_io_wait_time;
+
 
 	return move_ptr(cgfsng_ops);
 }

@@ -5139,14 +5139,15 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 }
 
 static int proc_diskstats_read(char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			       struct fuse_file_info *fi)
 {
-	char dev_name[72];
+	__do_free char *cg = NULL, *io_serviced_str = NULL,
+		       *io_merged_str = NULL, *io_service_bytes_str = NULL,
+		       *io_wait_time_str = NULL, *io_service_time_str = NULL,
+		       *line = NULL;
+	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = (struct file_info *)fi->fh;
-	char *cg;
-	char *io_serviced_str = NULL, *io_merged_str = NULL, *io_service_bytes_str = NULL,
-			*io_wait_time_str = NULL, *io_service_time_str = NULL;
 	unsigned long read = 0, write = 0;
 	unsigned long read_merged = 0, write_merged = 0;
 	unsigned long read_sectors = 0, write_sectors = 0;
@@ -5155,20 +5156,25 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
-	char *line = NULL;
-	size_t linelen = 0, total_len = 0, rv = 0;
+	size_t linelen = 0, total_len = 0;
 	unsigned int major = 0, minor = 0;
 	int i = 0;
-	FILE *f = NULL;
+	int ret;
+	char dev_name[72];
 
 	if (offset){
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
+
+		left = d->size - offset;
 		total_len = left > size ? size: left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
@@ -5180,21 +5186,39 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/diskstats", buf, size, d);
 	prune_init_slice(cg);
 
-	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_serviced_recursive", &io_serviced_str))
-		goto err;
-	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_merged_recursive", &io_merged_str))
-		goto err;
-	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_service_bytes_recursive", &io_service_bytes_str))
-		goto err;
-	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_wait_time_recursive", &io_wait_time_str))
-		goto err;
-	if (!cgroup_ops->get(cgroup_ops, "blkio", cg, "blkio.io_service_time_recursive", &io_service_time_str))
-		goto err;
+	ret = cgroup_ops->get_io_serviced(cgroup_ops, cg, &io_serviced_str);
+	if (ret < 0) {
+		if (ret == -EOPNOTSUPP)
+			return read_file_fuse("/proc/diskstats", buf, size, d);
+	}
 
+	ret = cgroup_ops->get_io_merged(cgroup_ops, cg, &io_merged_str);
+	if (ret < 0) {
+		if (ret == -EOPNOTSUPP)
+			return read_file_fuse("/proc/diskstats", buf, size, d);
+	}
+
+	ret = cgroup_ops->get_io_service_bytes(cgroup_ops, cg, &io_service_bytes_str);
+	if (ret < 0) {
+		if (ret == -EOPNOTSUPP)
+			return read_file_fuse("/proc/diskstats", buf, size, d);
+	}
+
+	ret = cgroup_ops->get_io_wait_time(cgroup_ops, cg, &io_wait_time_str);
+	if (ret < 0) {
+		if (ret == -EOPNOTSUPP)
+			return read_file_fuse("/proc/diskstats", buf, size, d);
+	}
+
+	ret = cgroup_ops->get_io_service_time(cgroup_ops, cg, &io_service_time_str);
+	if (ret < 0) {
+		if (ret == -EOPNOTSUPP)
+			return read_file_fuse("/proc/diskstats", buf, size, d);
+	}
 
 	f = fopen("/proc/diskstats", "r");
 	if (!f)
-		goto err;
+		return 0;
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
@@ -5239,13 +5263,11 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0) {
 			perror("Error writing to fuse buf");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		if (l >= cache_size) {
 			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			rv = 0;
-			goto err;
+			return 0;
 		}
 		cache += l;
 		cache_size -= l;
@@ -5257,18 +5279,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	if (total_len > size ) total_len = size;
 	memcpy(buf, d->buf, total_len);
 
-	rv = total_len;
-err:
-	free(cg);
-	if (f)
-		fclose(f);
-	free(line);
-	free(io_serviced_str);
-	free(io_merged_str);
-	free(io_service_bytes_str);
-	free(io_wait_time_str);
-	free(io_service_time_str);
-	return rv;
+	return total_len;
 }
 
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
