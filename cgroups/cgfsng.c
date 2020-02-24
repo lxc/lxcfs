@@ -598,7 +598,7 @@ static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
 	if (!h)
 		return false;
 
-	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	*value = readat_file(h->fd, path);
 	return *value != NULL;
 }
@@ -628,7 +628,7 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 		ret = CGROUP2_SUPER_MAGIC;
 	}
 
-	path = must_make_path(*cgroup == '/' ? "." : "", cgroup, file, NULL);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	*value = readat_file(h->fd, path);
 	if (!*value)
 		ret = -1;
@@ -664,6 +664,77 @@ static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
 				   char **value)
 {
 	return cgfsng_get_memory(ops, cgroup, "memory.stat", value);
+}
+
+static char *readat_cpuset(int cgroup_fd)
+{
+	__do_free char *val = NULL;
+
+	val = readat_file(cgroup_fd, "cpuset.cpus");
+	if (val && strcmp(val, "") != 0)
+		return move_ptr(val);
+
+	free_disarm(val);
+	val = readat_file(cgroup_fd, "cpuset.cpus.effective");
+	if (val && strcmp(val, "") != 0)
+		return move_ptr(val);
+
+	return NULL;
+}
+
+static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
+				  char **value)
+{
+	__do_close_prot_errno int cgroup_fd = -EBADF;
+	__do_free char *path = NULL;
+	char *v;
+	struct hierarchy *h;
+	int ret;
+
+	h = ops->get_hierarchy(ops, "cpuset");
+	if (!h)
+		return -1;
+
+	if (!is_unified_hierarchy(h))
+		ret = CGROUP_SUPER_MAGIC;
+	else
+		ret = CGROUP2_SUPER_MAGIC;
+
+	*value = NULL;
+	path = must_make_path(dot_or_empty(cgroup), cgroup, NULL);
+	cgroup_fd = openat_safe(h->fd, path);
+	if (cgroup_fd < 0) {
+		return -1;
+	}
+	v = readat_cpuset(cgroup_fd);
+	if (v) {
+		*value = v;
+		return ret;
+	}
+
+	/*
+	 * cpuset.cpus and cpuset.cpus.effective are empty so we need to look
+	 * the nearest ancestor with a non-empty cpuset.cpus{.effective} file.
+	 */
+	for (;;) {
+		int fd;
+
+		fd = openat_safe(cgroup_fd, "../");
+		if (fd < 0 || !is_cgroup_fd(fd)) {
+			fprintf(stderr, "2222: %s\n", strerror(errno));
+			return -1;
+		}
+
+		close_prot_errno_replace(cgroup_fd, fd);
+
+		v = readat_cpuset(fd);
+		if (v) {
+			*value = v;
+			return ret;
+		}
+	}
+
+	return -1;
 }
 
 /* At startup, parse_hierarchies finds all the info we need about cgroup
@@ -862,13 +933,15 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->mount = cgfsng_mount;
 	cgfsng_ops->nrtasks = cgfsng_nrtasks;
 
-
 	/* memory */
 	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;
 	cgfsng_ops->get_memory_max = cgfsng_get_memory_max;
 	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;
 	cgfsng_ops->get_memory_current = cgfsng_get_memory_current;
 	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
+
+	/* cpuset */
+	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
 
 	return move_ptr(cgfsng_ops);
 }

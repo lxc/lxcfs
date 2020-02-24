@@ -69,5 +69,16 @@ extern char *cg_hybrid_get_current_cgroup(char *basecginfo,
 					  const char *controller, int type);
 extern char *cg_legacy_get_current_cgroup(pid_t pid, const char *controller);
 extern bool mkdir_p(const char *dir, mode_t mode);
+extern bool is_cgroup_fd(int fd);
+
+static inline int openat_safe(int fd, const char *path)
+{
+	return openat(fd, path, O_DIRECTORY | O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+}
+
+static inline const char *dot_or_empty(const char *s)
+{
+	return (*s == '/') ? (const char *){"."} : (const char *){""};
+}
 
 #endif /* __LXC_CGROUP_UTILS_H */

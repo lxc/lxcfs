@@ -738,7 +738,7 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 	 */
 	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
 	if (ret < 0 || (size_t)ret >= len)
 		return false;
 
@@ -804,7 +804,7 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	 */
 	len = strlen(cg) + 2;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
+	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
 
 	if (mkdirat(cfd, dirnam, 0755) < 0)
 		return -errno;
@@ -895,7 +895,7 @@ bool cgfs_remove(const char *controller, const char *cg)
 	 */
 	len = strlen(cg) + 2;
 	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", *cg == '/' ? "." : "", cg);
+	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
 
 	fd = openat(cfd, dirnam, O_DIRECTORY);
 	if (fd < 0)
@@ -921,7 +921,7 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 	 */
 	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
 	if (fchmodat(cfd, pathname, mode, 0) < 0)
 		return false;
 	return true;
@@ -958,7 +958,7 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 	 */
 	len = strlen(file) + 2;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", *file == '/' ? "." : "", file);
+	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
 	if (fchownat(cfd, pathname, uid, gid, 0) < 0)
 		return -errno;
 
@@ -984,7 +984,7 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 	 */
 	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
 	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s/cgroup.procs", *cgroup == '/' ? "." : "", cgroup);
+	snprintf(pathname, len, "%s%s/cgroup.procs", dot_or_empty(cgroup), cgroup);
 
 	fd = openat(cfd, pathname, O_WRONLY);
 	if (fd < 0)
@@ -1013,7 +1013,7 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 	/* Make sure we pass a relative path to *at() family of functions. */
 	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
 	cg = alloca(len);
-	ret = snprintf(cg, len, "%s%s", *cgroup == '/' ? "." : "", cgroup);
+	ret = snprintf(cg, len, "%s%s", dot_or_empty(cgroup), cgroup);
 	if (ret < 0 || (size_t)ret >= len) {
 		lxcfs_error("Pathname too long under %s\n", cgroup);
 		return false;
@@ -1117,7 +1117,7 @@ bool cgfs_param_exist(const char *controller, const char *cgroup, const char *fi
 	 */
 	len = strlen(cgroup) + strlen(file) + 3;
 	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, file);
+	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
 	if (ret < 0 || (size_t)ret >= len)
 		return false;
 
@@ -1149,7 +1149,7 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	if (file)
 		len += strlen(file) + 1;
 	fnam = alloca(len);
-	snprintf(fnam, len, "%s%s%s%s", *cgroup == '/' ? "." : "", cgroup,
+	snprintf(fnam, len, "%s%s%s%s", dot_or_empty(cgroup), cgroup,
 		 file ? "/" : "", file ? file : "");
 
 	ret = fstatat(cfd, fnam, &sb, 0);
@@ -1204,7 +1204,7 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 	 */
 	len = strlen(cgroup) + strlen(f) + 3;
 	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", *cgroup == '/' ? "." : "", cgroup, f);
+	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, f);
 	if (ret < 0 || (size_t)ret >= len)
 		return false;
 
@@ -3543,11 +3543,14 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
  */
 char *get_cpuset(const char *cg)
 {
-	char *answer;
+	char *value = NULL;
+	int ret;
 
-	if (!cgroup_ops->get(cgroup_ops, "cpuset", cg, "cpuset.cpus", &answer))
+	ret = cgroup_ops->get_cpuset_cpus(cgroup_ops, cg, &value);
+	if (ret < 0)
 		return NULL;
-	return answer;
+
+	return value;
 }
 
 bool cpu_in_cpuset(int cpu, const char *cpuset);
@@ -5594,7 +5597,7 @@ void *load_begin(void *arg)
 					path = malloc(length);
 				} while (!path);
 
-				ret = snprintf(path, length, "%s%s", *(f->cg) == '/' ? "." : "", f->cg);
+				ret = snprintf(path, length, "%s%s", dot_or_empty(f->cg), f->cg);
 				if (ret < 0 || ret > length - 1) {
 					/* snprintf failed, ignore the node.*/
 					lxcfs_error("Refresh node %s failed for snprintf().\n", f->cg);
