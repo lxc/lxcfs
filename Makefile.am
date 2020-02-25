@@ -19,6 +19,7 @@ liblxcfs_la_SOURCES = bindings.c bindings.h \
 		      cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 		      cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 		      cpuset_parse.c cpuset_parse.h \
+		      macro.h \
 		      memory_utils.h \
 		      proc_cpuview.c proc_cpuview.h \
 		      proc_fuse.c proc_fuse.h \
@@ -35,6 +36,7 @@ liblxcfstest_la_SOURCES = bindings.c bindings.h \
 			  cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 			  cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 			  cpuset_parse.c cpuset_parse.h \
+			  macro.h \
 			  memory_utils.h \
 			  proc_cpuview.c proc_cpuview.h \
 			  proc_fuse.c proc_fuse.h \
@@ -44,7 +46,19 @@ liblxcfstest_la_SOURCES = bindings.c bindings.h \
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h cgroups/cgroup.h cgroups/cgroup2_devices.h cgroups/cgroup_utils.h macro.h memory_utils.h sysfs_fuse.h
+noinst_HEADERS = bindings.h \
+		 cgroup_fuse.h \
+		 cgroups/cgroup.h \
+		 cgroups/cgroup2_devices.h \
+		 cgroups/cgroup_utils.h \
+		 cpuset_parse.h \
+		 macro.h \
+		 memory_utils.h \
+		 proc_cpuview.h \
+		 proc_fuse.h \
+		 proc_loadavg.h \
+		 sysfs_fuse.h \
+		 utils.h
 
 sodir=$(libdir)
 lxcfs_LTLIBRARIES = liblxcfs.la
