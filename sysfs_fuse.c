@@ -34,6 +34,7 @@
 #include "cgroups/cgroup.h"
 #include "config.h"
 #include "sysfs_fuse.h"
+#include "utils.h"
 
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,

@@ -11,9 +11,6 @@
 /* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
 #define LXCFS_NUMSTRLEN64 21
 
-/* Reserve buffer size to account for file size changes. */
-#define BUF_RESERVE_SIZE 512
-
 enum lxcfs_virt_t {
 	LXC_TYPE_CGDIR,
 	LXC_TYPE_CGFILE,

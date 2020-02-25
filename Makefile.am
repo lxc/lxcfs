@@ -19,7 +19,8 @@ liblxcfs_la_SOURCES = bindings.c bindings.h \
 		      cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 		      cpuset.c \
 		      memory_utils.h \
-		      sysfs_fuse.c sysfs_fuse.h
+		      sysfs_fuse.c sysfs_fuse.h \
+		      utils.c utils.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
@@ -30,7 +31,8 @@ liblxcfstest_la_SOURCES = bindings.c bindings.h \
 			  cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 			  cpuset.c \
 			  memory_utils.h \
-			  sysfs_fuse.c sysfs_fuse.h
+			  sysfs_fuse.c sysfs_fuse.h \
+			  utils.c utils.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
