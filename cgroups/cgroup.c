@@ -51,6 +51,10 @@ void cgroup_exit(struct cgroup_ops *ops)
 		free((*it)->monitor_full_path);
 		free(*it);
 	}
+
+	if (ops->mntns_fd >= 0)
+		close(ops->mntns_fd);
+
 	free(ops->hierarchies);
 
 	free(ops);

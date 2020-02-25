@@ -74,6 +74,12 @@ struct hierarchy {
 };
 
 struct cgroup_ops {
+	/*
+	 * File descriptor of the mount namespace the cgroup hierarchies are
+	 * mounted in.
+	 */
+	int mntns_fd;
+
 	/* string constant */
 	const char *driver;
 
