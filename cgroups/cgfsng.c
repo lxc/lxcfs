@@ -300,7 +300,7 @@ static char **cg_unified_get_controllers(const char *file)
 }
 
 static struct hierarchy *add_hierarchy(struct hierarchy ***h, char **clist, char *mountpoint,
-				       char *container_base_path, int type)
+				       char *base_path, int type)
 {
 	struct hierarchy *new;
 	int newentry;
@@ -308,7 +308,7 @@ static struct hierarchy *add_hierarchy(struct hierarchy ***h, char **clist, char
 	new = zalloc(sizeof(*new));
 	new->controllers = clist;
 	new->mountpoint = mountpoint;
-	new->container_base_path = container_base_path;
+	new->base_path = base_path;
 	new->version = type;
 
 	newentry = append_null_to_list((void ***)h);
@@ -828,11 +828,10 @@ static int cg_hybrid_init(struct cgroup_ops *ops)
 		if (!mountpoint)
 			log_error_errno(goto next, EINVAL, "Failed parsing mountpoint from \"%s\"", line);
 
-		if (type == CGROUP_SUPER_MAGIC) {
+		if (type == CGROUP_SUPER_MAGIC)
 			base_cgroup = cg_hybrid_get_current_cgroup(basecginfo, controller_list[0], CGROUP_SUPER_MAGIC);
-		} else {
+		else
 			base_cgroup = cg_hybrid_get_current_cgroup(basecginfo, NULL, CGROUP2_SUPER_MAGIC);
-		}
 		if (!base_cgroup)
 			log_error_errno(goto next, EINVAL, "Failed to find current cgroup %s", mountpoint);
 

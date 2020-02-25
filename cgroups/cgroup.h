@@ -63,9 +63,7 @@ struct hierarchy {
 	char **controllers;
 	char *__controllers;
 	char *mountpoint;
-	char *container_base_path;
-	char *container_full_path;
-	char *monitor_full_path;
+	char *base_path;
 	int version;
 
 	/* cgroup2 only */
@@ -85,10 +83,6 @@ struct cgroup_ops {
 
 	/* string constant */
 	const char *version;
-
-	/* What controllers is the container supposed to use. */
-	char *container_cgroup;
-	char *monitor_cgroup;
 
 	/* @hierarchies
 	 * - A NULL-terminated array of struct hierarchy, one per legacy
