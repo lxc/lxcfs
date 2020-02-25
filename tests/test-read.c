@@ -1,4 +1,15 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -25,7 +36,7 @@ int main(int argc, char *argv[]){
 		fd = open(file, O_RDONLY|O_DIRECT);
 	else
 		fd = open(file, O_RDONLY);
-	
+
 	while(i++ < read_count){
 		memset(buf, 0, BUFSIZE);
 		ret = read(fd, buf, BUFSIZE-1);

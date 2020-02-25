@@ -1,14 +1,40 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE
 #endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <linux/magic.h>
+#include <linux/sched.h>
+#include <sched.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
+#include "../config.h"
+#include "../macro.h"
+#include "../memory_utils.h"
 #include "cgroup.h"
+#include "cgroup_utils.h"
 #include "cgroup2_devices.h"
 
 extern struct cgroup_ops *cgfsng_ops_init(void);
@@ -71,4 +97,34 @@ void prune_init_scope(char *cg)
 		else
 			*point = '\0';
 	}
+}
+
+char *get_pid_cgroup(pid_t pid, const char *contrl)
+{
+	int cfd;
+
+	cfd = get_cgroup_fd(contrl);
+	if (cfd < 0)
+		return false;
+
+	if (pure_unified_layout(cgroup_ops))
+		return cg_unified_get_current_cgroup(pid);
+
+	return cg_legacy_get_current_cgroup(pid, contrl);
+}
+
+/*
+ * Read the cpuset.cpus for cg
+ * Return the answer in a newly allocated string which must be freed
+ */
+char *get_cpuset(const char *cg)
+{
+	char *value = NULL;
+	int ret;
+
+	ret = cgroup_ops->get_cpuset_cpus(cgroup_ops, cg, &value);
+	if (ret < 0)
+		return NULL;
+
+	return value;
 }

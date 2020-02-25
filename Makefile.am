@@ -13,28 +13,52 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c bindings.h \
+		      cgroup_fuse.c cgroup_fuse.h
 		      cgroups/cgfsng.c \
 		      cgroups/cgroup.c cgroups/cgroup.h \
 		      cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 		      cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
-		      cpuset.c \
+		      cpuset_parse.c cpuset_parse.h \
+		      macro.h \
 		      memory_utils.h \
-		      sysfs_fuse.c sysfs_fuse.h
+		      proc_cpuview.c proc_cpuview.h \
+		      proc_fuse.c proc_fuse.h \
+		      proc_loadavg.c proc_loadavg.h \
+		      sysfs_fuse.c sysfs_fuse.h \
+		      utils.c utils.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 liblxcfstest_la_SOURCES = bindings.c bindings.h \
+			  cgroup_fuse.c cgroup_fuse.h
 			  cgroups/cgfsng.c \
 			  cgroups/cgroup.c cgroups/cgroup.h \
 			  cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 			  cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
-			  cpuset.c \
+			  cpuset_parse.c cpuset_parse.h \
+			  macro.h \
 			  memory_utils.h \
-			  sysfs_fuse.c sysfs_fuse.h
+			  proc_cpuview.c proc_cpuview.h \
+			  proc_fuse.c proc_fuse.h \
+			  proc_loadavg.c proc_loadavg.h \
+			  sysfs_fuse.c sysfs_fuse.h \
+			  utils.c utils.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h cgroups/cgroup.h cgroups/cgroup2_devices.h cgroups/cgroup_utils.h macro.h memory_utils.h sysfs_fuse.h
+noinst_HEADERS = bindings.h \
+		 cgroup_fuse.h \
+		 cgroups/cgroup.h \
+		 cgroups/cgroup2_devices.h \
+		 cgroups/cgroup_utils.h \
+		 cpuset_parse.h \
+		 macro.h \
+		 memory_utils.h \
+		 proc_cpuview.h \
+		 proc_fuse.h \
+		 proc_loadavg.h \
+		 sysfs_fuse.h \
+		 utils.h
 
 sodir=$(libdir)
 lxcfs_LTLIBRARIES = liblxcfs.la
@@ -58,12 +82,15 @@ lxcfs.1: lxcfs lxcfs.man.add
 endif
 
 TEST_READ: tests/test-read.c
-	$(CC) -o tests/test-read tests/test-read.c
-TEST_CPUSET: tests/cpusetrange.c cpuset.c
-	$(CC) -o tests/cpusetrange tests/cpusetrange.c cpuset.c
+	$(CC) -o tests/test-read \
+		tests/test-read.c
+TEST_CPUSET: tests/cpusetrange.c cpuset_parse.c
+	$(CC) -o tests/cpusetrange \
+		tests/cpusetrange.c \
+		cpuset_parse.c
 TEST_SYSCALLS: tests/test_syscalls.c
-	$(CC) -o tests/test_syscalls tests/test_syscalls.c
-
+	$(CC) -o tests/test_syscalls \
+		tests/test_syscalls.c
 tests: TEST_READ TEST_CPUSET TEST_SYSCALLS
 
 distclean:

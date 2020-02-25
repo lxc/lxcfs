@@ -1,10 +1,19 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE
 #endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
@@ -13,10 +22,11 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#include "../config.h"
+#include "../macro.h"
+#include "../memory_utils.h"
 #include "cgroup.h"
 #include "cgroup_utils.h"
-#include "macro.h"
-#include "memory_utils.h"
 
 int get_cgroup_version(char *line)
 {

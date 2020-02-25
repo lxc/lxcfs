@@ -1,6 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
@@ -34,6 +42,7 @@
 #include "cgroups/cgroup.h"
 #include "config.h"
 #include "sysfs_fuse.h"
+#include "utils.h"
 
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,

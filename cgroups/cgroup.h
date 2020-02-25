@@ -3,11 +3,24 @@
 #ifndef __LXC_CGROUP_H
 #define __LXC_CGROUP_H
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/types.h>
 
-#include "macro.h"
+#include "../config.h"
+#include "../macro.h"
+#include "../memory_utils.h"
 
 #define DEFAULT_CGROUP_MOUNTPOINT "/sys/fs/cgroup"
 
@@ -183,5 +196,17 @@ static inline bool is_unified_controller(int version)
 {
 	return version == CGROUP2_SUPER_MAGIC;
 }
+
+static inline int get_cgroup_fd(const char *controller)
+{
+	struct hierarchy *h;
+
+	h = cgroup_ops->get_hierarchy(cgroup_ops, controller);
+	return h ? h->fd : -EBADF;
+}
+
+extern char *get_pid_cgroup(pid_t pid, const char *contrl);
+
+extern char *get_cpuset(const char *cg);
 
 #endif
