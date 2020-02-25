@@ -414,8 +414,6 @@ static void lock_mutex(pthread_mutex_t *l)
 
 struct cgroup_ops *cgroup_ops;
 
-static int cgroup_mount_ns_fd = -1;
-
 static void unlock_mutex(pthread_mutex_t *l)
 {
 	int ret;
@@ -701,7 +699,7 @@ static void print_subsystems(void)
 {
 	int i = 0;
 
-	fprintf(stderr, "mount namespace: %d\n", cgroup_mount_ns_fd);
+	fprintf(stderr, "mount namespace: %d\n", cgroup_ops->mntns_fd);
 	fprintf(stderr, "hierarchies:\n");
 	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
 		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
@@ -6056,8 +6054,8 @@ static bool cgfs_prepare_mounts(void)
 		return false;
 	}
 
-	cgroup_mount_ns_fd = preserve_mnt_ns(getpid());
-	if (cgroup_mount_ns_fd < 0) {
+	cgroup_ops->mntns_fd = preserve_mnt_ns(getpid());
+	if (cgroup_ops->mntns_fd < 0) {
 		lxcfs_error("Failed to preserve mount namespace: %s.\n", strerror(errno));
 		return false;
 	}
@@ -6146,8 +6144,7 @@ static void __attribute__((constructor)) lxcfs_init(void)
 
 static void __attribute__((destructor)) lxcfs_exit(void)
 {
-	lxcfs_debug("%s\n", "Running destructor for liblxcfs.");
+	lxcfs_debug("%s\n", "Running destructor for liblxcfs");
 	free_cpuview();
-	close_prot_errno_disarm(cgroup_mount_ns_fd);
 	cgroup_exit(cgroup_ops);
 }

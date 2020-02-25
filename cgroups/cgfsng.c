@@ -300,7 +300,7 @@ static char **cg_unified_get_controllers(const char *file)
 }
 
 static struct hierarchy *add_hierarchy(struct hierarchy ***h, char **clist, char *mountpoint,
-				       char *container_base_path, int type)
+				       char *base_path, int type)
 {
 	struct hierarchy *new;
 	int newentry;
@@ -308,7 +308,7 @@ static struct hierarchy *add_hierarchy(struct hierarchy ***h, char **clist, char
 	new = zalloc(sizeof(*new));
 	new->controllers = clist;
 	new->mountpoint = mountpoint;
-	new->container_base_path = container_base_path;
+	new->base_path = base_path;
 	new->version = type;
 
 	newentry = append_null_to_list((void ***)h);
@@ -499,57 +499,6 @@ static bool cgfsng_mount(struct cgroup_ops *ops, const char *root)
 
 on_error:
 	return retval;
-}
-
-static int recursive_count_nrtasks(char *dirname)
-{
-	__do_free char *path = NULL;
-	__do_closedir DIR *dir = NULL;
-	struct dirent *direntp;
-	int count = 0, ret;
-
-	dir = opendir(dirname);
-	if (!dir)
-		return 0;
-
-	while ((direntp = readdir(dir))) {
-		struct stat mystat;
-
-		if (!strcmp(direntp->d_name, ".") ||
-		    !strcmp(direntp->d_name, ".."))
-			continue;
-
-		path = must_make_path(dirname, direntp->d_name, NULL);
-
-		if (lstat(path, &mystat))
-			continue;
-
-		if (!S_ISDIR(mystat.st_mode))
-			continue;
-
-		count += recursive_count_nrtasks(path);
-	}
-
-	path = must_make_path(dirname, "cgroup.procs", NULL);
-	ret = lxc_count_file_lines(path);
-	if (ret != -1)
-		count += ret;
-
-	return count;
-}
-
-static int cgfsng_nrtasks(struct cgroup_ops *ops)
-{
-	__do_free char *path = NULL;
-
-	if (!ops)
-		return ret_set_errno(-1, ENOENT);
-
-	if (!ops->container_cgroup || !ops->hierarchies)
-		return ret_set_errno(-1, EINVAL);
-
-	path = must_make_path(ops->hierarchies[0]->container_full_path, NULL);
-	return recursive_count_nrtasks(path);
 }
 
 static int cgfsng_num_hierarchies(struct cgroup_ops *ops)
@@ -879,11 +828,10 @@ static int cg_hybrid_init(struct cgroup_ops *ops)
 		if (!mountpoint)
 			log_error_errno(goto next, EINVAL, "Failed parsing mountpoint from \"%s\"", line);
 
-		if (type == CGROUP_SUPER_MAGIC) {
+		if (type == CGROUP_SUPER_MAGIC)
 			base_cgroup = cg_hybrid_get_current_cgroup(basecginfo, controller_list[0], CGROUP_SUPER_MAGIC);
-		} else {
+		else
 			base_cgroup = cg_hybrid_get_current_cgroup(basecginfo, NULL, CGROUP2_SUPER_MAGIC);
-		}
 		if (!base_cgroup)
 			log_error_errno(goto next, EINVAL, "Failed to find current cgroup %s", mountpoint);
 
@@ -1006,7 +954,6 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->driver = "cgfsng";
 	cgfsng_ops->version = "1.0.0";
 	cgfsng_ops->mount = cgfsng_mount;
-	cgfsng_ops->nrtasks = cgfsng_nrtasks;
 
 	/* memory */
 	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;

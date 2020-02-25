@@ -26,18 +26,11 @@ struct cgroup_ops *cgroup_init(void)
 
 void cgroup_exit(struct cgroup_ops *ops)
 {
-	struct hierarchy **it;
-
 	if (!ops)
 		return;
 
-	free(ops->container_cgroup);
-	free(ops->monitor_cgroup);
-
-	for (it = ops->hierarchies; it && *it; it++) {
-		char **p;
-
-		for (p = (*it)->controllers; p && *p; p++)
+	for (struct hierarchy **it = ops->hierarchies; it && *it; it++) {
+		for (char **p = (*it)->controllers; p && *p; p++)
 			free(*p);
 		free((*it)->controllers);
 		free((*it)->__controllers);
@@ -46,11 +39,13 @@ void cgroup_exit(struct cgroup_ops *ops)
 			close((*it)->fd);
 
 		free((*it)->mountpoint);
-		free((*it)->container_base_path);
-		free((*it)->container_full_path);
-		free((*it)->monitor_full_path);
+		free((*it)->base_path);
 		free(*it);
 	}
+
+	if (ops->mntns_fd >= 0)
+		close(ops->mntns_fd);
+
 	free(ops->hierarchies);
 
 	free(ops);

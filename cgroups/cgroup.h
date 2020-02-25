@@ -63,9 +63,7 @@ struct hierarchy {
 	char **controllers;
 	char *__controllers;
 	char *mountpoint;
-	char *container_base_path;
-	char *container_full_path;
-	char *monitor_full_path;
+	char *base_path;
 	int version;
 
 	/* cgroup2 only */
@@ -74,15 +72,17 @@ struct hierarchy {
 };
 
 struct cgroup_ops {
+	/*
+	 * File descriptor of the mount namespace the cgroup hierarchies are
+	 * mounted in.
+	 */
+	int mntns_fd;
+
 	/* string constant */
 	const char *driver;
 
 	/* string constant */
 	const char *version;
-
-	/* What controllers is the container supposed to use. */
-	char *container_cgroup;
-	char *monitor_cgroup;
 
 	/* @hierarchies
 	 * - A NULL-terminated array of struct hierarchy, one per legacy
@@ -117,7 +117,6 @@ struct cgroup_ops {
 	int (*num_hierarchies)(struct cgroup_ops *ops);
 	bool (*get_hierarchies)(struct cgroup_ops *ops, int n, char ***out);
 	bool (*mount)(struct cgroup_ops *ops, const char *root);
-	int (*nrtasks)(struct cgroup_ops *ops);
 	struct hierarchy *(*get_hierarchy)(struct cgroup_ops *ops,
 					   const char *controller);
 	bool (*get)(struct cgroup_ops *ops, const char *controller,
