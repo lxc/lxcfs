@@ -127,3 +127,19 @@ int preserve_ns(const int pid, const char *ns)
 
 	return open(path, O_RDONLY | O_CLOEXEC);
 }
+
+void do_release_file_info(struct fuse_file_info *fi)
+{
+	struct file_info *f = (struct file_info *)fi->fh;
+
+	if (!f)
+		return;
+
+	fi->fh = 0;
+
+	free_disarm(f->controller);
+	free_disarm(f->cgroup);
+	free_disarm(f->file);
+	free_disarm(f->buf);
+	free_disarm(f);
+}
