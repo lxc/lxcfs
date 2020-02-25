@@ -1,7 +1,29 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#define __STDC_FORMAT_MACROS
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+
+#include "bindings.h"
+#include "cgroups/cgroup.h"
+#include "cgroups/cgroup_utils.h"
+#include "config.h"
+#include "memory_utils.h"
+#include "proc_loadavg.h"
+#include "utils.h"
 
 /*
  * Helper functions for cpuset_in-set

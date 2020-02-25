@@ -3,8 +3,15 @@
 /* Parts of this taken from systemd's implementation. */
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE
 #endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -15,9 +22,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../config.h"
+#include "../macro.h"
+#include "../memory_utils.h"
 #include "cgroup2_devices.h"
-#include "macro.h"
-#include "memory_utils.h"
 
 #ifdef HAVE_STRUCT_BPF_CGROUP_DEV_CTX
 #include <linux/bpf.h>

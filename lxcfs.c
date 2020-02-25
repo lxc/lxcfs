@@ -6,7 +6,15 @@
  * See COPYING file for details.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
 
 #include <alloca.h>
 #include <dirent.h>
@@ -868,7 +876,7 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 	if (strncmp(path, "/proc", 5) == 0)
 		return -EPERM;
 
-	if (strncmp(path, "/sys", 4) == 0) 
+	if (strncmp(path, "/sys", 4) == 0)
 		return -EPERM;
 	return -ENOENT;
 }

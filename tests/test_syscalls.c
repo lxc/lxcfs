@@ -1,20 +1,33 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#include <errno.h>
+#include <fcntl.h>
+#include <libgen.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <linux/un.h>
-#include <attr/xattr.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/xattr.h>
+#include <unistd.h>
 #include <utime.h>
-#include <sys/stat.h>
-#include <sys/mount.h>
-#include <libgen.h>
-#include <fcntl.h>
-#include <errno.h>
-
 
 void test_open(const char *path)
 {

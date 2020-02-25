@@ -1,8 +1,31 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
 #ifndef __LXCFS_BINDINGS_H
 #define __LXCFS_BINDINGS_H
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#include <fuse.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include "config.h"
 #include "macro.h"
 #include "cgroup_fuse.h"
+#include "proc_cpuview.h"
+#include "proc_fuse.h"
+#include "proc_loadavg.h"
 #include "sysfs_fuse.h"
 
 /* directory under which we mount the controllers - /run/lxcfs/controllers */
@@ -43,25 +66,7 @@ struct lxcfs_opts {
 	bool swap_off;
 };
 
-extern int proc_getattr(const char *path, struct stat *sb);
-extern int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi);
-extern int proc_release(const char *path, struct fuse_file_info *fi);
-extern int proc_open(const char *path, struct fuse_file_info *fi);
-extern int proc_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi);
-extern int proc_access(const char *path, int mask);
-extern pthread_t load_daemon(int load_use);
-extern int stop_load_daemon(pthread_t pid);
-
 extern pid_t lookup_initpid_in_store(pid_t qpid);
-extern char *get_pid_cgroup(pid_t pid, const char *contrl);
-extern int read_file_fuse(const char *path, char *buf, size_t size,
-			  struct file_info *d);
 extern void prune_init_slice(char *cg);
-extern char *get_cpuset(const char *cg);
-extern int max_cpu_count(const char *cg);
-extern void do_release_file_info(struct fuse_file_info *fi);
-extern int cpu_number_in_cpuset(const char *cpuset);
 
 #endif /* __LXCFS_BINDINGS_H */

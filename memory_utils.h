@@ -3,6 +3,16 @@
 #ifndef __LXCFS_MEMORY_UTILS_H
 #define __LXCFS_MEMORY_UTILS_H
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -10,6 +20,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "macro.h"
 
 static inline void __auto_free__(void *p)

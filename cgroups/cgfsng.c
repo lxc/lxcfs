@@ -13,8 +13,15 @@
  */
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE
 #endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -31,11 +38,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../config.h"
+#include "../macro.h"
+#include "../memory_utils.h"
 #include "cgroup.h"
 #include "cgroup2_devices.h"
 #include "cgroup_utils.h"
-#include "macro.h"
-#include "memory_utils.h"
 
 static void free_string_list(char **clist)
 {

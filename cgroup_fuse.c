@@ -1,6 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
@@ -1152,107 +1160,6 @@ out:
 
 #define POLLIN_SET ( EPOLLIN | EPOLLHUP | EPOLLRDHUP )
 
-static bool wait_for_sock(int sock, int timeout)
-{
-	struct epoll_event ev;
-	int epfd, ret, now, starttime, deltatime, saved_errno;
-
-	if ((starttime = time(NULL)) < 0)
-		return false;
-
-	if ((epfd = epoll_create(1)) < 0) {
-		lxcfs_error("%s\n", "Failed to create epoll socket: %m.");
-		return false;
-	}
-
-	ev.events = POLLIN_SET;
-	ev.data.fd = sock;
-	if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) < 0) {
-		lxcfs_error("%s\n", "Failed adding socket to epoll: %m.");
-		close(epfd);
-		return false;
-	}
-
-again:
-	if ((now = time(NULL)) < 0) {
-		close(epfd);
-		return false;
-	}
-
-	deltatime = (starttime + timeout) - now;
-	if (deltatime < 0) { // timeout
-		errno = 0;
-		close(epfd);
-		return false;
-	}
-	ret = epoll_wait(epfd, &ev, 1, 1000*deltatime + 1);
-	if (ret < 0 && errno == EINTR)
-		goto again;
-	saved_errno = errno;
-	close(epfd);
-
-	if (ret <= 0) {
-		errno = saved_errno;
-		return false;
-	}
-	return true;
-}
-
-static int msgrecv(int sockfd, void *buf, size_t len)
-{
-	if (!wait_for_sock(sockfd, 2))
-		return -1;
-	return recv(sockfd, buf, len, MSG_DONTWAIT);
-}
-
-#define SEND_CREDS_OK 0
-#define SEND_CREDS_NOTSK 1
-#define SEND_CREDS_FAIL 2
-
-static int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
-{
-	struct msghdr msg = { 0 };
-	struct iovec iov;
-	struct cmsghdr *cmsg;
-	char cmsgbuf[CMSG_SPACE(sizeof(*cred))];
-	char buf[1];
-	buf[0] = 'p';
-
-	if (pingfirst) {
-		if (msgrecv(sock, buf, 1) != 1) {
-			lxcfs_error("%s\n", "Error getting reply from server over socketpair.");
-			return SEND_CREDS_FAIL;
-		}
-	}
-
-	msg.msg_control = cmsgbuf;
-	msg.msg_controllen = sizeof(cmsgbuf);
-
-	cmsg = CMSG_FIRSTHDR(&msg);
-	cmsg->cmsg_len = CMSG_LEN(sizeof(struct ucred));
-	cmsg->cmsg_level = SOL_SOCKET;
-	cmsg->cmsg_type = SCM_CREDENTIALS;
-	memcpy(CMSG_DATA(cmsg), cred, sizeof(*cred));
-
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-
-	buf[0] = v;
-	iov.iov_base = buf;
-	iov.iov_len = sizeof(buf);
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-
-	if (sendmsg(sock, &msg, 0) < 0) {
-		lxcfs_error("Failed at sendmsg: %s.\n",strerror(errno));
-		if (errno == 3)
-			return SEND_CREDS_NOTSK;
-		return SEND_CREDS_FAIL;
-	}
-
-	return SEND_CREDS_OK;
-}
-
 static int wait_for_pid(pid_t pid)
 {
 	int status, ret;
@@ -1272,64 +1179,6 @@ again:
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
 		return -1;
 	return 0;
-}
-
-static bool recv_creds(int sock, struct ucred *cred, char *v)
-{
-	struct msghdr msg = { 0 };
-	struct iovec iov;
-	struct cmsghdr *cmsg;
-	char cmsgbuf[CMSG_SPACE(sizeof(*cred))];
-	char buf[1];
-	int ret;
-	int optval = 1;
-
-	*v = '1';
-
-	cred->pid = -1;
-	cred->uid = -1;
-	cred->gid = -1;
-
-	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
-		lxcfs_error("Failed to set passcred: %s\n", strerror(errno));
-		return false;
-	}
-	buf[0] = '1';
-	if (write(sock, buf, 1) != 1) {
-		lxcfs_error("Failed to start write on scm fd: %s\n", strerror(errno));
-		return false;
-	}
-
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_control = cmsgbuf;
-	msg.msg_controllen = sizeof(cmsgbuf);
-
-	iov.iov_base = buf;
-	iov.iov_len = sizeof(buf);
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-
-	if (!wait_for_sock(sock, 2)) {
-		lxcfs_error("Timed out waiting for scm_cred: %s\n", strerror(errno));
-		return false;
-	}
-	ret = recvmsg(sock, &msg, MSG_DONTWAIT);
-	if (ret < 0) {
-		lxcfs_error("Failed to receive scm_cred: %s\n", strerror(errno));
-		return false;
-	}
-
-	cmsg = CMSG_FIRSTHDR(&msg);
-
-	if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred)) &&
-			cmsg->cmsg_level == SOL_SOCKET &&
-			cmsg->cmsg_type == SCM_CREDENTIALS) {
-		memcpy(cred, CMSG_DATA(cmsg), sizeof(*cred));
-	}
-	*v = buf[0];
-
-	return true;
 }
 
 /*

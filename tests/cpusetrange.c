@@ -1,15 +1,23 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 26
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-/*
- * cpusets are in format "1,2-3,4"
- * iow, comma-delimited ranges
- */
-extern bool cpu_in_cpuset(int cpu, const char *cpuset);
+#include "../cpuset_parse.h"
 
-void verify(bool condition) {
+static void verify(bool condition) {
 	if (condition) {
 		printf(" PASS\n");
 	} else {
