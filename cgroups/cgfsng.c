@@ -501,57 +501,6 @@ on_error:
 	return retval;
 }
 
-static int recursive_count_nrtasks(char *dirname)
-{
-	__do_free char *path = NULL;
-	__do_closedir DIR *dir = NULL;
-	struct dirent *direntp;
-	int count = 0, ret;
-
-	dir = opendir(dirname);
-	if (!dir)
-		return 0;
-
-	while ((direntp = readdir(dir))) {
-		struct stat mystat;
-
-		if (!strcmp(direntp->d_name, ".") ||
-		    !strcmp(direntp->d_name, ".."))
-			continue;
-
-		path = must_make_path(dirname, direntp->d_name, NULL);
-
-		if (lstat(path, &mystat))
-			continue;
-
-		if (!S_ISDIR(mystat.st_mode))
-			continue;
-
-		count += recursive_count_nrtasks(path);
-	}
-
-	path = must_make_path(dirname, "cgroup.procs", NULL);
-	ret = lxc_count_file_lines(path);
-	if (ret != -1)
-		count += ret;
-
-	return count;
-}
-
-static int cgfsng_nrtasks(struct cgroup_ops *ops)
-{
-	__do_free char *path = NULL;
-
-	if (!ops)
-		return ret_set_errno(-1, ENOENT);
-
-	if (!ops->container_cgroup || !ops->hierarchies)
-		return ret_set_errno(-1, EINVAL);
-
-	path = must_make_path(ops->hierarchies[0]->container_full_path, NULL);
-	return recursive_count_nrtasks(path);
-}
-
 static int cgfsng_num_hierarchies(struct cgroup_ops *ops)
 {
 	int i = 0;
@@ -1006,7 +955,6 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->driver = "cgfsng";
 	cgfsng_ops->version = "1.0.0";
 	cgfsng_ops->mount = cgfsng_mount;
-	cgfsng_ops->nrtasks = cgfsng_nrtasks;
 
 	/* memory */
 	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;

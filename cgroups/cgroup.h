@@ -123,7 +123,6 @@ struct cgroup_ops {
 	int (*num_hierarchies)(struct cgroup_ops *ops);
 	bool (*get_hierarchies)(struct cgroup_ops *ops, int n, char ***out);
 	bool (*mount)(struct cgroup_ops *ops, const char *root);
-	int (*nrtasks)(struct cgroup_ops *ops);
 	struct hierarchy *(*get_hierarchy)(struct cgroup_ops *ops,
 					   const char *controller);
 	bool (*get)(struct cgroup_ops *ops, const char *controller,
