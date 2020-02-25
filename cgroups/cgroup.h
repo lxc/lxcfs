@@ -3,6 +3,7 @@
 #ifndef __LXC_CGROUP_H
 #define __LXC_CGROUP_H
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -182,6 +183,14 @@ static inline bool is_unified_hierarchy(const struct hierarchy *h)
 static inline bool is_unified_controller(int version)
 {
 	return version == CGROUP2_SUPER_MAGIC;
+}
+
+static inline int get_cgroup_fd(const char *controller)
+{
+	struct hierarchy *h;
+
+	h = cgroup_ops->get_hierarchy(cgroup_ops, controller);
+	return h ? h->fd : -EBADF;
 }
 
 #endif

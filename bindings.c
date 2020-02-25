@@ -707,19 +707,6 @@ static void print_subsystems(void)
 	}
 }
 
-/* do we need to do any massaging here?  I'm not sure... */
-/* Return the mounted controller and store the corresponding open file descriptor
- * referring to the controller mountpoint in the private lxcfs namespace in
- * @cfd.
- */
-static int find_mounted_controller(const char *controller)
-{
-	struct hierarchy *h;
-
-	h = cgroup_ops->get_hierarchy(cgroup_ops, controller);
-	return h ? h->fd : -EBADF;
-}
-
 bool cgfs_set_value(const char *controller, const char *cgroup, const char *file,
 		const char *value)
 {
@@ -727,7 +714,7 @@ bool cgfs_set_value(const char *controller, const char *cgroup, const char *file
 	size_t len;
 	char *fnam;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -793,7 +780,7 @@ int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 	size_t len;
 	char *dirnam;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return -EINVAL;
 
@@ -884,7 +871,7 @@ bool cgfs_remove(const char *controller, const char *cg)
 	char *dirnam;
 	bool bret;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -910,7 +897,7 @@ bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 	size_t len;
 	char *pathname;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -947,7 +934,7 @@ int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t g
 	size_t len;
 	char *pathname;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -973,7 +960,7 @@ FILE *open_pids_file(const char *controller, const char *cgroup)
 	size_t len;
 	char *pathname;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1003,7 +990,7 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup, bool
 	struct dirent *dirent;
 	DIR *dir;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	*list = NULL;
 	if (cfd < 0)
 		return false;
@@ -1106,7 +1093,7 @@ bool cgfs_param_exist(const char *controller, const char *cgroup, const char *fi
 	size_t len;
 	char *fnam;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1130,7 +1117,7 @@ struct cgfs_files *cgfs_get_key(const char *controller, const char *cgroup, cons
 	struct stat sb;
 	struct cgfs_files *newkey;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1193,7 +1180,7 @@ bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
 	int ret;
 	struct stat sb;
 
-	cfd = find_mounted_controller(controller);
+	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1553,7 +1540,7 @@ char *get_pid_cgroup(pid_t pid, const char *contrl)
 {
 	int cfd;
 
-	cfd = find_mounted_controller(contrl);
+	cfd = get_cgroup_fd(contrl);
 	if (cfd < 0)
 		return false;
 
@@ -5578,7 +5565,7 @@ static int proc_loadavg_read(char *buf, size_t size, off_t offset,
 
 	/* First time */
 	if (n == NULL) {
-		cfd = find_mounted_controller("cpu");
+		cfd = get_cgroup_fd("cpu");
 		if (cfd >= 0) {
 			/*
 			 * In locate_node() above, pthread_rwlock_unlock() isn't used
