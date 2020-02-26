@@ -40,6 +40,8 @@
 
 #include "bindings.h"
 #include "config.h"
+#include "macro.h"
+#include "memory_utils.h"
 
 void *dlopen_handle;
 
@@ -1043,7 +1045,7 @@ bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
 
 static int set_pidfile(char *pidfile)
 {
-	int fd;
+	__do_close_prot_errno int fd = -EBADF;
 	char buf[50];
 	struct flock fl;
 
@@ -1059,28 +1061,25 @@ static int set_pidfile(char *pidfile)
 	}
 
 	if (fcntl(fd, F_SETLK, &fl) == -1) {
-		if (errno  == EAGAIN || errno == EACCES) {
-			fprintf(stderr, "PID file '%s' is already locked.\n", pidfile);
-			close(fd);
-			return -1;
-		}
-		fprintf(stderr, "Warning; unable to lock PID file, proceeding.\n");
+		if (errno == EAGAIN || errno == EACCES)
+			return log_error_errno(-1,
+					       errno, "PID file '%s' is already locked",
+					       pidfile);
+		fprintf(stderr, "Warning; unable to lock PID file, proceeding");
 	}
 
-	if (ftruncate(fd, 0) == -1) {
-		fprintf(stderr, "Error truncating PID file '%s': %m", pidfile);
-		close(fd);
-		return -1;
-	}
+	if (ftruncate(fd, 0))
+		return log_error_errno(-1, errno,
+				       "Error truncating PID file '%s': %m",
+				       pidfile);
 
-	snprintf(buf, 50, "%ld\n", (long) getpid());
-	if (write(fd, buf, strlen(buf)) != strlen(buf)) {
-		fprintf(stderr, "Error writing to PID file '%s': %m", pidfile);
-		close(fd);
-		return -1;
-	}
+	snprintf(buf, 50, "%ld\n", (long)getpid());
+	if (write(fd, buf, strlen(buf)) != strlen(buf))
+		return log_error_errno(-1, errno,
+				       "Error writing to PID file '%s': %m",
+				       pidfile);
 
-	return fd;
+	return move_fd(fd);
 }
 
 int main(int argc, char *argv[])

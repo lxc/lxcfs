@@ -483,13 +483,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 }
 
 #if RELOADTEST
-void iwashere(void)
+static inline void iwashere(void)
 {
-	int fd;
-
-	fd = creat("/tmp/lxcfs-iwashere", 0644);
-	if (fd >= 0)
-		close(fd);
+	mknod("/tmp/lxcfs-iwashere", S_IFREG, 0644);
 }
 #endif
 
@@ -524,8 +520,8 @@ static double get_reaper_busy(pid_t task)
 
 static uint64_t get_reaper_start_time(pid_t pid)
 {
+	__do_fclose FILE *f = NULL;
 	int ret;
-	FILE *f;
 	uint64_t starttime;
 	/* strlen("/proc/") = 6
 	 * +
@@ -588,17 +584,10 @@ static uint64_t get_reaper_start_time(pid_t pid)
 			"%*d "      /* (21) itrealvalue %ld  */
 			"%" PRIu64, /* (22) starttime   %llu */
 		     &starttime);
-	if (ret != 1) {
-		fclose(f);
-		/* Caller can check for EINVAL on 0. */
-		errno = EINVAL;
-		return 0;
-	}
+	if (ret != 1)
+		return ret_set_errno(0, EINVAL);
 
-	fclose(f);
-
-	errno = 0;
-	return starttime;
+	return ret_set_errno(starttime, 0);
 }
 
 static double get_reaper_start_time_in_sec(pid_t pid)
