@@ -39,6 +39,7 @@
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/param.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
@@ -314,6 +315,32 @@ static int send_creds_clone_wrapper(void *arg)
 }
 
 /*
+ * Let's use the "standard stack limit" (i.e. glibc thread size default) for
+ * stack sizes: 8MB.
+ */
+#define __LXCFS_STACK_SIZE (8 * 1024 * 1024)
+static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+{
+	pid_t ret;
+	void *stack;
+
+	stack = malloc(__LXCFS_STACK_SIZE);
+	if (!stack)
+		return ret_errno(ENOMEM);
+
+#ifdef __ia64__
+	ret = __clone2(fn, stack, __LXCFS_STACK_SIZE, flags | SIGCHLD, arg, NULL);
+#else
+	ret = clone(fn, stack + __LXCFS_STACK_SIZE, flags | SIGCHLD, arg, NULL);
+#endif
+	return ret;
+}
+
+#define LXCFS_PROC_PID_NS_LEN                                    \
+	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + \
+	 STRLITERALLEN("/ns/pid") + 1)
+
+/*
  * clone a task which switches to @task's namespace and writes '1'.
  * over a unix sock so we can read the task's reaper's pid in our
  * namespace
@@ -325,73 +352,64 @@ static int send_creds_clone_wrapper(void *arg)
  */
 static void write_task_init_pid_exit(int sock, pid_t target)
 {
-	char fnam[100];
+	__do_close_prot_errno int fd = -EBADF;
+	char path[LXCFS_PROC_PID_NS_LEN];
 	pid_t pid;
-	int fd, ret;
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
 
-	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", (int)target);
-	if (ret < 0 || ret >= sizeof(fnam))
-		_exit(1);
+	snprintf(path, sizeof(path), "/proc/%d/ns/pid", (int)target);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		log_exit("write_task_init_pid_exit open of ns/pid");
 
-	fd = open(fnam, O_RDONLY);
-	if (fd < 0) {
-		perror("write_task_init_pid_exit open of ns/pid");
-		_exit(1);
-	}
-	if (setns(fd, 0)) {
-		perror("write_task_init_pid_exit setns 1");
-		close(fd);
-		_exit(1);
-	}
-	pid = clone(send_creds_clone_wrapper, stack + stack_size, SIGCHLD, &sock);
+	if (setns(fd, 0))
+		log_exit("Failed to setns to pid namespace of process %d", target);
+
+	pid = lxcfs_clone(send_creds_clone_wrapper, &sock, 0);
 	if (pid < 0)
-		_exit(1);
+		_exit(EXIT_FAILURE);
+
 	if (pid != 0) {
 		if (!wait_for_pid(pid))
-			_exit(1);
-		_exit(0);
+			_exit(EXIT_FAILURE);
+
+		_exit(EXIT_SUCCESS);
 	}
 }
 
 static pid_t get_init_pid_for_task(pid_t task)
 {
-	int sock[2];
-	pid_t pid;
-	pid_t ret = -1;
 	char v = '0';
+	pid_t pid_ret = -1;
+	pid_t pid;
+	int sock[2];
 	struct ucred cred;
 
-	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0) {
-		perror("socketpair");
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0)
 		return -1;
-	}
 
 	pid = fork();
 	if (pid < 0)
 		goto out;
-	if (!pid) {
+
+	if (pid == 0) {
 		close(sock[1]);
 		write_task_init_pid_exit(sock[0], task);
-		_exit(0);
+		_exit(EXIT_SUCCESS);
 	}
 
 	if (!recv_creds(sock[1], &cred, &v))
 		goto out;
-	ret = cred.pid;
+
+	pid_ret = cred.pid;
 
 out:
 	close(sock[0]);
 	close(sock[1]);
 	if (pid > 0)
 		wait_for_pid(pid);
-	return ret;
-}
 
-#define LXCFS_PROC_PID_NS_LEN                                    \
-	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + \
-	 STRLITERALLEN("/ns/pid") + 1)
+	return pid_ret;
+}
 
 pid_t lookup_initpid_in_store(pid_t pid)
 {
@@ -457,97 +475,79 @@ static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val)
  */
 static bool is_on_ramfs(void)
 {
-	FILE *f;
-	char *p, *p2;
-	char *line = NULL;
+	__do_free char *line = NULL;
+	__do_fclose FILE *f = NULL;
 	size_t len = 0;
-	int i;
 
-	f = fopen("/proc/self/mountinfo", "r");
+	f = fopen("/proc/self/mountinfo", "re");
 	if (!f)
 		return false;
 
 	while (getline(&line, &len, f) != -1) {
+		int i;
+		char *p, *p2;
+
 		for (p = line, i = 0; p && i < 4; i++)
 			p = strchr(p + 1, ' ');
 		if (!p)
 			continue;
+
 		p2 = strchr(p + 1, ' ');
 		if (!p2)
 			continue;
 		*p2 = '\0';
 		if (strcmp(p + 1, "/") == 0) {
-			// this is '/'.  is it the ramfs?
+			/* This is '/'. Is it the ramfs? */
 			p = strchr(p2 + 1, '-');
-			if (p && strncmp(p, "- rootfs rootfs ", 16) == 0) {
-				free(line);
-				fclose(f);
+			if (p && strncmp(p, "- rootfs rootfs ", 16) == 0)
 				return true;
-			}
 		}
 	}
-	free(line);
-	fclose(f);
+
 	return false;
 }
 
 static int pivot_enter()
 {
-	int ret = -1, oldroot = -1, newroot = -1;
+	__do_close_prot_errno int oldroot = -EBADF, newroot = -EBADF;
 
 	oldroot = open("/", O_DIRECTORY | O_RDONLY);
-	if (oldroot < 0) {
-		lxcfs_error("%s\n", "Failed to open old root for fchdir.");
-		return ret;
-	}
+	if (oldroot < 0)
+		return log_error_errno(-1, errno,
+				       "Failed to open old root for fchdir");
 
 	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
-	if (newroot < 0) {
-		lxcfs_error("%s\n", "Failed to open new root for fchdir.");
-		goto err;
-	}
+	if (newroot < 0)
+		return log_error_errno(-1, errno,
+				       "Failed to open new root for fchdir");
 
 	/* change into new root fs */
-	if (fchdir(newroot) < 0) {
-		lxcfs_error("Failed to change directory to new rootfs: %s.\n", ROOTDIR);
-		goto err;
-	}
+	if (fchdir(newroot) < 0)
+		return log_error_errno(-1,
+				       errno, "Failed to change directory to new rootfs: %s",
+				       ROOTDIR);
 
 	/* pivot_root into our new root fs */
-	if (pivot_root(".", ".") < 0) {
-		lxcfs_error("pivot_root() syscall failed: %s.\n", strerror(errno));
-		goto err;
-	}
+	if (pivot_root(".", ".") < 0)
+		return log_error_errno(-1, errno,
+				       "pivot_root() syscall failed: %s",
+				       strerror(errno));
 
 	/*
 	 * At this point the old-root is mounted on top of our new-root.
 	 * To unmounted it we must not be chdir'd into it, so escape back
 	 * to the old-root.
 	 */
-	if (fchdir(oldroot) < 0) {
-		lxcfs_error("%s\n", "Failed to enter old root.");
-		goto err;
-	}
+	if (fchdir(oldroot) < 0)
+		return log_error_errno(-1, errno, "Failed to enter old root");
 
-	if (umount2(".", MNT_DETACH) < 0) {
-		lxcfs_error("%s\n", "Failed to detach old root.");
-		goto err;
-	}
+	if (umount2(".", MNT_DETACH) < 0)
+		return log_error_errno(-1, errno, "Failed to detach old root");
 
-	if (fchdir(newroot) < 0) {
-		lxcfs_error("%s\n", "Failed to re-enter new root.");
-		goto err;
-	}
+	if (fchdir(newroot) < 0)
+		return log_error_errno(-1, errno, "Failed to re-enter new root");
 
-	ret = 0;
-
-err:
-	if (oldroot > 0)
-		close(oldroot);
-	if (newroot > 0)
-		close(newroot);
-
-	return ret;
+	return 0;
 }
 
 static int chroot_enter()

@@ -42,25 +42,36 @@
  * format: string format. See printf for details.
  * ...: varargs. See printf for details.
  */
-void must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...)
+/*
+ * append the given formatted string to *src.
+ * src: a pointer to a char* in which to append the formatted string.
+ * sz: the number of characters printed so far, minus trailing \0.
+ * asz: the allocated size so far
+ * format: string format. See printf for details.
+ * ...: varargs. See printf for details.
+ */
+char *must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...)
 {
 	char tmp[BUF_RESERVE_SIZE];
-	va_list		args;
+	va_list args;
+	int tmplen;
 
 	va_start (args, format);
-	int tmplen = vsnprintf(tmp, BUF_RESERVE_SIZE, format, args);
+	tmplen = vsnprintf(tmp, BUF_RESERVE_SIZE, format, args);
 	va_end(args);
 
 	if (!*src || tmplen + *sz + 1 >= *asz) {
-		char *buf;
+		char *str;
 		do {
-			buf = realloc(*src, *asz + BUF_RESERVE_SIZE);
-		} while (!buf);
-		*src = buf;
+			str = realloc(*src, *asz + BUF_RESERVE_SIZE);
+		} while (!str);
+		*src = str;
 		*asz += BUF_RESERVE_SIZE;
 	}
 	memcpy((*src) +*sz , tmp, tmplen+1); /* include the \0 */
 	*sz += tmplen;
+
+	return *src;
 }
 
 /**

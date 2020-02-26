@@ -186,8 +186,8 @@ char *lxc_string_join(const char *sep, const char **parts, bool use_as_prefix)
 
 int lxc_count_file_lines(const char *fn)
 {
-	FILE *f;
-	char *line = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
 	size_t sz = 0;
 	int n = 0;
 
@@ -195,12 +195,9 @@ int lxc_count_file_lines(const char *fn)
 	if (!f)
 		return -1;
 
-	while (getline(&line, &sz, f) != -1) {
+	while (getline(&line, &sz, f) != -1)
 		n++;
-	}
 
-	free(line);
-	fclose(f);
 	return n;
 }
 
@@ -292,7 +289,9 @@ static int check_symlink(int fd)
  */
 static int open_if_safe(int dirfd, const char *nextpath)
 {
-	int newfd = openat(dirfd, nextpath, O_RDONLY | O_NOFOLLOW);
+	__do_close_prot_errno int newfd = -EBADF;
+
+	newfd = openat(dirfd, nextpath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
 	if (newfd >= 0) /* Was not a symlink, all good. */
 		return newfd;
 
@@ -310,14 +309,12 @@ static int open_if_safe(int dirfd, const char *nextpath)
 			 * now a link, then something * fishy is going on.
 			 */
 			int ret = check_symlink(newfd);
-			if (ret < 0) {
-				close(newfd);
+			if (ret < 0)
 				newfd = ret;
-			}
 		}
 	}
 
-	return newfd;
+	return move_fd(newfd);
 }
 
 /*
@@ -335,8 +332,9 @@ static int open_if_safe(int dirfd, const char *nextpath)
  */
 static int open_without_symlink(const char *target, const char *prefix_skip)
 {
-	int curlen = 0, dirfd, fulllen, i;
-	char *dup;
+	__do_close_prot_errno int dirfd = -EBADF;
+	__do_free char *dup = NULL;
+	int curlen = 0, fulllen, i;
 
 	fulllen = strlen(target);
 
@@ -359,8 +357,9 @@ static int open_without_symlink(const char *target, const char *prefix_skip)
 	}
 
 	/* Make a copy of target which we can hack up, and tokenize it */
-	if ((dup = strdup(target)) == NULL)
-		return -ENOMEM;
+	dup = strdup(target);
+	if (!dup)
+		return ret_errno(ENOMEM);
 
 	for (i = 0; i < fulllen; i++) {
 		if (dup[i] == '/')
@@ -369,29 +368,25 @@ static int open_without_symlink(const char *target, const char *prefix_skip)
 
 	dirfd = open(prefix_skip, O_RDONLY);
 	if (dirfd < 0)
-		goto out;
+		return -1;
 
 	for (;;) {
-		int newfd, saved_errno;
+		__do_close_prot_errno int newfd = -EBADF;
 		char *nextpath;
 
-		if ((nextpath = get_nextpath(dup, &curlen, fulllen)) == NULL)
-			goto out;
+		nextpath = get_nextpath(dup, &curlen, fulllen);
+		if (!nextpath)
+			return move_fd(dirfd);
 
 		newfd = open_if_safe(dirfd, nextpath);
-		saved_errno = errno;
-		close(dirfd);
+		if (newfd < 0)
+			return -1;
 
+		close_prot_errno_disarm(dirfd);
 		dirfd = newfd;
-		if (newfd < 0) {
-			errno = saved_errno;
-			goto out;
-		}
 	}
 
-out:
-	free(dup);
-	return dirfd;
+	return move_fd(dirfd);
 }
 
 /*
@@ -403,12 +398,12 @@ out:
  * setup before executing the container's init
  */
 int safe_mount(const char *src, const char *dest, const char *fstype,
-		unsigned long flags, const void *data, const char *rootfs)
+	       unsigned long flags, const void *data, const char *rootfs)
 {
-	int destfd, ret, saved_errno;
+	__do_close_prot_errno int destfd = -EBADF, srcfd = -EBADF;
+	int ret;
 	/* Only needs enough for /proc/self/fd/<fd>. */
 	char srcbuf[50], destbuf[50];
-	int srcfd = -1;
 	const char *mntsrc = src;
 
 	if (!rootfs)
@@ -422,43 +417,22 @@ int safe_mount(const char *src, const char *dest, const char *fstype,
 			return srcfd;
 
 		ret = snprintf(srcbuf, sizeof(srcbuf), "/proc/self/fd/%d", srcfd);
-		if (ret < 0 || ret >= (int)sizeof(srcbuf)) {
-			close(srcfd);
+		if (ret < 0 || ret >= (int)sizeof(srcbuf))
 			return -EINVAL;
-		}
 		mntsrc = srcbuf;
 	}
 
 	destfd = open_without_symlink(dest, rootfs);
-	if (destfd < 0) {
-		if (srcfd != -1) {
-			saved_errno = errno;
-			close(srcfd);
-			errno = saved_errno;
-		}
-
-		return destfd;
-	}
+	if (destfd < 0)
+		return -1;
 
 	ret = snprintf(destbuf, sizeof(destbuf), "/proc/self/fd/%d", destfd);
-	if (ret < 0 || ret >= (int)sizeof(destbuf)) {
-		if (srcfd != -1)
-			close(srcfd);
-
-		close(destfd);
-		return -EINVAL;
-	}
+	if (ret < 0 || ret >= (int)sizeof(destbuf))
+		return ret_errno(EINVAL);
 
 	ret = mount(mntsrc, destbuf, fstype, flags, data);
-	saved_errno = errno;
-	if (srcfd != -1)
-		close(srcfd);
-
-	close(destfd);
-	if (ret < 0) {
-		errno = saved_errno;
-		return ret;
-	}
+	if (ret < 0)
+		return -1;
 
 	return 0;
 }
@@ -491,11 +465,11 @@ size_t strlcat(char *d, const char *s, size_t n)
 
 FILE *fopen_cloexec(const char *path, const char *mode)
 {
+	__do_close_prot_errno int fd = -EBADF;
+	__do_fclose FILE *ret = NULL;
 	int open_mode = 0;
 	int step = 0;
-	int fd;
 	int saved_errno = 0;
-	FILE *ret;
 
 	if (!strncmp(mode, "r+", 2)) {
 		open_mode = O_RDWR;
@@ -526,11 +500,11 @@ FILE *fopen_cloexec(const char *path, const char *mode)
 		return NULL;
 
 	ret = fdopen(fd, mode);
-	saved_errno = errno;
 	if (!ret)
-		close(fd);
-	errno = saved_errno;
-	return ret;
+		return NULL;
+	move_fd(fd);
+
+	return move_ptr(ret);
 }
 
 /* Given a multi-line string, return a null-terminated copy of the current line. */
