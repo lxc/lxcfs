@@ -41,13 +41,13 @@ extern struct cgroup_ops *cgfsng_ops_init(void);
 
 struct cgroup_ops *cgroup_init(void)
 {
-	struct cgroup_ops *cgroup_ops;
+	struct cgroup_ops *ops;
 
-	cgroup_ops = cgfsng_ops_init();
-	if (!cgroup_ops)
+	ops = cgfsng_ops_init();
+	if (!ops)
 		return log_error_errno(NULL, errno, "Failed to initialize cgroup driver");
 
-	return cgroup_ops;
+	return ops;
 }
 
 void cgroup_exit(struct cgroup_ops *ops)

@@ -1,14 +1,16 @@
 # Process this file with autoconf to produce a configure script.
 
-AC_PREREQ(2.61)
+AC_PREREQ([2.69])
 AC_INIT([lxcfs], [3.1.2], [lxc-devel@lists.linuxcontainers.org])
 AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
 AC_CONFIG_MACRO_DIR([m4])
+AC_CONFIG_AUX_DIR([config])
+AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_SRCDIR([configure.ac])
 
 AM_INIT_AUTOMAKE([subdir-objects -Wno-portability])
 
 AC_GNU_SOURCE
-AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([
 	Makefile
 	lxcfs.spec
@@ -24,11 +26,15 @@ AC_CONFIG_FILES([
 	tests/Makefile ])
 
 LT_INIT
-AC_PROG_CC
-
 AC_PROG_CC_C99
+AC_CANONICAL_HOST
+AM_PROG_CC_C_O
+AC_USE_SYSTEM_EXTENSIONS
 
 AC_CHECK_LIB(pthread, main)
+
+# We need pkg-config
+PKG_PROG_PKG_CONFIG
 
 PKG_CHECK_MODULES(FUSE, fuse)
 
@@ -180,5 +186,41 @@ AC_CHECK_FUNCS([pidfd_send_signal],
 	AM_CONDITIONAL(HAVE_PIDFD_SEND_SIGNAL, true)
 	AC_DEFINE(HAVE_PIDFD_SEND_SIGNAL,1,[Supports pidfd_send_signal]),
 	AM_CONDITIONAL(HAVE_PIDFD_SEND_SIGNAL, false))
+
+AX_CHECK_COMPILE_FLAG([-fdiagnostics-color], [CFLAGS="$CFLAGS -fdiagnostics-color"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wimplicit-fallthrough=5], [CFLAGS="$CFLAGS -Wimplicit-fallthrough=5"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wcast-align], [CFLAGS="$CFLAGS -Wcast-align"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wstrict-prototypes], [CFLAGS="$CFLAGS -Wstrict-prototypes"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-fno-strict-aliasing], [CFLAGS="$CFLAGS -fno-strict-aliasing"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-fstack-clash-protection], [CFLAGS="$CFLAGS -fstack-clash-protection"],,[-Werror])
+AX_CHECK_LINK_FLAG([-fstack-protector-strong], [CFLAGS="$CFLAGS -fstack-protector-strong"],,[-Werror])
+AX_CHECK_LINK_FLAG([--param=ssp-buffer-size=4], [CFLAGS="$CFLAGS --param=ssp-buffer-size=4"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-g], [CFLAGS="$CFLAGS -g"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([--mcet -fcf-protection], [CFLAGS="$CFLAGS --mcet -fcf-protection"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=implicit-function-declaration], [CFLAGS="$CFLAGS -Werror=implicit-function-declaration"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wlogical-op], [CFLAGS="$CFLAGS -Wlogical-op"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wmissing-include-dirs], [CFLAGS="$CFLAGS -Wmissing-include-dirs"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wold-style-definition], [CFLAGS="$CFLAGS -Wold-style-definition"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Winit-self], [CFLAGS="$CFLAGS -Winit-self"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wunused-but-set-variable], [CFLAGS="$CFLAGS -Wunused-but-set-variable"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wfloat-equal], [CFLAGS="$CFLAGS -Wfloat-equal"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wsuggest-attribute=noreturn], [CFLAGS="$CFLAGS -Wsuggest-attribute=noreturn"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=return-type], [CFLAGS="$CFLAGS -Werror=return-type"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=incompatible-pointer-types], [CFLAGS="$CFLAGS -Werror=incompatible-pointer-types"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wformat=2], [CFLAGS="$CFLAGS -Wformat=2"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wshadow], [CFLAGS="$CFLAGS -Wshadow"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wendif-labels], [CFLAGS="$CFLAGS -Wendif-labels"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=overflow], [CFLAGS="$CFLAGS -Werror=overflow"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-fdiagnostics-show-option], [CFLAGS="$CFLAGS -fdiagnostics-show-option"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=shift-count-overflow], [CFLAGS="$CFLAGS -Werror=shift-count-overflow"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Werror=shift-overflow=2], [CFLAGS="$CFLAGS -Werror=shift-overflow=2"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wdate-time], [CFLAGS="$CFLAGS -Wdate-time"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-Wnested-externs], [CFLAGS="$CFLAGS -Wnested-externs"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-fasynchronous-unwind-tables], [CFLAGS="$CFLAGS -fasynchronous-unwind-tables"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-pipe], [CFLAGS="$CFLAGS -pipe"],,[-Werror])
+AX_CHECK_COMPILE_FLAG([-fexceptions], [CFLAGS="$CFLAGS -fexceptions"],,[-Werror])
+
+AX_CHECK_LINK_FLAG([-z relro], [LDFLAGS="$LDFLAGS -z relro"],,[])
+AX_CHECK_LINK_FLAG([-z now], [LDFLAGS="$LDFLAGS -z now"],,[])
 
 AC_OUTPUT

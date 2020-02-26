@@ -52,11 +52,11 @@ void must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...)
 	va_end(args);
 
 	if (!*src || tmplen + *sz + 1 >= *asz) {
-		char *tmp;
+		char *buf;
 		do {
-			tmp = realloc(*src, *asz + BUF_RESERVE_SIZE);
-		} while (!tmp);
-		*src = tmp;
+			buf = realloc(*src, *asz + BUF_RESERVE_SIZE);
+		} while (!buf);
+		*src = buf;
 		*asz += BUF_RESERVE_SIZE;
 	}
 	memcpy((*src) +*sz , tmp, tmplen+1); /* include the \0 */
