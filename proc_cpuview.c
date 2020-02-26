@@ -1052,8 +1052,8 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 	__do_free char *usage_str = NULL;
 	__do_free struct cpuacct_usage *cpu_usage = NULL;
 	int cpucount = get_nprocs_conf();
-	int read_pos = 0, read_cnt=0;
-	int i, j, ret;
+	int i = 0, j = 0, read_pos = 0, read_cnt = 0;
+	int ret;
 	int cg_cpu;
 	uint64_t cg_user, cg_system;
 	int64_t ticks_per_sec;
@@ -1075,7 +1075,6 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 	memset(cpu_usage, 0, sizeof(struct cpuacct_usage) * cpucount);
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
 		char *data = NULL;
-		int i = 0, read_pos = 0, read_cnt=0;
 		size_t sz = 0, asz = 0;
 
 		/* read cpuacct.usage_percpu instead. */

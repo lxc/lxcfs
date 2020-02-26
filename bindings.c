@@ -235,7 +235,7 @@ static void prune_initpid_store(void)
 /* Must be called under store_lock */
 static void save_initpid(struct stat *sb, pid_t pid)
 {
-	__do_free struct pidns_init_store *e = NULL;
+	__do_free struct pidns_init_store *entry = NULL;
 	__do_close_prot_errno int pidfd = -EBADF;
 	char path[LXCFS_PROC_PID_LEN];
 	struct lxcfs_opts *opts = fuse_get_context()->private_data;
@@ -252,18 +252,20 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	if (stat(path, &st))
 		return;
 
-	e = malloc(sizeof(*e));
-	if (!e)
+	entry = malloc(sizeof(*entry));
+	if (entry)
 		return;
 
-	e->ino = sb->st_ino;
-	e->initpid = pid;
-	e->ctime = st.st_ctime;
-	ino_hash = HASH(e->ino);
-	e->next = pidns_hash_table[ino_hash];
-	e->lastcheck = time(NULL);
-	e->init_pidfd = move_fd(pidfd);
-	pidns_hash_table[ino_hash] = move_ptr(e);
+	ino_hash = HASH(entry->ino);
+	*entry = (struct pidns_init_store){
+		.ino		= sb->st_ino,
+		.initpid	= pid,
+		.ctime		= st.st_ctime,
+		.next		= pidns_hash_table[ino_hash],
+		.lastcheck	= time(NULL),
+		.init_pidfd	= move_fd(pidfd),
+	};
+	pidns_hash_table[ino_hash] = move_ptr(entry);
 
 	lxcfs_debug("Added cache entry %d for pid %d to init pid cache", ino_hash, pid);
 }

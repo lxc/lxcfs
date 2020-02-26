@@ -82,17 +82,17 @@ static pthread_t loadavg_pid = 0;
 /* Returns zero on success */
 static int start_loadavg(void) {
 	char *error;
-	pthread_t (*load_daemon)(int);
+	pthread_t (*__load_daemon)(int);
 
 	dlerror();    /* Clear any existing error */
 
-	load_daemon = (pthread_t (*)(int)) dlsym(dlopen_handle, "load_daemon");
+	__load_daemon = (pthread_t (*)(int)) dlsym(dlopen_handle, "load_daemon");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("load_daemon fails:%s\n", error);
 		return -1;
 	}
-	loadavg_pid = load_daemon(1);
+	loadavg_pid = __load_daemon(1);
 	if (loadavg_pid == 0)
 		return -1;
 
@@ -102,16 +102,16 @@ static int start_loadavg(void) {
 /* Returns zero on success */
 static int stop_loadavg(void) {
 	char *error;
-	int (*stop_load_daemon)(pthread_t);
+	int (*__stop_load_daemon)(pthread_t);
 
-	stop_load_daemon = (int (*)(pthread_t)) dlsym(dlopen_handle, "stop_load_daemon");
+	__stop_load_daemon = (int (*)(pthread_t)) dlsym(dlopen_handle, "stop_load_daemon");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("stop_load_daemon error: %s\n", error);
 		return -1;
 	}
 
-	if (stop_load_daemon(loadavg_pid) != 0)
+	if (__stop_load_daemon(loadavg_pid) != 0)
 		return -1;
 
 	return 0;
@@ -185,414 +185,417 @@ static void reload_handler(int sig)
 /* Functions to run the library methods */
 static int do_cg_getattr(const char *path, struct stat *sb)
 {
-	int (*cg_getattr)(const char *path, struct stat *sb);
+	int (*__cg_getattr)(const char *path, struct stat *sb);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "cg_getattr");
+	__cg_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "cg_getattr");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_getattr(path, sb);
+	return __cg_getattr(path, sb);
 }
 
 static int do_proc_getattr(const char *path, struct stat *sb)
 {
-	int (*proc_getattr)(const char *path, struct stat *sb);
+	int (*__proc_getattr)(const char *path, struct stat *sb);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	proc_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "proc_getattr");
+	__proc_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "proc_getattr");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return proc_getattr(path, sb);
+	return __proc_getattr(path, sb);
 }
 
 static int do_sys_getattr(const char *path, struct stat *sb)
 {
-	int (*sys_getattr)(const char *path, struct stat *sb);
+	int (*__sys_getattr)(const char *path, struct stat *sb);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	sys_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "sys_getattr");
+	__sys_getattr = (int (*)(const char *, struct stat *)) dlsym(dlopen_handle, "sys_getattr");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_getattr(path, sb);
+	return __sys_getattr(path, sb);
 }
 
 static int do_cg_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	int (*cg_read)(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi);
+	int (*__cg_read)(const char *path, char *buf, size_t size, off_t offset,
+			 struct fuse_file_info *fi);
 	char *error;
 
 	dlerror();    /* Clear any existing error */
-	cg_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_read");
+	__cg_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_read");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_read(path, buf, size, offset, fi);
+	return __cg_read(path, buf, size, offset, fi);
 }
 
 static int do_proc_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+			struct fuse_file_info *fi)
 {
-	int (*proc_read)(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi);
+	int (*__proc_read)(const char *path, char *buf, size_t size,
+			   off_t offset, struct fuse_file_info *fi);
 	char *error;
 
 	dlerror();    /* Clear any existing error */
-	proc_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_read");
+	__proc_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_read");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return proc_read(path, buf, size, offset, fi);
+	return __proc_read(path, buf, size, offset, fi);
 }
 
 static int do_sys_read(const char *path, char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
-	int (*sys_read)(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi);
+	int (*__sys_read)(const char *path, char *buf, size_t size,
+			  off_t offset, struct fuse_file_info *fi);
 	char *error;
 
 	dlerror();    /* Clear any existing error */
-	sys_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_read");
+	__sys_read = (int (*)(const char *, char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_read");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_read(path, buf, size, offset, fi);
+	return __sys_read(path, buf, size, offset, fi);
 }
 
 static int do_cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi)
 {
-	int (*cg_write)(const char *path, const char *buf, size_t size, off_t offset,
-	     struct fuse_file_info *fi);
+	int (*__cg_write)(const char *path, const char *buf, size_t size,
+			  off_t offset, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_write = (int (*)(const char *, const char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_write");
+	__cg_write = (int (*)(const char *, const char *, size_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_write");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_write(path, buf, size, offset, fi);
+	return __cg_write(path, buf, size, offset, fi);
 }
 
 static int do_cg_mkdir(const char *path, mode_t mode)
 {
-	int (*cg_mkdir)(const char *path, mode_t mode);
+	int (*__cg_mkdir)(const char *path, mode_t mode);
 	char *error;
+
 	dlerror();    /* Clear any existing error */
-	cg_mkdir = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_mkdir");
+	__cg_mkdir = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_mkdir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_mkdir(path, mode);
+	return __cg_mkdir(path, mode);
 }
 
 static int do_cg_chown(const char *path, uid_t uid, gid_t gid)
 {
-	int (*cg_chown)(const char *path, uid_t uid, gid_t gid);
+	int (*__cg_chown)(const char *path, uid_t uid, gid_t gid);
 	char *error;
+
 	dlerror();    /* Clear any existing error */
-	cg_chown = (int (*)(const char *, uid_t, gid_t)) dlsym(dlopen_handle, "cg_chown");
+	__cg_chown = (int (*)(const char *, uid_t, gid_t)) dlsym(dlopen_handle, "cg_chown");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_chown(path, uid, gid);
+	return __cg_chown(path, uid, gid);
 }
 
 static int do_cg_rmdir(const char *path)
 {
-	int (*cg_rmdir)(const char *path);
+	int (*__cg_rmdir)(const char *path);
 	char *error;
+
 	dlerror();    /* Clear any existing error */
-	cg_rmdir = (int (*)(const char *path)) dlsym(dlopen_handle, "cg_rmdir");
+	__cg_rmdir = (int (*)(const char *path)) dlsym(dlopen_handle, "cg_rmdir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_rmdir(path);
+	return __cg_rmdir(path);
 }
 
 static int do_cg_chmod(const char *path, mode_t mode)
 {
-	int (*cg_chmod)(const char *path, mode_t mode);
+	int (*__cg_chmod)(const char *path, mode_t mode);
 	char *error;
+
 	dlerror();    /* Clear any existing error */
-	cg_chmod = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_chmod");
+	__cg_chmod = (int (*)(const char *, mode_t)) dlsym(dlopen_handle, "cg_chmod");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_chmod(path, mode);
+	return __cg_chmod(path, mode);
 }
 
-static int do_cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi)
+static int do_cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+			 off_t offset, struct fuse_file_info *fi)
 {
-	int (*cg_readdir)(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+	int (*__cg_readdir)(const char *path, void *buf, fuse_fill_dir_t filler,
+			    off_t offset, struct fuse_file_info *fi);
+	char *error;
+
+	dlerror();    /* Clear any existing error */
+	__cg_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_readdir");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return __cg_readdir(path, buf, filler, offset, fi);
+}
+
+static int do_proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+			   off_t offset, struct fuse_file_info *fi)
+{
+	int (*__proc_readdir)(const char *path, void *buf, fuse_fill_dir_t filler,
+			      off_t offset, struct fuse_file_info *fi);
+	char *error;
+
+	dlerror();    /* Clear any existing error */
+	__proc_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_readdir");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("%s\n", error);
+		return -1;
+	}
+
+	return __proc_readdir(path, buf, filler, offset, fi);
+}
+
+static int do_sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+			  off_t offset, struct fuse_file_info *fi)
+{
+	int (*__sys_readdir)(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi);
 	char *error;
 
 	dlerror();    /* Clear any existing error */
-	cg_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_readdir");
+	__sys_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_readdir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_readdir(path, buf, filler, offset, fi);
-}
-
-static int do_proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi)
-{
-	int (*proc_readdir)(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi);
-	char *error;
-
-	dlerror();    /* Clear any existing error */
-	proc_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_readdir");
-	error = dlerror();
-	if (error != NULL) {
-		lxcfs_error("%s\n", error);
-		return -1;
-	}
-
-	return proc_readdir(path, buf, filler, offset, fi);
-}
-
-static int do_sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi)
-{
-	int (*sys_readdir)(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-		struct fuse_file_info *fi);
-	char *error;
-
-	dlerror();    /* Clear any existing error */
-	sys_readdir = (int (*)(const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_readdir");
-	error = dlerror();
-	if (error != NULL) {
-		lxcfs_error("%s\n", error);
-		return -1;
-	}
-
-	return sys_readdir(path, buf, filler, offset, fi);
+	return __sys_readdir(path, buf, filler, offset, fi);
 }
 
 
 static int do_cg_open(const char *path, struct fuse_file_info *fi)
 {
-	int (*cg_open)(const char *path, struct fuse_file_info *fi);
+	int (*__cg_open)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_open = (int (*)(const char *, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_open");
+	__cg_open = (int (*)(const char *, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_open");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_open(path, fi);
+	return __cg_open(path, fi);
 }
 
 static int do_cg_access(const char *path, int mode)
 {
-	int (*cg_access)(const char *path, int mode);
+	int (*__cg_access)(const char *path, int mode);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "cg_access");
+	__cg_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "cg_access");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_access(path, mode);
+	return __cg_access(path, mode);
 }
 
 static int do_proc_open(const char *path, struct fuse_file_info *fi)
 {
-	int (*proc_open)(const char *path, struct fuse_file_info *fi);
+	int (*__proc_open)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	proc_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "proc_open");
+	__proc_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "proc_open");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return proc_open(path, fi);
+	return __proc_open(path, fi);
 }
 
 static int do_proc_access(const char *path, int mode)
 {
-	int (*proc_access)(const char *path, int mode);
+	int (*__proc_access)(const char *path, int mode);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	proc_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "proc_access");
+	__proc_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "proc_access");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return proc_access(path, mode);
+	return __proc_access(path, mode);
 }
 
 static int do_sys_open(const char *path, struct fuse_file_info *fi)
 {
-	int (*sys_open)(const char *path, struct fuse_file_info *fi);
+	int (*__sys_open)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	sys_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "sys_open");
+	__sys_open = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "sys_open");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_open(path, fi);
+	return __sys_open(path, fi);
 }
 
 static int do_sys_access(const char *path, int mode)
 {
-	int (*sys_access)(const char *path, int mode);
+	int (*__sys_access)(const char *path, int mode);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	sys_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "sys_access");
+	__sys_access = (int (*)(const char *, int mode)) dlsym(dlopen_handle, "sys_access");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_access(path, mode);
+	return __sys_access(path, mode);
 }
-
 
 static int do_cg_release(const char *path, struct fuse_file_info *fi)
 {
-	int (*cg_release)(const char *path, struct fuse_file_info *fi);
+	int (*__cg_release)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_release");
+	__cg_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_release");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_release(path, fi);
+	return __cg_release(path, fi);
 }
 
 static int do_proc_release(const char *path, struct fuse_file_info *fi)
 {
-	int (*proc_release)(const char *path, struct fuse_file_info *fi);
+	int (*__proc_release)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	proc_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_release");
+	__proc_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_release");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return proc_release(path, fi);
+	return __proc_release(path, fi);
 }
 
 static int do_sys_release(const char *path, struct fuse_file_info *fi)
 {
-	int (*sys_release)(const char *path, struct fuse_file_info *fi);
+	int (*__sys_release)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	sys_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_release");
+	__sys_release = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_release");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_release(path, fi);
+	return __sys_release(path, fi);
 }
 
 static int do_cg_opendir(const char *path, struct fuse_file_info *fi)
 {
-	int (*cg_opendir)(const char *path, struct fuse_file_info *fi);
+	int (*__cg_opendir)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_opendir = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "cg_opendir");
+	__cg_opendir = (int (*)(const char *path, struct fuse_file_info *fi)) dlsym(dlopen_handle, "cg_opendir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_opendir(path, fi);
+	return __cg_opendir(path, fi);
 }
 
 static int do_cg_releasedir(const char *path, struct fuse_file_info *fi)
 {
-	int (*cg_releasedir)(const char *path, struct fuse_file_info *fi);
+	int (*__cg_releasedir)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	cg_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_releasedir");
+	__cg_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "cg_releasedir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return cg_releasedir(path, fi);
+	return __cg_releasedir(path, fi);
 }
 
 static int do_sys_releasedir(const char *path, struct fuse_file_info *fi)
 {
-	int (*sys_releasedir)(const char *path, struct fuse_file_info *fi);
+	int (*__sys_releasedir)(const char *path, struct fuse_file_info *fi);
 	char *error;
 	dlerror();    /* Clear any existing error */
-	sys_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_releasedir");
+	__sys_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "sys_releasedir");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("%s\n", error);
 		return -1;
 	}
 
-	return sys_releasedir(path, fi);
+	return __sys_releasedir(path, fi);
 }
 
 /*
