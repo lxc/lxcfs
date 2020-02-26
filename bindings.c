@@ -53,6 +53,8 @@
 #include "proc_cpuview.h"
 #include "utils.h"
 
+static bool can_use_pidfd;
+
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
 static int pivot_root(const char *new_root, const char *put_old)
@@ -83,9 +85,10 @@ extern int pivot_root(const char *new_root, const char *put_old);
  *	 cached initpid.
  */
 struct pidns_init_store {
-	ino_t ino;          // inode number for /proc/$pid/ns/pid
-	pid_t initpid;      // the pid of nit in that ns
-	long int ctime;     // the time at which /proc/$initpid was created
+	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
+	pid_t initpid; /* the pid of nit in that ns */
+	int init_pidfd;
+	long int ctime; /* the time at which /proc/$initpid was created */
 	struct pidns_init_store *next;
 	long int lastcheck;
 };
@@ -127,47 +130,62 @@ static void store_unlock(void)
 	unlock_mutex(&pidns_store_mutex);
 }
 
+/* /proc/       =    6
+ *                +
+ * <pid-as-str> =   INTTYPE_TO_STRLEN(pid_t)
+ *                +
+ * \0           =    1
+ */
+#define LXCFS_PROC_PID_LEN \
+	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + +1)
+
 /* Must be called under store_lock */
-static bool initpid_still_valid(struct pidns_init_store *e, struct stat *nsfdsb)
+static bool initpid_still_valid(struct pidns_init_store *entry)
 {
-	struct stat initsb;
-	char fnam[100];
+	bool valid = true;
 
-	snprintf(fnam, 100, "/proc/%d", e->initpid);
-	if (stat(fnam, &initsb) < 0)
-		return false;
+	if (entry->init_pidfd >= 0) {
+		if (pidfd_send_signal(entry->init_pidfd, 0, NULL, 0))
+			valid = false;
+	} else {
+		struct stat st;
+		char path[LXCFS_PROC_PID_LEN];
 
-	lxcfs_debug("Comparing ctime %ld == %ld for pid %d.\n", e->ctime,
-		    initsb.st_ctime, e->initpid);
+		snprintf(path, sizeof(path), "/proc/%d", entry->initpid);
 
-	if (e->ctime != initsb.st_ctime)
-		return false;
-	return true;
+		if (stat(path, &st) || entry->ctime != st.st_ctime)
+			valid = false;
+	}
+
+	return valid;
 }
 
 /* Must be called under store_lock */
-static void remove_initpid(struct pidns_init_store *e)
+static void remove_initpid(struct pidns_init_store *entry)
 {
-	struct pidns_init_store *tmp;
-	int h;
+	struct pidns_init_store *it;
+	int ino_hash;
 
-	lxcfs_debug("Remove_initpid: removing entry for %d.\n", e->initpid);
+	lxcfs_debug("Removing cached entry for pid %d from init pid cache",
+		    entry->initpid);
 
-	h = HASH(e->ino);
-	if (pidns_hash_table[h] == e) {
-		pidns_hash_table[h] = e->next;
-		free_disarm(e);
+	ino_hash = HASH(entry->ino);
+	if (pidns_hash_table[ino_hash] == entry) {
+		pidns_hash_table[ino_hash] = entry->next;
+		close_prot_errno_disarm(entry->init_pidfd);
+		free_disarm(entry);
 		return;
 	}
 
-	tmp = pidns_hash_table[h];
-	while (tmp) {
-		if (tmp->next == e) {
-			tmp->next = e->next;
-			free_disarm(e);
+	it = pidns_hash_table[ino_hash];
+	while (it) {
+		if (it->next == entry) {
+			it->next = entry->next;
+			close_prot_errno_disarm(entry->init_pidfd);
+			free_disarm(entry);
 			return;
 		}
-		tmp = tmp->next;
+		it = it->next;
 	}
 }
 
@@ -176,39 +194,39 @@ static void remove_initpid(struct pidns_init_store *e)
 static void prune_initpid_store(void)
 {
 	static long int last_prune = 0;
-	struct pidns_init_store *e, *prev, *delme;
 	long int now, threshold;
-	int i;
 
 	if (!last_prune) {
 		last_prune = time(NULL);
 		return;
 	}
+
 	now = time(NULL);
 	if (now < last_prune + PURGE_SECS)
 		return;
 
-	lxcfs_debug("%s\n", "Pruning.");
+	lxcfs_debug("Pruning init pid cache");
 
 	last_prune = now;
 	threshold = now - 2 * PURGE_SECS;
 
-	for (i = 0; i < PIDNS_HASH_SIZE; i++) {
-		for (prev = NULL, e = pidns_hash_table[i]; e; ) {
-			if (e->lastcheck < threshold) {
+	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
+		for (struct pidns_init_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
+			if (entry->lastcheck < threshold) {
+				struct pidns_init_store *cur = entry;
 
-				lxcfs_debug("Removing cached entry for %d.\n", e->initpid);
+				lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
 
-				delme = e;
 				if (prev)
-					prev->next = e->next;
+					prev->next = entry->next;
 				else
-					pidns_hash_table[i] = e->next;
-				e = e->next;
-				free_disarm(delme);
+					pidns_hash_table[i] = entry->next;
+				entry = entry->next;
+				close_prot_errno_disarm(cur->init_pidfd);
+				free_disarm(cur);
 			} else {
-				prev = e;
-				e = e->next;
+				prev = entry;
+				entry = entry->next;
 			}
 		}
 	}
@@ -217,26 +235,37 @@ static void prune_initpid_store(void)
 /* Must be called under store_lock */
 static void save_initpid(struct stat *sb, pid_t pid)
 {
-	struct pidns_init_store *e;
-	char fpath[100];
-	struct stat procsb;
-	int h;
+	__do_free struct pidns_init_store *e = NULL;
+	__do_close_prot_errno int pidfd = -EBADF;
+	char path[LXCFS_PROC_PID_LEN];
+	struct lxcfs_opts *opts = fuse_get_context()->private_data;
+	struct stat st;
+	int ino_hash;
 
-	lxcfs_debug("Save_initpid: adding entry for %d.\n", pid);
+	if (opts->use_pidfd && can_use_pidfd) {
+		pidfd = pidfd_open(pid, 0);
+		if (pidfd < 0)
+			return;
+	}
 
-	snprintf(fpath, 100, "/proc/%d", pid);
-	if (stat(fpath, &procsb) < 0)
+	snprintf(path, sizeof(path), "/proc/%d", pid);
+	if (stat(path, &st))
 		return;
-	do {
-		e = malloc(sizeof(*e));
-	} while (!e);
+
+	e = malloc(sizeof(*e));
+	if (!e)
+		return;
+
 	e->ino = sb->st_ino;
 	e->initpid = pid;
-	e->ctime = procsb.st_ctime;
-	h = HASH(e->ino);
-	e->next = pidns_hash_table[h];
+	e->ctime = st.st_ctime;
+	ino_hash = HASH(e->ino);
+	e->next = pidns_hash_table[ino_hash];
 	e->lastcheck = time(NULL);
-	pidns_hash_table[h] = e;
+	e->init_pidfd = move_fd(pidfd);
+	pidns_hash_table[ino_hash] = move_ptr(e);
+
+	lxcfs_debug("Added cache entry %d for pid %d to init pid cache", ino_hash, pid);
 }
 
 /*
@@ -248,19 +277,19 @@ static void save_initpid(struct stat *sb, pid_t pid)
  */
 static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 {
-	int h = HASH(sb->st_ino);
-	struct pidns_init_store *e = pidns_hash_table[h];
+	struct pidns_init_store *entry = pidns_hash_table[HASH(sb->st_ino)];
 
-	while (e) {
-		if (e->ino == sb->st_ino) {
-			if (initpid_still_valid(e, sb)) {
-				e->lastcheck = time(NULL);
-				return e;
+	while (entry) {
+		if (entry->ino == sb->st_ino) {
+			if (initpid_still_valid(entry)) {
+				entry->lastcheck = time(NULL);
+				return entry;
 			}
-			remove_initpid(e);
+
+			remove_initpid(entry);
 			return NULL;
 		}
-		e = e->next;
+		entry = entry->next;
 	}
 
 	return NULL;
@@ -358,31 +387,42 @@ out:
 	return ret;
 }
 
-pid_t lookup_initpid_in_store(pid_t qpid)
+#define LXCFS_PROC_PID_NS_LEN                                    \
+	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + \
+	 STRLITERALLEN("/ns/pid") + 1)
+
+pid_t lookup_initpid_in_store(pid_t pid)
 {
 	pid_t answer = 0;
-	struct stat sb;
-	struct pidns_init_store *e;
-	char fnam[100];
+	char path[LXCFS_PROC_PID_NS_LEN];
+	struct stat st;
+	struct pidns_init_store *entry;
 
-	snprintf(fnam, 100, "/proc/%d/ns/pid", qpid);
+	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
+
 	store_lock();
-	if (stat(fnam, &sb) < 0)
+	if (stat(path, &st))
 		goto out;
-	e = lookup_verify_initpid(&sb);
-	if (e) {
-		answer = e->initpid;
+
+	entry = lookup_verify_initpid(&st);
+	if (entry) {
+		answer = entry->initpid;
 		goto out;
 	}
-	answer = get_init_pid_for_task(qpid);
+
+	answer = get_init_pid_for_task(pid);
 	if (answer > 0)
-		save_initpid(&sb, answer);
+		save_initpid(&st, answer);
 
 out:
-	/* we prune at end in case we are returning
-	 * the value we were about to return */
+	/*
+	 * Prune at the end in case we're returning the value we were about to
+	 * return.
+	 */
 	prune_initpid_store();
+
 	store_unlock();
+
 	return answer;
 }
 
@@ -663,8 +703,9 @@ static bool cgfs_setup_controllers(void)
 
 static void __attribute__((constructor)) lxcfs_init(void)
 {
-	__do_close_prot_errno int init_ns = -EBADF;
+	__do_close_prot_errno int init_ns = -EBADF, pidfd = -EBADF;
 	int i = 0;
+	pid_t pid;
 	char *cret;
 	char cwd[MAXPATHLEN];
 
@@ -673,7 +714,8 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		log_exit("Failed to initialize cgroup support");
 
 	/* Preserve initial namespace. */
-	init_ns = preserve_ns(getpid(), "mnt");
+	pid = getpid();
+	init_ns = preserve_ns(pid, "mnt");
 	if (init_ns < 0)
 		log_exit("Failed to preserve initial mount namespace");
 
@@ -701,6 +743,12 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
 		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
 		fprintf(stderr, " %2d: fd: %3d: %s\n", i, (*h)->fd, controllers ?: "");
+	}
+
+	pidfd = pidfd_open(pid, 0);
+	if (pidfd >= 0 && pidfd_send_signal(pidfd, 0, NULL, 0) == 0) {
+		can_use_pidfd = true;
+		lxcfs_error("Kernel supports pidfds");
 	}
 }
 

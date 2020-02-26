@@ -46,4 +46,27 @@ extern int read_file_fuse(const char *path, char *buf, size_t size,
 extern void prune_init_slice(char *cg);
 extern int wait_for_pid(pid_t pid);
 
+#ifndef HAVE_PIDFD_OPEN
+static inline int pidfd_open(pid_t pid, unsigned int flags)
+{
+#ifdef __NR_pidfd_open
+	return syscall(__NR_pidfd_open, pid, flags);
+#else
+	return ret_errno(ENOSYS);
+#endif
+}
+#endif
+
+#ifndef HAVE_PIDFD_SEND_SIGNAL
+static inline int pidfd_send_signal(int pidfd, int sig, siginfo_t *info,
+				    unsigned int flags)
+{
+#ifdef __NR_pidfd_send_signal
+	return syscall(__NR_pidfd_send_signal, pidfd, sig, info, flags);
+#else
+	return ret_errno(ENOSYS);
+#endif
+}
+#endif
+
 #endif /* __LXCFS_UTILS_H */

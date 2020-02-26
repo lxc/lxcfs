@@ -1102,6 +1102,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 	opts->swap_off = false;
+	opts->use_pidfd = false;
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
@@ -1111,6 +1112,9 @@ int main(int argc, char *argv[])
 		load_use = true;
 	if (swallow_arg(&argc, argv, "-u"))
 		opts->swap_off = true;
+
+	if (swallow_arg(&argc, argv, "--pidfd"))
+		opts->use_pidfd = true;
 
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
