@@ -14,15 +14,16 @@
 #define _FILE_OFFSET_BITS 64
 
 #include <fuse.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "cgroup_fuse.h"
 #include "config.h"
 #include "macro.h"
-#include "cgroup_fuse.h"
 #include "proc_cpuview.h"
 #include "proc_fuse.h"
 #include "proc_loadavg.h"
@@ -64,9 +65,11 @@ struct file_info {
 
 struct lxcfs_opts {
 	bool swap_off;
+	bool use_pidfd;
 };
 
 extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
+extern bool supports_pidfd(void);
 
 #endif /* __LXCFS_BINDINGS_H */
