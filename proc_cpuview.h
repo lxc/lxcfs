@@ -21,7 +21,12 @@
 #include "config.h"
 #include "macro.h"
 
-struct cpuacct_usage;
+struct cpuacct_usage {
+	uint64_t user;
+	uint64_t system;
+	uint64_t idle;
+	bool online;
+};
 
 extern int cpuview_proc_stat(const char *cg, const char *cpuset,
 			     struct cpuacct_usage *cg_cpu_usage,
@@ -31,8 +36,9 @@ extern int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi);
 extern int read_cpuacct_usage_all(char *cg, char *cpuset,
 				  struct cpuacct_usage **return_usage, int *size);
-extern bool init_cpuview();
-extern void free_cpuview();
+extern bool init_cpuview(void);
+extern void free_cpuview(void);
+extern int max_cpu_count(const char *cg);
 
 #endif /* __LXCFS_PROC_CPUVIEW_FUSE_H */
 

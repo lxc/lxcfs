@@ -14,10 +14,12 @@
 #define _FILE_OFFSET_BITS 64
 
 #include <fuse.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -41,5 +43,7 @@ extern int send_creds(int sock, struct ucred *cred, char v, bool pingfirst);
 extern bool wait_for_sock(int sock, int timeout);
 extern int read_file_fuse(const char *path, char *buf, size_t size,
 			  struct file_info *d);
+extern void prune_init_slice(char *cg);
+extern int wait_for_pid(pid_t pid);
 
 #endif /* __LXCFS_UTILS_H */

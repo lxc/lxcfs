@@ -39,7 +39,7 @@
 #include <linux/limits.h>
 
 #include "bindings.h"
-#include "config.h" // for VERSION
+#include "config.h"
 
 void *dlopen_handle;
 
@@ -1094,8 +1094,8 @@ int main(int argc, char *argv[])
 	 */
 	int nargs = 5, cnt = 0;
 	char *newargv[6];
-
 	struct lxcfs_opts *opts;
+
 	opts = malloc(sizeof(struct lxcfs_opts));
 	if (opts == NULL) {
 		fprintf(stderr, "Error allocating memory for options.\n");
@@ -1107,12 +1107,11 @@ int main(int argc, char *argv[])
 	swallow_arg(&argc, argv, "-s");
 	swallow_arg(&argc, argv, "-f");
 	debug = swallow_arg(&argc, argv, "-d");
-	if (swallow_arg(&argc, argv, "-l")) {
+	if (swallow_arg(&argc, argv, "-l"))
 		load_use = true;
-	}
-	if (swallow_arg(&argc, argv, "-u")) {
+	if (swallow_arg(&argc, argv, "-u"))
 		opts->swap_off = true;
-	}
+
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
 		for (; (token = strtok_r(v, ",", &saveptr)); v = NULL) {

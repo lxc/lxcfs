@@ -44,8 +44,10 @@
 #include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
+#include "cpuset_parse.h"
 #include "memory_utils.h"
 #include "proc_loadavg.h"
+#include "proc_cpuview.h"
 #include "utils.h"
 
 int proc_getattr(const char *path, struct stat *sb)
@@ -207,6 +209,13 @@ static unsigned long get_min_memlimit(const char *cgroup, bool swap)
 	};
 
 	return retlimit;
+}
+
+static bool startswith(const char *line, const char *pref)
+{
+	if (strncmp(line, pref, strlen(pref)) == 0)
+		return true;
+	return false;
 }
 
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
@@ -995,13 +1004,6 @@ static void parse_memstat(int version,
 			return;
 		memstat = eol+1;
 	}
-}
-
-static bool startswith(const char *line, const char *pref)
-{
-	if (strncmp(line, pref, strlen(pref)) == 0)
-		return true;
-	return false;
 }
 
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,

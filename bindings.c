@@ -55,17 +55,17 @@
 
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
-static int pivot_root(const char * new_root, const char * put_old)
+static int pivot_root(const char *new_root, const char *put_old)
 {
 #ifdef __NR_pivot_root
-return syscall(__NR_pivot_root, new_root, put_old);
+	return syscall(__NR_pivot_root, new_root, put_old);
 #else
-errno = ENOSYS;
-return -1;
+	errno = ENOSYS;
+	return -1;
 #endif
 }
 #else
-extern int pivot_root(const char * new_root, const char * put_old);
+extern int pivot_root(const char *new_root, const char *put_old);
 #endif
 
 /*
@@ -96,14 +96,14 @@ struct pidns_init_store {
 
 static struct pidns_init_store *pidns_hash_table[PIDNS_HASH_SIZE];
 static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static void lock_mutex(pthread_mutex_t *l)
 {
 	int ret;
 
-	if ((ret = pthread_mutex_lock(l)) != 0) {
-		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
-		exit(1);
-	}
+	ret = pthread_mutex_lock(l);
+	if (ret)
+		log_exit("%s - returned %d\n", strerror(ret), ret);
 }
 
 struct cgroup_ops *cgroup_ops;
@@ -112,10 +112,9 @@ static void unlock_mutex(pthread_mutex_t *l)
 {
 	int ret;
 
-	if ((ret = pthread_mutex_unlock(l)) != 0) {
-		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
-		exit(1);
-	}
+	ret = pthread_mutex_unlock(l);
+	if (ret)
+		log_exit("%s - returned %d\n", strerror(ret), ret);
 }
 
 static void store_lock(void)
@@ -267,51 +266,21 @@ static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 	return NULL;
 }
 
-struct cgfs_files {
-	char *name;
-	uint32_t uid, gid;
-	uint32_t mode;
-};
-
-static void print_subsystems(void)
+static int send_creds_clone_wrapper(void *arg)
 {
-	int i = 0;
+	struct ucred cred;
+	char v;
+	int sock = *(int *)arg;
 
-	fprintf(stderr, "mount namespace: %d\n", cgroup_ops->mntns_fd);
-	fprintf(stderr, "hierarchies:\n");
-	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
-		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
-		fprintf(stderr, " %2d: fd: %3d: %s\n", i, (*h)->fd, controllers ?: "");
-	}
+	/* we are the child */
+	cred.uid = 0;
+	cred.gid = 0;
+	cred.pid = 1;
+	v = '1';
+	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
+		return 1;
+	return 0;
 }
-
-bool cgfs_param_exist(const char *controller, const char *cgroup, const char *file)
-{
-	int ret, cfd;
-	size_t len;
-	char *fnam;
-
-	cfd = get_cgroup_fd(controller);
-	if (cfd < 0)
-		return false;
-
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + strlen(file) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
-
-	return (faccessat(cfd, fnam, F_OK, 0) == 0);
-}
-
-#define SEND_CREDS_OK 0
-#define SEND_CREDS_NOTSK 1
-#define SEND_CREDS_FAIL 2
-static int wait_for_pid(pid_t pid);
-static int send_creds_clone_wrapper(void *arg);
 
 /*
  * clone a task which switches to @task's namespace and writes '1'.
@@ -353,21 +322,6 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 			_exit(1);
 		_exit(0);
 	}
-}
-
-static int send_creds_clone_wrapper(void *arg) {
-	struct ucred cred;
-	char v;
-	int sock = *(int *)arg;
-
-	/* we are the child */
-	cred.uid = 0;
-	cred.gid = 0;
-	cred.pid = 1;
-	v = '1';
-	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
-		return 1;
-	return 0;
 }
 
 static pid_t get_init_pid_for_task(pid_t task)
@@ -431,52 +385,6 @@ out:
 	store_unlock();
 	return answer;
 }
-
-static int wait_for_pid(pid_t pid)
-{
-	int status, ret;
-
-	if (pid <= 0)
-		return -1;
-
-again:
-	ret = waitpid(pid, &status, 0);
-	if (ret == -1) {
-		if (errno == EINTR)
-			goto again;
-		return -1;
-	}
-	if (ret != pid)
-		goto again;
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-		return -1;
-	return 0;
-}
-
-#define INITSCOPE "/init.scope"
-void prune_init_slice(char *cg)
-{
-	char *point;
-	size_t cg_len = strlen(cg), initscope_len = strlen(INITSCOPE);
-
-	if (cg_len < initscope_len)
-		return;
-
-	point = cg + cg_len - initscope_len;
-	if (strcmp(point, INITSCOPE) == 0) {
-		if (point == cg)
-			*(point+1) = '\0';
-		else
-			*point = '\0';
-	}
-}
-
-struct pid_ns_clone_args {
-	int *cpipe;
-	int sock;
-	pid_t tpid;
-	int (*wrapped) (int, pid_t); // pid_from_ns or pid_to_ns
-};
 
 /*
  * Functions needed to setup cgroups in the __constructor__.
@@ -756,6 +664,7 @@ static bool cgfs_setup_controllers(void)
 static void __attribute__((constructor)) lxcfs_init(void)
 {
 	__do_close_prot_errno int init_ns = -EBADF;
+	int i = 0;
 	char *cret;
 	char cwd[MAXPATHLEN];
 
@@ -769,6 +678,7 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		log_exit("Failed to preserve initial mount namespace");
 
 	cret = getcwd(cwd, MAXPATHLEN);
+	if (!cret)
 		log_exit("%s - Could not retrieve current working directory", strerror(errno));
 
 	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
@@ -785,7 +695,13 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	if (!init_cpuview())
 		log_exit("Failed to init CPU view");
 
-	print_subsystems();
+	fprintf(stderr, "mount namespace: %d\n", cgroup_ops->mntns_fd);
+	fprintf(stderr, "hierarchies:\n");
+
+	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
+		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
+		fprintf(stderr, " %2d: fd: %3d: %s\n", i, (*h)->fd, controllers ?: "");
+	}
 }
 
 static void __attribute__((destructor)) lxcfs_exit(void)

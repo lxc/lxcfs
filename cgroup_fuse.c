@@ -1160,27 +1160,6 @@ out:
 
 #define POLLIN_SET ( EPOLLIN | EPOLLHUP | EPOLLRDHUP )
 
-static int wait_for_pid(pid_t pid)
-{
-	int status, ret;
-
-	if (pid <= 0)
-		return -1;
-
-again:
-	ret = waitpid(pid, &status, 0);
-	if (ret == -1) {
-		if (errno == EINTR)
-			goto again;
-		return -1;
-	}
-	if (ret != pid)
-		goto again;
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-		return -1;
-	return 0;
-}
-
 /*
  * pid_to_ns - reads pids from a ucred over a socket, then writes the
  * int value back over the socket.  This shifts the pid from the

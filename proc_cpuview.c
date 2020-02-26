@@ -46,14 +46,8 @@
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
 #include "memory_utils.h"
+#include "proc_loadavg.h"
 #include "utils.h"
-
-struct cpuacct_usage {
-	uint64_t user;
-	uint64_t system;
-	uint64_t idle;
-	bool online;
-};
 
 /* Data for CPU view */
 struct cg_proc_stat {
@@ -136,6 +130,15 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 	node->cpu_count = cpu_count;
 
 	return true;
+}
+
+static void free_proc_stat_node(struct cg_proc_stat *node)
+{
+	pthread_mutex_destroy(&node->lock);
+	free_disarm(node->cg);
+	free_disarm(node->usage);
+	free_disarm(node->view);
+	free_disarm(node);
 }
 
 static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
@@ -231,6 +234,29 @@ err:
 		free(node);
 
 	return NULL;
+}
+
+static bool cgfs_param_exist(const char *controller, const char *cgroup,
+			     const char *file)
+{
+	int ret, cfd;
+	size_t len;
+	char *fnam;
+
+	cfd = get_cgroup_fd(controller);
+	if (cfd < 0)
+		return false;
+
+	/* Make sure we pass a relative path to *at() family of functions.
+	 * . + /cgroup + / + file + \0
+	 */
+	len = strlen(cgroup) + strlen(file) + 3;
+	fnam = alloca(len);
+	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
+	if (ret < 0 || (size_t)ret >= len)
+		return false;
+
+	return (faccessat(cfd, fnam, F_OK, 0) == 0);
 }
 
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
@@ -454,7 +480,7 @@ static double exact_cpu_count(const char *cg)
  * Return the maximum number of visible CPUs based on CPU quotas.
  * If there is no quota set, zero is returned.
  */
-static int max_cpu_count(const char *cg)
+int max_cpu_count(const char *cg)
 {
 	int rv, nprocs;
 	int64_t cfs_quota, cfs_period;
@@ -1129,7 +1155,7 @@ static bool cpuview_init_head(struct cg_proc_stat_head **head)
 	return true;
 }
 
-bool init_cpuview()
+bool init_cpuview(void)
 {
 	int i;
 
@@ -1150,15 +1176,6 @@ err:
 	}
 
 	return false;
-}
-
-static void free_proc_stat_node(struct cg_proc_stat *node)
-{
-	pthread_mutex_destroy(&node->lock);
-	free_disarm(node->cg);
-	free_disarm(node->usage);
-	free_disarm(node->view);
-	free_disarm(node);
 }
 
 static void cpuview_free_head(struct cg_proc_stat_head *head)
@@ -1182,12 +1199,9 @@ static void cpuview_free_head(struct cg_proc_stat_head *head)
 	free_disarm(head);
 }
 
-void free_cpuview()
+void free_cpuview(void)
 {
-	int i;
-
-	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+	for (int i = 0; i < CPUVIEW_HASH_SIZE; i++)
 		if (proc_stat_history[i])
 			cpuview_free_head(proc_stat_history[i]);
-	}
 }

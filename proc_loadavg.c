@@ -144,7 +144,7 @@ static void insert_node(struct load_node **n, int locate)
 	pthread_rwlock_unlock(&load_hash[locate].rilock);
 }
 
-static int calc_hash(const char *name)
+int calc_hash(const char *name)
 {
 	unsigned int hash = 0;
 	unsigned int x = 0;
