@@ -177,6 +177,13 @@ AC_CHECK_FUNCS([strlcat],
 	AC_DEFINE(HAVE_STRLCAT,1,[Have strlcat]),
 	AM_CONDITIONAL(HAVE_STRLCAT, false))
 
+AC_CHECK_TYPES([struct clone_args], [], [], [[#include <linux/sched.h>]])
+
+AC_CHECK_FUNCS([clone3],
+	AM_CONDITIONAL(HAVE_CLONE3, true)
+	AC_DEFINE(HAVE_CLONE3,1,[Supports clone3]),
+	AM_CONDITIONAL(HAVE_CLONE3, false))
+
 AC_CHECK_FUNCS([pidfd_open],
 	AM_CONDITIONAL(HAVE_PIDFD_OPEN, true)
 	AC_DEFINE(HAVE_PIDFD_OPEN,1,[Supports pidfd_open]),
