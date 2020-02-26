@@ -27,6 +27,7 @@ extern int proc_loadavg_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi);
 extern pthread_t load_daemon(int load_use);
 extern int stop_load_daemon(pthread_t pid);
+extern int calc_hash(const char *name);
 
 #endif /* __LXCFS_PROC_LOADAVG_FUSE_H */
 

@@ -92,7 +92,7 @@
 #define log_exit(format, ...)                           \
 	({                                              \
 		fprintf(stderr, format, ##__VA_ARGS__); \
-		exit(EXIT_FAILURE);                     \
+		_exit(EXIT_FAILURE);                    \
 	})
 
 #endif /* __LXCFS_MACRO_H */

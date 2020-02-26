@@ -16,6 +16,7 @@
 #include <inttypes.h>
 #include <sched.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "bindings.h"
@@ -352,4 +354,43 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 	if (d->size > total_len)
 		d->cached = d->size - total_len;
 	return total_len;
+}
+
+#define INITSCOPE "/init.scope"
+void prune_init_slice(char *cg)
+{
+	char *point;
+	size_t cg_len = strlen(cg), initscope_len = strlen(INITSCOPE);
+
+	if (cg_len < initscope_len)
+		return;
+
+	point = cg + cg_len - initscope_len;
+	if (strcmp(point, INITSCOPE) == 0) {
+		if (point == cg)
+			*(point+1) = '\0';
+		else
+			*point = '\0';
+	}
+}
+
+int wait_for_pid(pid_t pid)
+{
+	int status, ret;
+
+	if (pid <= 0)
+		return -1;
+
+again:
+	ret = waitpid(pid, &status, 0);
+	if (ret == -1) {
+		if (errno == EINTR)
+			goto again;
+		return -1;
+	}
+	if (ret != pid)
+		goto again;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return -1;
+	return 0;
 }

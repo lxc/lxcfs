@@ -13,7 +13,7 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c bindings.h \
-		      cgroup_fuse.c cgroup_fuse.h
+		      cgroup_fuse.c cgroup_fuse.h \
 		      cgroups/cgfsng.c \
 		      cgroups/cgroup.c cgroups/cgroup.h \
 		      cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
@@ -30,7 +30,7 @@ liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 liblxcfstest_la_SOURCES = bindings.c bindings.h \
-			  cgroup_fuse.c cgroup_fuse.h
+			  cgroup_fuse.c cgroup_fuse.h \
 			  cgroups/cgfsng.c \
 			  cgroups/cgroup.c cgroups/cgroup.h \
 			  cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
