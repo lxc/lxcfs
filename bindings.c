@@ -45,6 +45,7 @@
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
+#include "api_extensions.h"
 #include "bindings.h"
 #include "config.h"
 #include "cgroup_fuse.h"
@@ -748,8 +749,12 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	pidfd = pidfd_open(pid, 0);
 	if (pidfd >= 0 && pidfd_send_signal(pidfd, 0, NULL, 0) == 0) {
 		can_use_pidfd = true;
-		lxcfs_error("Kernel supports pidfds");
+		fprintf(stderr, "Kernel supports pidfds\n");
 	}
+
+	fprintf(stderr, "api_extensions:\n");
+	for (i = 0; i < nr_api_extensions; i++)
+		fprintf(stderr, "- %s\n", api_extensions[i]);
 }
 
 static void __attribute__((destructor)) lxcfs_exit(void)
