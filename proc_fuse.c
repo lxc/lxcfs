@@ -1036,7 +1036,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		 hosttotal = 0;
-	struct memory_stat mstat;
+	struct memory_stat mstat = {};
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
