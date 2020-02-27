@@ -593,6 +593,19 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 	return ret;
 }
 
+static int cgfsng_get_memory_stats_fd(struct cgroup_ops *ops, const char *cgroup)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return -1;
+
+	path = must_make_path(dot_or_empty(cgroup), cgroup, "memory.stat", NULL);
+	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+}
+
 static int cgfsng_get_memory_current(struct cgroup_ops *ops, const char *cgroup,
 				     char **value)
 {
@@ -964,6 +977,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->mount = cgfsng_mount;
 
 	/* memory */
+	cgfsng_ops->get_memory_stats_fd = cgfsng_get_memory_stats_fd;
 	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;
 	cgfsng_ops->get_memory_max = cgfsng_get_memory_max;
 	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;

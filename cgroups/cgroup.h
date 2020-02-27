@@ -136,6 +136,7 @@ struct cgroup_ops {
 		    const char *cgroup, const char *file, char **value);
 
 	/* memory */
+	int (*get_memory_stats_fd)(struct cgroup_ops *ops, const char *cgroup);
 	int (*get_memory_stats)(struct cgroup_ops *ops, const char *cgroup,
 				char **value);
 	int (*get_memory_current)(struct cgroup_ops *ops, const char *cgroup,
