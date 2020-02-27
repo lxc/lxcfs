@@ -762,10 +762,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
 	 * CPU usage. If not, values from the host's /proc/stat are used.
 	 */
-	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0) {
-		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, "
-				"falling back to the host's /proc/stat");
-	}
+	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0)
+		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 
 	f = fopen("/proc/stat", "r");
 	if (!f)
@@ -813,7 +811,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
-		curcpu ++;
+		curcpu++;
 
 		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
 			   &user,
@@ -861,15 +859,15 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				new_idle = idle + (all_used - cg_used);
 
 			} else {
-				lxcfs_error("cpu%d from %s has unexpected cpu time: %lu in /proc/stat, "
-						"%lu in cpuacct.usage_all; unable to determine idle time\n",
-						curcpu, cg, all_used, cg_used);
+				lxcfs_error("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
+					    curcpu, cg, all_used, cg_used);
 				new_idle = idle;
 			}
 
-			l = snprintf(cache, cache_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-					curcpu, cg_cpu_usage[physcpu].user, cg_cpu_usage[physcpu].system,
-					new_idle);
+			l = snprintf(cache, cache_size,
+				     "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
+				     curcpu, cg_cpu_usage[physcpu].user,
+				     cg_cpu_usage[physcpu].system, new_idle);
 
 			if (l < 0) {
 				perror("Error writing to cache");

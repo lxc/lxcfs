@@ -372,8 +372,8 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 	return node;
 }
 
-static void add_cpu_usage(unsigned long *surplus, struct cpuacct_usage *usage,
-			  unsigned long *counter, unsigned long threshold)
+static void add_cpu_usage(uint64_t *surplus, struct cpuacct_usage *usage,
+			  uint64_t *counter, uint64_t threshold)
 {
 	unsigned long free_space, to_add;
 
@@ -441,7 +441,7 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
-	if (sscanf(str, "%ld", value) != 1)
+	if (sscanf(str, "%"PRId64, value) != 1)
 		return false;
 
 	return true;
@@ -534,11 +534,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu, i;
 	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
-	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0,
-		      irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
-	unsigned long user_sum = 0, system_sum = 0, idle_sum = 0;
-	unsigned long user_surplus = 0, system_surplus = 0;
-	unsigned long total_sum, threshold;
+	uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0,
+		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
+	uint64_t user_sum = 0, system_sum = 0, idle_sum = 0;
+	uint64_t user_surplus = 0, system_surplus = 0;
+	uint64_t total_sum, threshold;
 	struct cg_proc_stat *stat_node;
 	int nprocs = get_nprocs_conf();
 
@@ -583,7 +583,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 		cg_cpu_usage[curcpu].online = true;
 
-		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+		ret = sscanf(line, "%*s %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 "lu",
 			   &user,
 			   &nice,
 			   &system,
@@ -605,9 +605,8 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			cg_cpu_usage[curcpu].idle = idle + (all_used - cg_used);
 
 		} else {
-			lxcfs_error("cpu%d from %s has unexpected cpu time: %lu in /proc/stat, "
-					"%lu in cpuacct.usage_all; unable to determine idle time\n",
-					curcpu, cg, all_used, cg_used);
+			lxcfs_error("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
+				    curcpu, cg, all_used, cg_used);
 			cg_cpu_usage[curcpu].idle = idle;
 		}
 	}
@@ -664,11 +663,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	/* Calculate usage counters of visible CPUs */
 	if (max_cpus > 0) {
-		unsigned long diff_user = 0;
-		unsigned long diff_system = 0;
-		unsigned long diff_idle = 0;
-		unsigned long max_diff_idle = 0;
-		unsigned long max_diff_idle_index = 0;
+		uint64_t diff_user = 0;
+		uint64_t diff_system = 0;
+		uint64_t diff_idle = 0;
+		uint64_t max_diff_idle = 0;
+		uint64_t max_diff_idle_index = 0;
 		double exact_cpus;
 
 		/* threshold = maximum usage per cpu, including idle */
@@ -765,10 +764,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	/* Render the file */
 	/* cpu-all */
-	l = snprintf(buf, buf_size, "cpu  %lu 0 %lu %lu 0 0 0 0 0 0\n",
-			user_sum,
-			system_sum,
-			idle_sum);
+	l = snprintf(buf, buf_size,
+		     "cpu  %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
+		     user_sum, system_sum, idle_sum);
 	lxcfs_v("cpu-all: %s\n", buf);
 
 	if (l < 0) {
@@ -794,11 +792,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		if (max_cpus > 0 && i == max_cpus)
 			break;
 
-		l = snprintf(buf, buf_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-				i,
-				stat_node->view[curcpu].user,
-				stat_node->view[curcpu].system,
-				stat_node->view[curcpu].idle);
+		l = snprintf(buf, buf_size, "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
+			     i,
+			     stat_node->view[curcpu].user,
+			     stat_node->view[curcpu].system,
+			     stat_node->view[curcpu].idle);
 		lxcfs_v("cpu: %s\n", buf);
 
 		if (l < 0) {
@@ -1088,8 +1086,8 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 
 		must_strcat(&data, &sz, &asz, "cpu user system\n");
 
-		while (sscanf(usage_str + read_pos, "%lu %n", &cg_user, &read_cnt) > 0) {
-			lxcfs_debug("i: %d, cg_user: %lu, read_pos: %d, read_cnt: %d\n", i, cg_user, read_pos, read_cnt);
+		while (sscanf(usage_str + read_pos, "%" PRIu64 " %n", &cg_user, &read_cnt) > 0) {
+			lxcfs_debug("i: %d, cg_user: %" PRIu64 ", read_pos: %d, read_cnt: %d\n", i, cg_user, read_pos, read_cnt);
 			must_strcat(&data, &sz, &asz, "%d %lu 0\n", i, cg_user);
 			i++;
 			read_pos += read_cnt;
@@ -1109,8 +1107,9 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 	read_pos += read_cnt;
 
 	for (i = 0, j = 0; i < cpucount; i++) {
-		ret = sscanf(usage_str + read_pos, "%d %lu %lu\n%n", &cg_cpu, &cg_user,
-				&cg_system, &read_cnt);
+		ret = sscanf(usage_str + read_pos,
+			     "%d %" PRIu64 " %" PRIu64 "\n%n", &cg_cpu,
+			     &cg_user, &cg_system, &read_cnt);
 
 		if (ret == EOF)
 			break;
