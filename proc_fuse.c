@@ -50,6 +50,28 @@
 #include "proc_cpuview.h"
 #include "utils.h"
 
+struct memory_stat {
+	uint64_t hierarchical_memory_limit;
+	uint64_t hierarchical_memsw_limit;
+	uint64_t total_cache;
+	uint64_t total_rss;
+	uint64_t total_rss_huge;
+	uint64_t total_shmem;
+	uint64_t total_mapped_file;
+	uint64_t total_dirty;
+	uint64_t total_writeback;
+	uint64_t total_swap;
+	uint64_t total_pgpgin;
+	uint64_t total_pgpgout;
+	uint64_t total_pgfault;
+	uint64_t total_pgmajfault;
+	uint64_t total_inactive_anon;
+	uint64_t total_active_anon;
+	uint64_t total_inactive_file;
+	uint64_t total_active_file;
+	uint64_t total_unevictable;
+};
+
 int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
@@ -937,60 +959,69 @@ out:
 }
 
 /* Note that "memory.stat" in cgroup2 is hierarchical by default. */
-static void parse_memstat(int version,
-			  char *memstat,
-			  unsigned long *cached,
-			  unsigned long *active_anon,
-			  unsigned long *inactive_anon,
-			  unsigned long *active_file,
-			  unsigned long *inactive_file,
-			  unsigned long *unevictable,
-			  unsigned long *shmem)
+static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mstat)
 {
-	char *eol;
+	__do_close_prot_errno int fd = -EBADF;
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
+	bool unified;
+	size_t len = 0;
+	ssize_t linelen;
 
-	while (*memstat) {
-		if (startswith(memstat, is_unified_controller(version)
-					    ? "cache"
-					    : "total_cache")) {
-			sscanf(memstat + 11, "%lu", cached);
-			*cached /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "active_anon"
-						   : "total_active_anon")) {
-			sscanf(memstat + 17, "%lu", active_anon);
-			*active_anon /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "inactive_anon"
-						   : "total_inactive_anon")) {
-			sscanf(memstat + 19, "%lu", inactive_anon);
-			*inactive_anon /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "active_file"
-						   : "total_active_file")) {
-			sscanf(memstat + 17, "%lu", active_file);
-			*active_file /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "inactive_file"
-						   : "total_inactive_file")) {
-			sscanf(memstat + 19, "%lu", inactive_file);
-			*inactive_file /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "unevictable"
-						   : "total_unevictable")) {
-			sscanf(memstat + 17, "%lu", unevictable);
-			*unevictable /= 1024;
-		} else if (startswith(memstat, is_unified_controller(version)
-						   ? "shmem"
-						   : "total_shmem")) {
-			sscanf(memstat + 11, "%lu", shmem);
-			*shmem /= 1024;
+	fd = cgroup_ops->get_memory_stats_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return false;
+
+	f = fdopen(fd, "re");
+	if (!f)
+		return false;
+	/* Transferring ownership to fdopen(). */
+	move_fd(fd);
+
+	unified = pure_unified_layout(cgroup_ops);
+	while ((linelen = getline(&line, &len, f)) != -1) {
+		if (!unified && startswith(line, "hierarchical_memory_limit")) {
+			sscanf(line, "hierarchical_memory_limit %" PRIu64, &(mstat->hierarchical_memory_limit));
+		} else if (!unified && startswith(line, "hierarchical_memsw_limit")) {
+			sscanf(line, "hierarchical_memsw_limit %" PRIu64, &(mstat->hierarchical_memsw_limit));
+		} else if (!unified && startswith(line, "total_cache")) {
+			sscanf(line, "total_cache %" PRIu64, &(mstat->total_cache));
+		} else if (!unified && startswith(line, "total_rss")) {
+			sscanf(line, "total_rss %" PRIu64, &(mstat->total_rss));
+		} else if (!unified && startswith(line, "total_rss_huge")) {
+			sscanf(line, "total_rss_huge %" PRIu64, &(mstat->total_rss_huge));
+		} else if (startswith(line, unified ? "shmem" : "total_shmem")) {
+			sscanf(line, unified ? "shmem %" PRIu64 : "total_shmem %" PRIu64, &(mstat->total_shmem));
+		} else if (startswith(line, unified ? "file_mapped" : "total_mapped_file")) {
+			sscanf(line, unified ? "file_mapped %" PRIu64 : "total_mapped_file %" PRIu64, &(mstat->total_mapped_file));
+		} else if (!unified && startswith(line, "total_dirty")) {
+			sscanf(line, "total_dirty %" PRIu64, &(mstat->total_dirty));
+		} else if (!unified && startswith(line, "total_writeback")) {
+			sscanf(line, "total_writeback %" PRIu64, &(mstat->total_writeback));
+		} else if (!unified && startswith(line, "total_swap")) {
+			sscanf(line, "total_swap %" PRIu64, &(mstat->total_swap));
+		} else if (!unified && startswith(line, "total_pgpgin")) {
+			sscanf(line, "total_pgpgin %" PRIu64, &(mstat->total_pgpgin));
+		} else if (!unified && startswith(line, "total_pgpgout")) {
+			sscanf(line, "total_pgpgout %" PRIu64, &(mstat->total_pgpgout));
+		} else if (startswith(line, unified ? "pgfault" : "total_pgfault")) {
+			sscanf(line, unified ? "pgfault %" PRIu64 : "total_pgfault %" PRIu64, &(mstat->total_pgfault));
+		} else if (startswith(line, unified ? "pgmajfault" : "total_pgmajfault")) {
+			sscanf(line, unified ? "pgmajfault %" PRIu64 : "total_pgmajfault %" PRIu64, &(mstat->total_pgmajfault));
+		} else if (startswith(line, unified ? "inactive_anon" : "total_inactive_anon")) {
+			sscanf(line, unified ? "inactive_anon %" PRIu64 : "total_inactive_anon %" PRIu64, &(mstat->total_inactive_anon));
+		} else if (startswith(line, unified ? "active_anon" : "total_active_anon")) {
+			sscanf(line, unified ? "active_anon %" PRIu64 : "total_active_anon %" PRIu64, &(mstat->total_active_anon));
+		} else if (startswith(line, unified ? "inactive_file" : "total_inactive_file")) {
+			sscanf(line, unified ? "inactive_file %" PRIu64 : "total_inactive_file %" PRIu64, &(mstat->total_inactive_file));
+		} else if (startswith(line, unified ? "active_file" : "total_active_file")) {
+			sscanf(line, unified ? "active_file %" PRIu64 : "total_active_file %" PRIu64, &(mstat->total_active_file));
+		} else if (startswith(line, unified ? "unevictable" : "total_unevictable")) {
+			sscanf(line, unified ? "unevictable %" PRIu64 : "total_unevictable %" PRIu64, &(mstat->total_unevictable));
 		}
-		eol = strchr(memstat, '\n');
-		if (!eol)
-			return;
-		memstat = eol+1;
 	}
+
+	return true;
 }
 
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
@@ -1003,10 +1034,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *) fuse_get_context()->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	unsigned long memlimit = 0, memusage = 0, memswlimit = 0,
-		      memswusage = 0, cached = 0, hosttotal = 0, active_anon = 0,
-		      inactive_anon = 0, active_file = 0, inactive_file = 0,
-		      unevictable = 0, shmem = 0, hostswtotal = 0;
+	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
+		 hosttotal = 0;
+	struct memory_stat mstat;
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
@@ -1044,11 +1074,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (ret < 0)
 		return 0;
 
-	ret = cgroup_ops->get_memory_stats(cgroup_ops, cgroup, &memstat_str);
-	if (ret < 0)
+	if (!cgroup_parse_memory_stat(cgroup, &mstat))
 		return 0;
-	parse_memstat(ret, memstat_str, &cached, &active_anon, &inactive_anon,
-		      &active_file, &inactive_file, &unevictable, &shmem);
 
 	/*
 	 * Following values are allowed to fail, because swapaccount might be
@@ -1078,93 +1105,125 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 		memset(lbuf, 0, 100);
 		if (startswith(line, "MemTotal:")) {
-			sscanf(line+sizeof("MemTotal:")-1, "%lu", &hosttotal);
+			sscanf(line+sizeof("MemTotal:")-1, "%" PRIu64, &hosttotal);
 			if (hosttotal < memlimit)
 				memlimit = hosttotal;
-			snprintf(lbuf, 100, "MemTotal:       %8lu kB\n", memlimit);
+			snprintf(lbuf, 100, "MemTotal:       %8" PRIu64 " kB\n", memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "MemFree:")) {
-			snprintf(lbuf, 100, "MemFree:        %8lu kB\n", memlimit - memusage);
+			snprintf(lbuf, 100, "MemFree:        %8" PRIu64 " kB\n", memlimit - memusage);
 			printme = lbuf;
 		} else if (startswith(line, "MemAvailable:")) {
-			snprintf(lbuf, 100, "MemAvailable:   %8lu kB\n", memlimit - memusage + cached);
+			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + mstat.total_cache / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 &&
 			   opts && opts->swap_off == false) {
-			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
-			if (hostswtotal < memswlimit)
-				memswlimit = hostswtotal;
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit);
+ 			memswlimit -= memlimit;
+ 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 &&
 			   memswusage > 0 && opts && opts->swap_off == false) {
-			unsigned long swaptotal = memswlimit,
-				      swapusage = memusage > memswusage
-						      ? 0
-						      : memswusage - memusage,
-				      swapfree = swapusage < swaptotal
-						     ? swaptotal - swapusage
-						     : 0;
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
+			uint64_t swaptotal = memswlimit,
+				 swapusage = memusage > memswusage
+						 ? 0
+						 : memswusage - memusage,
+				 swapfree = swapusage < swaptotal
+						? swaptotal - swapusage
+						: 0;
+			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swapfree);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && opts && opts->swap_off == true) {
-			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
-			snprintf(lbuf, 100, "Slab:        %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "Slab:        %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Buffers:")) {
-			snprintf(lbuf, 100, "Buffers:        %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "Buffers:        %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Cached:")) {
-			snprintf(lbuf, 100, "Cached:         %8lu kB\n", cached);
+			snprintf(lbuf, 100, "Cached:         %8" PRIu64 " kB\n",
+				 mstat.total_cache / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapCached:")) {
-			snprintf(lbuf, 100, "SwapCached:     %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SwapCached:     %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Active:")) {
-			snprintf(lbuf, 100, "Active:         %8lu kB\n",
-					active_anon + active_file);
+			snprintf(lbuf, 100, "Active:         %8" PRIu64 " kB\n",
+				 (mstat.total_active_anon +
+				  mstat.total_active_file) /
+				     1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive:")) {
-			snprintf(lbuf, 100, "Inactive:       %8lu kB\n",
-					inactive_anon + inactive_file);
+			snprintf(lbuf, 100, "Inactive:       %8" PRIu64 " kB\n",
+				 (mstat.total_inactive_anon +
+				  mstat.total_inactive_file) /
+				     1024);
 			printme = lbuf;
 		} else if (startswith(line, "Active(anon)")) {
-			snprintf(lbuf, 100, "Active(anon):   %8lu kB\n", active_anon);
+			snprintf(lbuf, 100, "Active(anon):   %8" PRIu64 " kB\n",
+				 mstat.total_active_anon / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive(anon)")) {
-			snprintf(lbuf, 100, "Inactive(anon): %8lu kB\n", inactive_anon);
+			snprintf(lbuf, 100, "Inactive(anon): %8" PRIu64 " kB\n",
+				 mstat.total_inactive_anon / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Active(file)")) {
-			snprintf(lbuf, 100, "Active(file):   %8lu kB\n", active_file);
+			snprintf(lbuf, 100, "Active(file):   %8" PRIu64 " kB\n",
+				 mstat.total_active_file / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Inactive(file)")) {
-			snprintf(lbuf, 100, "Inactive(file): %8lu kB\n", inactive_file);
+			snprintf(lbuf, 100, "Inactive(file): %8" PRIu64 " kB\n",
+				 mstat.total_inactive_file / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Unevictable")) {
-			snprintf(lbuf, 100, "Unevictable:    %8lu kB\n", unevictable);
+			snprintf(lbuf, 100, "Unevictable:    %8" PRIu64 " kB\n",
+				 mstat.total_unevictable / 1024);
+			printme = lbuf;
+ 		} else if (startswith(line, "Dirty")) {
+			snprintf(lbuf, 100, "Dirty:          %8" PRIu64 " kB\n",
+				 mstat.total_dirty / 1024);
+			printme = lbuf;
+ 		} else if (startswith(line, "Writeback")) {
+			snprintf(lbuf, 100, "Writeback:      %8" PRIu64 " kB\n",
+				 mstat.total_writeback / 1024);
+			printme = lbuf;
+ 		} else if (startswith(line, "AnonPages")) {
+			snprintf(lbuf, 100, "AnonPages:      %8" PRIu64 " kB\n",
+				 (mstat.total_active_anon +
+				  mstat.total_inactive_anon - mstat.total_shmem) /
+				     1024);
+			printme = lbuf;
+ 		} else if (startswith(line, "Mapped")) {
+			snprintf(lbuf, 100, "Mapped:         %8" PRIu64 " kB\n",
+				 mstat.total_mapped_file / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SReclaimable")) {
-			snprintf(lbuf, 100, "SReclaimable:   %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SReclaimable:   %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "SUnreclaim")) {
-			snprintf(lbuf, 100, "SUnreclaim:     %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "SUnreclaim:     %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Shmem:")) {
-			snprintf(lbuf, 100, "Shmem:          %8lu kB\n", shmem);
+			snprintf(lbuf, 100, "Shmem:          %8" PRIu64 " kB\n",
+				 mstat.total_shmem / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "ShmemHugePages")) {
-			snprintf(lbuf, 100, "ShmemHugePages: %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "ShmemHugePages: %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "ShmemPmdMapped")) {
-			snprintf(lbuf, 100, "ShmemPmdMapped: %8lu kB\n", 0UL);
+			snprintf(lbuf, 100, "ShmemPmdMapped: %8" PRIu64 " kB\n", (uint64_t)0);
+ 			printme = lbuf;
+ 		} else if (startswith(line, "AnonHugePages")) {
+			snprintf(lbuf, 100, "AnonHugePages:  %8" PRIu64 " kB\n",
+				 mstat.total_rss_huge / 1024);
 			printme = lbuf;
-		} else
-			printme = line;
+ 		} else {
+ 			printme = line;
+		}
 
 		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0) {

@@ -393,11 +393,12 @@ static int refresh_load(struct load_node *p, char *path)
 		__do_closedir DIR *dp = NULL;
 
 		/*clean up '\n' */
-		length = strlen(idbuf[i])-1;
+		length = strlen(idbuf[i]) - 1;
 		idbuf[i][length] = '\0';
 		ret = snprintf(proc_path, 256, "/proc/%s/task", idbuf[i]);
 		if (ret < 0 || ret > 255) {
-			lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
+			lxcfs_error("%s\n",
+				    "snprintf() failed in refresh_load.");
 			i = sum;
 			sum = -1;
 			goto err_out;
@@ -405,7 +406,8 @@ static int refresh_load(struct load_node *p, char *path)
 
 		dp = opendir(proc_path);
 		if (!dp) {
-			lxcfs_error("%s\n", "Open proc_path failed in refresh_load.");
+			lxcfs_error("%s\n",
+				    "Open proc_path failed in refresh_load.");
 			continue;
 		}
 		while ((file = readdir(dp)) != NULL) {
@@ -420,7 +422,8 @@ static int refresh_load(struct load_node *p, char *path)
 			ret = atof(file->d_name);
 			last_pid = (ret > last_pid) ? ret : last_pid;
 
-			ret = snprintf(proc_path, 256, "/proc/%s/task/%s/status", idbuf[i], file->d_name);
+			ret = snprintf(proc_path, 256, "/proc/%s/task/%s/status",
+				       idbuf[i], file->d_name);
 			if (ret < 0 || ret > 255) {
 				lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
 				i = sum;
@@ -432,12 +435,12 @@ static int refresh_load(struct load_node *p, char *path)
 			if (f != NULL) {
 				while (getline(&line, &linelen, f) != -1) {
 					/* Find State */
-					if ((line[0] == 'S') && (line[1] == 't'))
-						break;
+					if ((strncmp(line, "State", 5) == 0) &&
+					    (strncmp(line, "State R", 7) == 0 ||
+					     strncmp(line, "State D", 7) == 0))
+						run_pid++;
+					break;
 				}
-
-			if ((line[7] == 'R') || (line[7] == 'D'))
-				run_pid++;
 			}
 		}
 	}
