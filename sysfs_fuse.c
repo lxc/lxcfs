@@ -39,6 +39,7 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
+#include "memory_utils.h"
 #include "cgroups/cgroup.h"
 #include "config.h"
 #include "sysfs_fuse.h"
@@ -48,11 +49,10 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,
 					      struct fuse_file_info *fi)
 {
+	__do_free char *cg = NULL, *cpuset = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
-	char *cg;
-	char *cpuset = NULL;
 	bool use_view;
 
 	int max_cpus = 0;
@@ -60,13 +60,18 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	ssize_t total_len = 0;
 
 	if (offset) {
+		int left;
+
 		if (!d->cached)
 			return 0;
+
 		if (offset > d->size)
 			return -EINVAL;
-		int left = d->size - offset;
+
+		left = d->size - offset;
 		total_len = left > size ? size : left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
@@ -80,7 +85,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
-		goto err;
+		return 0;
 
 	use_view = cgroup_ops->can_use_cpuview(cgroup_ops);
 	if (use_view)
@@ -104,27 +109,23 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
-err:
-	free(cpuset);
-	free(cg);
+
 	return total_len;
 }
 
 static off_t get_sysfile_size(const char *which)
 {
-	FILE *f;
-	char *line = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
 	size_t len = 0;
 	ssize_t sz, answer = 0;
 
-	f = fopen(which, "r");
+	f = fopen(which, "re");
 	if (!f)
 		return 0;
 
 	while ((sz = getline(&line, &len, f)) != -1)
 		answer += sz;
-	fclose(f);
-	free(line);
 
 	return answer;
 }
@@ -205,8 +206,8 @@ int sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 int sys_open(const char *path, struct fuse_file_info *fi)
 {
+	__do_free struct file_info *info = NULL;
 	int type = -1;
-	struct file_info *info;
 
 	if (strcmp(path, "/sys/devices") == 0)
 		type = LXC_TYPE_SYS_DEVICES;
@@ -227,14 +228,16 @@ int sys_open(const char *path, struct fuse_file_info *fi)
 	info->type = type;
 
 	info->buflen = get_sysfile_size(path) + BUF_RESERVE_SIZE;
-	do {
-		info->buf = malloc(info->buflen);
-	} while (!info->buf);
+
+	info->buf = malloc(info->buflen);
+	if (!info->buf)
+		return -ENOMEM;
+
 	memset(info->buf, 0, info->buflen);
 	/* set actual size to buffer size */
 	info->size = info->buflen;
 
-	fi->fh = PTR_TO_UINT64(info);
+	fi->fh = PTR_TO_UINT64(move_ptr(info));
 	return 0;
 }
 
@@ -276,9 +279,12 @@ int sys_read(const char *path, char *buf, size_t size, off_t offset,
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
 		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
 	case LXC_TYPE_SYS_DEVICES:
+		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:
+		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-	default:
-		return -EINVAL;
+		break;
 	}
+
+	return -EINVAL;
 }
