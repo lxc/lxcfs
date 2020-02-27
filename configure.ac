@@ -230,4 +230,29 @@ AX_CHECK_COMPILE_FLAG([-fexceptions], [CFLAGS="$CFLAGS -fexceptions"],,[-Werror]
 AX_CHECK_LINK_FLAG([-z relro], [LDFLAGS="$LDFLAGS -z relro"],,[])
 AX_CHECK_LINK_FLAG([-z now], [LDFLAGS="$LDFLAGS -z now"],,[])
 
+# Build with ASAN commands
+AC_ARG_ENABLE([asan],
+	[AS_HELP_STRING([--enable-asan], [build with address sanitizer enabled [default=no]])],
+	[enable_asan=$enableval], [enable_asan=no])
+AM_CONDITIONAL([ENABLE_ASAN], [test "x$enable_asan" = "xyes"])
+
+# Build with UBSAN commands
+AC_ARG_ENABLE([ubsan],
+	[AS_HELP_STRING([--enable-ubsan], [build with ubsan sanitizer enabled [default=no]])],
+	[enable_asan=$enableval], [enable_ubsan=no])
+AM_CONDITIONAL([ENABLE_UBSAN], [test "x$enable_ubsan" = "xyes"])
+
 AC_OUTPUT
+
+# Configuration overview
+cat << EOF
+
+----------------------------
+Environment:
+ - compiler: $CC
+
+Debugging:
+ - tests: $enable_tests
+ - ASAN: $enable_asan
+ - mutex debugging: $enable_mutex_debugging
+EOF

@@ -28,6 +28,16 @@ liblxcfs_la_SOURCES = api_extension.h \
 		      sysfs_fuse.c sysfs_fuse.h \
 		      utils.c utils.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
+
+if ENABLE_ASAN
+liblxcfs_la_CFLAGS += -fsanitize=address \
+		      -fno-omit-frame-pointer
+endif
+
+if ENABLE_UBSAN
+liblxcfs_la_CFLAGS += -fsanitize=undefined
+endif
+
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 liblxcfstest_la_SOURCES = api_extension.h \
@@ -46,6 +56,16 @@ liblxcfstest_la_SOURCES = api_extension.h \
 			  sysfs_fuse.c sysfs_fuse.h \
 			  utils.c utils.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
+
+if ENABLE_ASAN
+liblxcfstest_la_CFLAGS += -fsanitize=address \
+			  -fno-omit-frame-pointer
+endif
+
+if ENABLE_UBSAN
+liblxcfstest_la_CFLAGS += -fsanitize=undefined
+endif
+
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 noinst_HEADERS = bindings.h \

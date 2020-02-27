@@ -380,7 +380,7 @@ void prune_init_slice(char *cg)
 	point = cg + cg_len - initscope_len;
 	if (strcmp(point, INITSCOPE) == 0) {
 		if (point == cg)
-			*(point+1) = '\0';
+			*(point + 1) = '\0';
 		else
 			*point = '\0';
 	}

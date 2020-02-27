@@ -482,10 +482,10 @@ static double exact_cpu_count(const char *cg)
  */
 int max_cpu_count(const char *cg)
 {
+	__do_free char *cpuset = NULL;
 	int rv, nprocs;
 	int64_t cfs_quota, cfs_period;
 	int nr_cpus_in_cpuset = 0;
-	char *cpuset = NULL;
 
 	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
 		return 0;
@@ -616,16 +616,14 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		max_cpus = cpu_cnt;
 
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
-
 	if (!stat_node) {
 		lxcfs_error("unable to find/create stat node for %s\n", cg);
 		return 0;
 	}
 
 	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
-	if (!diff) {
+	if (!diff)
 		return 0;
-	}
 
 	/*
 	 * If the new values are LOWER than values stored in memory, it means

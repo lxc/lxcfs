@@ -138,8 +138,8 @@ static off_t get_procfile_size(const char *which)
 
 int proc_open(const char *path, struct fuse_file_info *fi)
 {
+	__do_free struct file_info *info = NULL;
 	int type = -1;
-	struct file_info *info;
 
 	if (strcmp(path, "/proc/meminfo") == 0)
 		type = LXC_TYPE_PROC_MEMINFO;
@@ -175,7 +175,7 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 	/* set actual size to buffer size */
 	info->size = info->buflen;
 
-	fi->fh = PTR_TO_UINT64(info);
+	fi->fh = PTR_TO_UINT64(move_ptr(info));
 	return 0;
 }
 
