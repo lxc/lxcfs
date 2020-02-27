@@ -157,8 +157,9 @@ int preserve_ns(const int pid, const char *ns)
 
 void do_release_file_info(struct fuse_file_info *fi)
 {
-	struct file_info *f = (struct file_info *)fi->fh;
+	struct file_info *f;
 
+	f = INTTYPE_TO_PTR(fi->fh);
 	if (!f)
 		return;
 

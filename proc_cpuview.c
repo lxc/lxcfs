@@ -881,7 +881,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	size_t linelen = 0, total_len = 0;
 	bool am_printing = false, firstline = true, is_s390x = false;
 	int curcpu = -1, cpu, max_cpus = 0;
