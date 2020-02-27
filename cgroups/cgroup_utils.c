@@ -291,12 +291,12 @@ static int open_if_safe(int dirfd, const char *nextpath)
 {
 	__do_close_prot_errno int newfd = -EBADF;
 
-	newfd = openat(dirfd, nextpath, O_RDONLY | O_CLOEXEC);
+	newfd = openat(dirfd, nextpath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	if (newfd >= 0) /* Was not a symlink, all good. */
 		return move_fd(newfd);
 
 	if (errno == ELOOP)
-		return move_fd(newfd);
+		return -1;
 
 	if (errno == EPERM || errno == EACCES) {
 		/* We're not root (cause we got EPERM) so try opening with
