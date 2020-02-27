@@ -469,7 +469,6 @@ FILE *fopen_cloexec(const char *path, const char *mode)
 	__do_fclose FILE *ret = NULL;
 	int open_mode = 0;
 	int step = 0;
-	int saved_errno = 0;
 
 	if (!strncmp(mode, "r+", 2)) {
 		open_mode = O_RDWR;
