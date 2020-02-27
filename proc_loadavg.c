@@ -163,7 +163,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	pid_t initpid;
 	char *cg;
 	size_t total_len = 0;

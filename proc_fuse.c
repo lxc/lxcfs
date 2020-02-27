@@ -153,7 +153,7 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 	/* set actual size to buffer size */
 	info->size = info->buflen;
 
-	fi->fh = (unsigned long)info;
+	fi->fh = PTR_TO_UINT64(info);
 	return 0;
 }
 
@@ -224,7 +224,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	__do_free char *cg = NULL, *memswlimit_str = NULL, *memusage_str = NULL,
 		       *memswusage_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	unsigned long memswlimit = 0, memlimit = 0, memusage = 0,
 		      memswusage = 0, swap_total = 0, swap_free = 0;
 	ssize_t total_len = 0;
@@ -347,7 +347,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		       *line = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	unsigned long read = 0, write = 0;
 	unsigned long read_merged = 0, write_merged = 0;
 	unsigned long read_sectors = 0, write_sectors = 0;
@@ -655,7 +655,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 			    struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	double busytime = get_reaper_busy(fc->pid);
 	char *cache = d->buf;
 	ssize_t total_len = 0;
@@ -707,7 +707,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	__do_free struct cpuacct_usage *cg_cpu_usage = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu = 0;
@@ -762,10 +762,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
 	 * CPU usage. If not, values from the host's /proc/stat are used.
 	 */
-	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0) {
-		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, "
-				"falling back to the host's /proc/stat");
-	}
+	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0)
+		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 
 	f = fopen("/proc/stat", "r");
 	if (!f)
@@ -813,7 +811,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
-		curcpu ++;
+		curcpu++;
 
 		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
 			   &user,
@@ -861,15 +859,15 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				new_idle = idle + (all_used - cg_used);
 
 			} else {
-				lxcfs_error("cpu%d from %s has unexpected cpu time: %lu in /proc/stat, "
-						"%lu in cpuacct.usage_all; unable to determine idle time\n",
-						curcpu, cg, all_used, cg_used);
+				lxcfs_error("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
+					    curcpu, cg, all_used, cg_used);
 				new_idle = idle;
 			}
 
-			l = snprintf(cache, cache_size, "cpu%d %lu 0 %lu %lu 0 0 0 0 0 0\n",
-					curcpu, cg_cpu_usage[physcpu].user, cg_cpu_usage[physcpu].system,
-					new_idle);
+			l = snprintf(cache, cache_size,
+				     "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
+				     curcpu, cg_cpu_usage[physcpu].user,
+				     cg_cpu_usage[physcpu].system, new_idle);
 
 			if (l < 0) {
 				perror("Error writing to cache");
@@ -1004,7 +1002,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *) fuse_get_context()->private_data;
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	unsigned long memlimit = 0, memusage = 0, memswlimit = 0,
 		      memswusage = 0, cached = 0, hosttotal = 0, active_anon = 0,
 		      inactive_anon = 0, active_file = 0, inactive_file = 0,
@@ -1193,9 +1191,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 }
 
 int proc_read(const char *path, char *buf, size_t size, off_t offset,
-		struct fuse_file_info *fi)
+	      struct fuse_file_info *fi)
 {
-	struct file_info *f = (struct file_info *) fi->fh;
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	switch (f->type) {
 	case LXC_TYPE_PROC_MEMINFO:
@@ -1212,7 +1210,7 @@ int proc_read(const char *path, char *buf, size_t size, off_t offset,
 		return proc_swaps_read(buf, size, offset, fi);
 	case LXC_TYPE_PROC_LOADAVG:
 		return proc_loadavg_read(buf, size, offset, fi);
-	default:
-		return -EINVAL;
 	}
+
+	return -EINVAL;
 }

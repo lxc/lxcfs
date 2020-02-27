@@ -49,7 +49,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
 	char *cg;
 	char *cpuset = NULL;
@@ -234,7 +234,7 @@ int sys_open(const char *path, struct fuse_file_info *fi)
 	/* set actual size to buffer size */
 	info->size = info->buflen;
 
-	fi->fh = (unsigned long)info;
+	fi->fh = PTR_TO_UINT64(info);
 	return 0;
 }
 
@@ -270,7 +270,7 @@ int sys_releasedir(const char *path, struct fuse_file_info *fi)
 int sys_read(const char *path, char *buf, size_t size, off_t offset,
 	     struct fuse_file_info *fi)
 {
-	struct file_info *f = (struct file_info *)fi->fh;
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	switch (f->type) {
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:

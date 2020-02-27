@@ -57,9 +57,9 @@ struct file_info {
 	char *cgroup;
 	char *file;
 	int type;
-	char *buf;  // unused as of yet
+	char *buf; /* unused */
 	int buflen;
-	int size; //actual data size
+	int size; /*actual data size */
 	int cached;
 };
 

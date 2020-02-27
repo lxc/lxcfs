@@ -291,12 +291,12 @@ static int open_if_safe(int dirfd, const char *nextpath)
 {
 	__do_close_prot_errno int newfd = -EBADF;
 
-	newfd = openat(dirfd, nextpath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	newfd = openat(dirfd, nextpath, O_RDONLY | O_CLOEXEC);
 	if (newfd >= 0) /* Was not a symlink, all good. */
-		return newfd;
+		return move_fd(newfd);
 
 	if (errno == ELOOP)
-		return newfd;
+		return move_fd(newfd);
 
 	if (errno == EPERM || errno == EACCES) {
 		/* We're not root (cause we got EPERM) so try opening with
@@ -310,7 +310,7 @@ static int open_if_safe(int dirfd, const char *nextpath)
 			 */
 			int ret = check_symlink(newfd);
 			if (ret < 0)
-				newfd = ret;
+				return -1;
 		}
 	}
 
@@ -371,7 +371,7 @@ static int open_without_symlink(const char *target, const char *prefix_skip)
 		return -1;
 
 	for (;;) {
-		__do_close_prot_errno int newfd = -EBADF;
+		int newfd;
 		char *nextpath;
 
 		nextpath = get_nextpath(dup, &curlen, fulllen);
@@ -379,11 +379,10 @@ static int open_without_symlink(const char *target, const char *prefix_skip)
 			return move_fd(dirfd);
 
 		newfd = open_if_safe(dirfd, nextpath);
-		if (newfd < 0)
-			return -1;
-
 		close_prot_errno_disarm(dirfd);
 		dirfd = newfd;
+		if (newfd < 0)
+			return -1;
 	}
 
 	return move_fd(dirfd);
@@ -469,7 +468,6 @@ FILE *fopen_cloexec(const char *path, const char *mode)
 	__do_fclose FILE *ret = NULL;
 	int open_mode = 0;
 	int step = 0;
-	int saved_errno = 0;
 
 	if (!strncmp(mode, "r+", 2)) {
 		open_mode = O_RDWR;

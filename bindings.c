@@ -692,10 +692,8 @@ static bool cgfs_setup_controllers(void)
 	if (!cgfs_prepare_mounts())
 		return false;
 
-	if (!cgfs_mount_hierarchies()) {
-		lxcfs_error("%s\n", "Failed to set up private lxcfs cgroup mounts.");
-		return false;
-	}
+	if (!cgfs_mount_hierarchies())
+		return log_error_errno(false, errno, "Failed to set up private lxcfs cgroup mounts");
 
 	if (!permute_root())
 		return false;

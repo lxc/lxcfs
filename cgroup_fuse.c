@@ -1150,7 +1150,7 @@ int cg_open(const char *path, struct fuse_file_info *fi)
 	file_info->buf = NULL;
 	file_info->buflen = 0;
 
-	fi->fh = (unsigned long)file_info;
+	fi->fh = PTR_TO_UINT64(file_info);
 	ret = 0;
 
 out:
@@ -1358,7 +1358,7 @@ int cg_read(const char *path, char *buf, size_t size, off_t offset,
 	    struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
-	struct file_info *f = (struct file_info *)fi->fh;
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	struct cgfs_files *k = NULL;
 	char *data = NULL;
 	int ret, s;
@@ -1468,7 +1468,7 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 	dir_info->file = NULL;
 	dir_info->buflen = 0;
 
-	fi->fh = (unsigned long)dir_info;
+	fi->fh = PTR_TO_UINT64(dir_info);
 	return 0;
 }
 
@@ -1811,7 +1811,7 @@ int cg_write(const char *path, const char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	char *localbuf = NULL;
 	struct cgfs_files *k = NULL;
-	struct file_info *f = (struct file_info *)fi->fh;
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	bool r;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
@@ -1977,7 +1977,7 @@ static void free_keys(struct cgfs_files **keys)
 int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	       off_t offset, struct fuse_file_info *fi)
 {
-	struct file_info *d = (struct file_info *)fi->fh;
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	struct cgfs_files **list = NULL;
 	int i, ret;
 	char *nextcg = NULL;
