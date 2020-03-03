@@ -372,7 +372,7 @@ static int get_existing_subsystems(char ***klist, char ***nlist)
 	__do_fclose FILE *f = NULL;
 	size_t len = 0;
 
-	f = fopen("/proc/self/cgroup", "r");
+	f = fopen("/proc/self/cgroup", "re");
 	if (!f)
 		return -1;
 
@@ -805,7 +805,7 @@ static int cg_hybrid_init(struct cgroup_ops *ops)
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to retrieve available legacy cgroup controllers");
 
-	f = fopen("/proc/self/mountinfo", "r");
+	f = fopen("/proc/self/mountinfo", "re");
 	if (!f)
 		return log_error_errno(-1, errno, "Failed to open \"/proc/self/mountinfo\"");
 

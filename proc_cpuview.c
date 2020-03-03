@@ -908,7 +908,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 
-	f = fopen("/proc/cpuinfo", "r");
+	f = fopen("/proc/cpuinfo", "re");
 	if (!f)
 		return 0;
 

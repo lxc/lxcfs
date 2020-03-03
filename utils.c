@@ -337,7 +337,7 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 
-	f = fopen(path, "r");
+	f = fopen(path, "re");
 	if (!f)
 		return 0;
 

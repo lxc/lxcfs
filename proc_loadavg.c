@@ -431,7 +431,7 @@ static int refresh_load(struct load_node *p, char *path)
 				goto err_out;
 			}
 
-			f = fopen(proc_path, "r");
+			f = fopen(proc_path, "re");
 			if (f != NULL) {
 				while (getline(&line, &linelen, f) != -1) {
 					/* Find State */

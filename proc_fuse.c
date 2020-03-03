@@ -121,7 +121,7 @@ int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static off_t get_procfile_size(const char *which)
 {
-	FILE *f = fopen(which, "r");
+	FILE *f = fopen(which, "re");
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t sz, answer = 0;
@@ -304,7 +304,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		__do_fclose FILE *f = NULL;
 		size_t linelen = 0;
 
-		f = fopen("/proc/meminfo", "r");
+		f = fopen("/proc/meminfo", "re");
 		if (!f)
 			return 0;
 
@@ -438,7 +438,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 			return read_file_fuse("/proc/diskstats", buf, size, d);
 	}
 
-	f = fopen("/proc/diskstats", "r");
+	f = fopen("/proc/diskstats", "re");
 	if (!f)
 		return 0;
 
@@ -571,7 +571,7 @@ static uint64_t get_reaper_start_time(pid_t pid)
 		return 0;
 	}
 
-	f = fopen(path, "r");
+	f = fopen(path, "re");
 	if (!f) {
 		/* Caller can check for EINVAL on 0. */
 		errno = EINVAL;
@@ -787,7 +787,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0)
 		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 
-	f = fopen("/proc/stat", "r");
+	f = fopen("/proc/stat", "re");
 	if (!f)
 		return 0;
 
@@ -1095,7 +1095,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit /= 1024;
 	memusage /= 1024;
 
-	f = fopen("/proc/meminfo", "r");
+	f = fopen("/proc/meminfo", "re");
 	if (!f)
 		return 0;
 
