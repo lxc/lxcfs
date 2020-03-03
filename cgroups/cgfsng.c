@@ -41,6 +41,7 @@
 #include "../config.h"
 #include "../macro.h"
 #include "../memory_utils.h"
+#include "../utils.h"
 #include "cgroup.h"
 #include "cgroup2_devices.h"
 #include "cgroup_utils.h"
@@ -789,6 +790,7 @@ static int cg_hybrid_init(struct cgroup_ops *ops)
 {
 	__do_free char *basecginfo = NULL;
 	__do_free char *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	int ret;
 	size_t len = 0;
@@ -805,7 +807,7 @@ static int cg_hybrid_init(struct cgroup_ops *ops)
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to retrieve available legacy cgroup controllers");
 
-	f = fopen("/proc/self/mountinfo", "re");
+	f = fopen_cached("/proc/self/mountinfo", "re", &fopen_cache);
 	if (!f)
 		return log_error_errno(-1, errno, "Failed to open \"/proc/self/mountinfo\"");
 

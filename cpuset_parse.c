@@ -56,8 +56,7 @@ bool cpu_in_cpuset(int cpu, const char *cpuset)
 		ret = cpuset_getrange(c, &a, &b);
 		if (ret == 1 && cpu == a) /* "1" or "1,6" */
 			return true;
-
-		if (ret == 2 && cpu >= a && cpu <= b) /* range match */
+		else if (ret == 2 && cpu >= a && cpu <= b) /* range match */
 			return true;
 	}
 

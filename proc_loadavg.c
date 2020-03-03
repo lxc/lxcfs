@@ -411,6 +411,7 @@ static int refresh_load(struct load_node *p, char *path)
 			continue;
 		}
 		while ((file = readdir(dp)) != NULL) {
+			__do_free void *fopen_cache = NULL;
 			__do_fclose FILE *f = NULL;
 
 			if (strncmp(file->d_name, ".", 1) == 0)
@@ -431,7 +432,7 @@ static int refresh_load(struct load_node *p, char *path)
 				goto err_out;
 			}
 
-			f = fopen(proc_path, "re");
+			f = fopen_cached(proc_path, "re", &fopen_cache);
 			if (f != NULL) {
 				while (getline(&line, &linelen, f) != -1) {
 					/* Find State */

@@ -866,6 +866,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
@@ -908,7 +909,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 
-	f = fopen("/proc/cpuinfo", "re");
+	f = fopen_cached("/proc/cpuinfo", "re", &fopen_cache);
 	if (!f)
 		return 0;
 

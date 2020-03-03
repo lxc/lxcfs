@@ -474,10 +474,11 @@ static bool has_fs_type(const struct statfs *fs, fs_type_magic magic_val)
 static bool is_on_ramfs(void)
 {
 	__do_free char *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	size_t len = 0;
 
-	f = fopen("/proc/self/mountinfo", "re");
+	f = fopen_cached("/proc/self/mountinfo", "re", &fopen_cache);
 	if (!f)
 		return false;
 
