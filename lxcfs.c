@@ -1086,8 +1086,8 @@ static int set_pidfile(char *pidfile)
 
 int main(int argc, char *argv[])
 {
+	__do_close_prot_errno int pidfile_fd = -EBADF;
 	int ret = EXIT_FAILURE;
-	int pidfd = -1;
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
 	bool debug = false, nonempty = false;
@@ -1170,7 +1170,9 @@ int main(int argc, char *argv[])
 		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", RUNTIME_PATH);
 		pidfile = pidfile_buf;
 	}
-	if ((pidfd = set_pidfile(pidfile)) < 0)
+
+	pidfile_fd = set_pidfile(pidfile);
+	if (pidfile_fd < 0)
 		goto out;
 
 	if (load_use && start_loadavg() != 0)
@@ -1186,7 +1188,5 @@ out:
 		dlclose(dlopen_handle);
 	if (pidfile)
 		unlink(pidfile);
-	if (pidfd > 0)
-		close(pidfd);
 	exit(ret);
 }
