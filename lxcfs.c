@@ -957,16 +957,22 @@ const struct fuse_operations lxcfs_ops = {
 
 static void usage()
 {
-	fprintf(stderr, "Usage:\n");
+	fprintf(stderr, "Usage: lxcfs <directory>\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs [-f|-d] -u -l -n [-p pidfile] mountpoint\n");
-	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
-	fprintf(stderr, "  -l use loadavg \n");
-	fprintf(stderr, "  -u no swap \n");
-	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
-	fprintf(stderr, "lxcfs -h\n");
-	fprintf(stderr, "lxcfs -v\n");
-	exit(1);
+	fprintf(stderr, "lxcfs set up fuse- and cgroup-based virtualizing filesystem\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "Options :\n");
+	fprintf(stderr, "-d, --debug		Run lxcfs with debugging enabled\n");
+	fprintf(stderr, "-f, --foreground	Run lxcfs in the foreground\n");
+	fprintf(stderr, "-n, --help		Print help\n");
+	fprintf(stderr, "-l, --enable-loadavg	Enable loadavg virtualization\n");
+	fprintf(stderr, "-o			Options to pass directly through fuse\n");
+	fprintf(stderr, "-p, --pidfile=FILE	Path to use for storing lxcfs pid\n");
+	fprintf(stderr, "			Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
+	fprintf(stderr, "-u, --disable-swap	Disable swap virtualization\n");
+	fprintf(stderr, "-v, --version		Print lxcfs version\n");
+	fprintf(stderr, "--enable-pidfd		Use pidfd for process tracking\n");
+	exit(EXIT_FAILURE);
 }
 
 static inline bool is_help(char *w)
@@ -1065,7 +1071,7 @@ int main(int argc, char *argv[])
 	int ret = EXIT_FAILURE;
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
-	bool debug = false, nonempty = false;
+	bool debug = false, foreground = false, nonempty = false;
 	bool load_use = false;
 	/*
 	 * what we pass to fuse_main is:
@@ -1085,15 +1091,32 @@ int main(int argc, char *argv[])
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
-	swallow_arg(&argc, argv, "-f");
+
+	/* -f / --foreground */
+	foreground = swallow_arg(&argc, argv, "-f");
+	if (swallow_arg(&argc, argv, "--foreground"))
+		foreground = true;
+
+	/* -d / --debug */
 	debug = swallow_arg(&argc, argv, "-d");
-	if (swallow_arg(&argc, argv, "-l"))
+	if (swallow_arg(&argc, argv, "--debug"))
+		debug = true;
+
+	if (foreground && debug)
+		log_exit("Both --debug and --forgreound specified");
+
+	/* -l / --enable-loadavg */
+	load_use = swallow_arg(&argc, argv, "-l");
+	if (swallow_arg(&argc, argv, "--enable-loadavg"))
 		load_use = true;
-	if (swallow_arg(&argc, argv, "-u"))
+
+	/* -u / --disable-swap */
+	opts->swap_off = swallow_arg(&argc, argv, "-u");
+	if (swallow_arg(&argc, argv, "--disable-swap"))
 		opts->swap_off = true;
 
-	if (swallow_arg(&argc, argv, "--pidfd"))
-		opts->use_pidfd = true;
+	/* --enable-pidfd */
+	opts->use_pidfd = swallow_arg(&argc, argv, "--enable-pidfd");
 
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
@@ -1111,7 +1134,11 @@ int main(int argc, char *argv[])
 		free(v);
 		v = NULL;
 	}
+
+	/* -p / --pidfile */
 	if (swallow_option(&argc, argv, "-p", &v))
+		pidfile = v;
+	if (!pidfile && swallow_option(&argc, argv, "--pidfile", &v))
 		pidfile = v;
 
 	if (argc == 2  && is_version(argv[1])) {
