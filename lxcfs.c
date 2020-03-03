@@ -1135,9 +1135,9 @@ int main(int argc, char *argv[])
 		newargv[cnt++] = "-f";
 	newargv[cnt++] = "-o";
 	if (nonempty)
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
+		newargv[cnt++] = "default_permissions,allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
 	else
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+		newargv[cnt++] = "default_permissions,allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
