@@ -984,8 +984,8 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 			sscanf(line, "hierarchical_memory_limit %" PRIu64, &(mstat->hierarchical_memory_limit));
 		} else if (!unified && startswith(line, "hierarchical_memsw_limit")) {
 			sscanf(line, "hierarchical_memsw_limit %" PRIu64, &(mstat->hierarchical_memsw_limit));
-		} else if (!unified && startswith(line, "total_cache")) {
-			sscanf(line, "total_cache %" PRIu64, &(mstat->total_cache));
+		} else if (startswith(line, unified ? "file" :"total_cache")) {
+			sscanf(line, unified ? "file %" PRIu64 : "total_cache %" PRIu64, &(mstat->total_cache));
 		} else if (!unified && startswith(line, "total_rss")) {
 			sscanf(line, "total_rss %" PRIu64, &(mstat->total_rss));
 		} else if (!unified && startswith(line, "total_rss_huge")) {
