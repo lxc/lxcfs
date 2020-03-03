@@ -55,6 +55,12 @@
 		__ret__;				 \
 	})
 
+#define log_error(__ret__, format, ...)             \
+	({                                          \
+		lxcfs_error(format, ##__VA_ARGS__); \
+		__ret__;                            \
+	})
+
 #define STRLITERALLEN(x) (sizeof(""x"") - 1)
 
 /* Calculate the number of chars needed to represent a given integer as a C
@@ -95,6 +101,8 @@
 		_exit(EXIT_FAILURE);                    \
 	})
 
+#define PTR_TO_INT(p) ((int)((intptr_t)(p)))
+#define INT_TO_PTR(u) ((void *)((intptr_t)(u)))
 #define PTR_TO_UINT64(p) ((uint64_t)((intptr_t)(p)))
 #define INTTYPE_TO_PTR(u) ((void *)((intptr_t)(u)))
 

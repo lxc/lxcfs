@@ -239,24 +239,15 @@ err:
 static bool cgfs_param_exist(const char *controller, const char *cgroup,
 			     const char *file)
 {
-	int ret, cfd;
-	size_t len;
-	char *fnam;
+	__do_free char *path = NULL;
+	int cfd;
 
 	cfd = get_cgroup_fd(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + strlen(file) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
-
-	return (faccessat(cfd, fnam, F_OK, 0) == 0);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file);
+	return (faccessat(cfd, path, F_OK, 0) == 0);
 }
 
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)

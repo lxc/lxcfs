@@ -30,10 +30,10 @@
  */
 static char *cpuset_nexttok(const char *c)
 {
-	char *r = strchr(c+1, ',');
-	if (r)
-		return r+1;
-	return NULL;
+	char *r;
+
+	r = strchr(c + 1, ',');
+	return r ? (r + 1) : NULL;
 }
 
 static int cpuset_getrange(const char *c, int *a, int *b)
@@ -50,15 +50,14 @@ static int cpuset_getrange(const char *c, int *a, int *b)
  */
 bool cpu_in_cpuset(int cpu, const char *cpuset)
 {
-	const char *c;
-
-	for (c = cpuset; c; c = cpuset_nexttok(c)) {
+	for (const char *c = cpuset; c; c = cpuset_nexttok(c)) {
 		int a, b, ret;
 
 		ret = cpuset_getrange(c, &a, &b);
-		if (ret == 1 && cpu == a) // "1" or "1,6"
+		if (ret == 1 && cpu == a) /* "1" or "1,6" */
 			return true;
-		else if (ret == 2 && cpu >= a && cpu <= b) // range match
+
+		if (ret == 2 && cpu >= a && cpu <= b) /* range match */
 			return true;
 	}
 
@@ -70,17 +69,17 @@ bool cpu_in_cpuset(int cpu, const char *cpuset)
  */
 int cpu_number_in_cpuset(const char *cpuset)
 {
-	const char *c;
 	int cpu_number = 0;
 
-	for (c = cpuset; c; c = cpuset_nexttok(c)) {
+	for (const char *c = cpuset; c; c = cpuset_nexttok(c)) {
 		int a, b, ret;
 
 		ret = cpuset_getrange(c, &a, &b);
 		if (ret == 1)
 			cpu_number++;
 		else if (ret == 2)
-			cpu_number +=  a > b ? a - b + 1 : b - a + 1;
+			cpu_number += a > b ? a - b + 1 : b - a + 1;
 	}
+
 	return cpu_number;
 }

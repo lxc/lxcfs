@@ -301,18 +301,15 @@ static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
 
 static int send_creds_clone_wrapper(void *arg)
 {
-	struct ucred cred;
-	char v;
-	int sock = *(int *)arg;
+	int sock = PTR_TO_INT(arg);
+	char v = '1'; /* we are the child */
+	struct ucred cred = {
+	    .uid = 0,
+	    .gid = 0,
+	    .pid = 1,
+	};
 
-	/* we are the child */
-	cred.uid = 0;
-	cred.gid = 0;
-	cred.pid = 1;
-	v = '1';
-	if (send_creds(sock, &cred, v, true) != SEND_CREDS_OK)
-		return 1;
-	return 0;
+	return send_creds(sock, &cred, v, true) != SEND_CREDS_OK;
 }
 
 /*
@@ -365,7 +362,7 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 	if (setns(fd, 0))
 		log_exit("Failed to setns to pid namespace of process %d", target);
 
-	pid = lxcfs_clone(send_creds_clone_wrapper, &sock, 0);
+	pid = lxcfs_clone(send_creds_clone_wrapper, INT_TO_PTR(sock), 0);
 	if (pid < 0)
 		_exit(EXIT_FAILURE);
 
