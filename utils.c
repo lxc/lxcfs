@@ -337,7 +337,7 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 
-	f = fopen(path, "r");
+	f = fopen(path, "re");
 	if (!f)
 		return 0;
 
@@ -405,4 +405,75 @@ again:
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
 		return -1;
 	return 0;
+}
+
+static ssize_t read_nointr(int fd, void *buf, size_t count)
+{
+	ssize_t ret;
+again:
+	ret = read(fd, buf, count);
+	if (ret < 0 && errno == EINTR)
+		goto again;
+
+	return ret;
+}
+
+static void *must_realloc(void *orig, size_t sz)
+{
+	void *ret;
+
+	do {
+		ret = realloc(orig, sz);
+	} while (!ret);
+
+	return ret;
+}
+
+static char *file_to_buf(const char *path, size_t *length)
+{
+	__do_close_prot_errno int fd = -EBADF;
+	__do_free char *copy = NULL;
+	char buf[PATH_MAX];
+
+	if (!length)
+		return NULL;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return NULL;
+
+	*length = 0;
+	for (;;) {
+		int n;
+		char *old = copy;
+
+		n = read_nointr(fd, buf, sizeof(buf));
+		if (n < 0)
+			return NULL;
+		if (!n)
+			break;
+
+		copy = must_realloc(old, (*length + n) * sizeof(*old));
+		memcpy(copy + *length, buf, n);
+		*length += n;
+	}
+
+	return move_ptr(copy);
+}
+
+FILE *fopen_cached(const char *path, const char *mode, void **caller_freed_buffer)
+{
+	__do_free char *buf = NULL;
+	size_t len = 0;
+	FILE *f;
+
+	buf = file_to_buf(path, &len);
+	if (!buf)
+		return NULL;
+
+	f = fmemopen(buf, len, mode);
+	if (!f)
+		return NULL;
+	*caller_freed_buffer = move_ptr(buf);
+	return f;
 }

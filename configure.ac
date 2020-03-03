@@ -17,6 +17,7 @@ AC_CONFIG_FILES([
 	config/Makefile
 	config/init/Makefile
 	config/init/systemd/Makefile
+	config/init/systemd/lxcfs.service
 	config/init/sysvinit/Makefile
 	config/init/upstart/Makefile
 	share/Makefile

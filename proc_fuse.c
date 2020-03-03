@@ -121,7 +121,7 @@ int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static off_t get_procfile_size(const char *which)
 {
-	FILE *f = fopen(which, "r");
+	FILE *f = fopen(which, "re");
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t sz, answer = 0;
@@ -301,10 +301,11 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	/* When no mem + swap limit is specified or swapaccount=0*/
 	if (!memswlimit) {
 		__do_free char *line = NULL;
+		__do_free void *fopen_cache = NULL;
 		__do_fclose FILE *f = NULL;
 		size_t linelen = 0;
 
-		f = fopen("/proc/meminfo", "r");
+		f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
 		if (!f)
 			return 0;
 
@@ -367,6 +368,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		       *io_merged_str = NULL, *io_service_bytes_str = NULL,
 		       *io_wait_time_str = NULL, *io_service_time_str = NULL,
 		       *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
@@ -438,7 +440,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 			return read_file_fuse("/proc/diskstats", buf, size, d);
 	}
 
-	f = fopen("/proc/diskstats", "r");
+	f = fopen_cached("/proc/diskstats", "re", &fopen_cache);
 	if (!f)
 		return 0;
 
@@ -542,6 +544,7 @@ static double get_reaper_busy(pid_t task)
 
 static uint64_t get_reaper_start_time(pid_t pid)
 {
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	int ret;
 	uint64_t starttime;
@@ -571,7 +574,7 @@ static uint64_t get_reaper_start_time(pid_t pid)
 		return 0;
 	}
 
-	f = fopen(path, "r");
+	f = fopen_cached(path, "re", &fopen_cache);
 	if (!f) {
 		/* Caller can check for EINVAL on 0. */
 		errno = EINVAL;
@@ -726,6 +729,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			  struct fuse_file_info *fi)
 {
 	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_free struct cpuacct_usage *cg_cpu_usage = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
@@ -787,7 +791,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0)
 		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 
-	f = fopen("/proc/stat", "r");
+	f = fopen_cached("/proc/stat", "re", &fopen_cache);
 	if (!f)
 		return 0;
 
@@ -1030,6 +1034,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_free char *cgroup = NULL, *line = NULL,
 		       *memusage_str = NULL, *memstat_str = NULL,
 		       *memswlimit_str = NULL, *memswusage_str = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *) fuse_get_context()->private_data;
@@ -1095,7 +1100,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	memlimit /= 1024;
 	memusage /= 1024;
 
-	f = fopen("/proc/meminfo", "r");
+	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
 	if (!f)
 		return 0;
 

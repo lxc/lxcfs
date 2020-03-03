@@ -407,7 +407,7 @@ static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_r
 	ret = snprintf(fpath, PROCLEN, "/proc/%d/uid_map", pid);
 	if (ret < 0 || ret >= PROCLEN)
 		return false;
-	FILE *f = fopen(fpath, "r");
+	FILE *f = fopen(fpath, "re");
 	if (!f)
 		return false;
 
@@ -1601,7 +1601,7 @@ static void get_pid_creds(pid_t pid, uid_t *uid, gid_t *gid)
 	*uid = -1;
 	*gid = -1;
 	sprintf(line, "/proc/%d/status", pid);
-	if ((f = fopen(line, "r")) == NULL) {
+	if ((f = fopen(line, "re")) == NULL) {
 		lxcfs_error("Error opening %s: %s\n", line, strerror(errno));
 		return;
 	}
@@ -1635,7 +1635,7 @@ static bool hostuid_to_ns(uid_t uid, pid_t pid, uid_t *answer)
 	char line[400];
 
 	sprintf(line, "/proc/%d/uid_map", pid);
-	if ((f = fopen(line, "r")) == NULL) {
+	if ((f = fopen(line, "re")) == NULL) {
 		return false;
 	}
 

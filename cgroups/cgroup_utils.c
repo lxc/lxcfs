@@ -557,7 +557,7 @@ char *read_file(const char *fnam)
 	char *buf = NULL;
 	size_t len = 0, fulllen = 0;
 
-	f = fopen(fnam, "r");
+	f = fopen(fnam, "re");
 	if (!f)
 		return NULL;
 	while ((linelen = getline(&line, &len, f)) != -1) {
