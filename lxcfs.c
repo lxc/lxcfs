@@ -123,34 +123,38 @@ static volatile sig_atomic_t need_reload;
  * lock and when we know the user_count was 0 */
 static void do_reload(void)
 {
+	int ret;
 	char lxcfs_lib_path[PATH_MAX];
 
 	if (loadavg_pid > 0)
 		stop_loadavg();
 
 	if (dlopen_handle) {
-		lxcfs_debug("%s\n", "Closing liblxcfs.so handle.");
+		lxcfs_debug("%s\n", "Closing liblxcfs.so handle");
 		dlclose(dlopen_handle);
 	}
 
 	/* First try loading using ld.so */
 	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
 	if (dlopen_handle) {
-		lxcfs_debug("%s\n", "Successfully called dlopen() on liblxcfs.so.");
+		lxcfs_debug("%s\n", "Successfully called dlopen() on liblxcfs.so");
 		goto good;
 	}
 
 #ifdef LIBDIR
 	/* LIBDIR: autoconf will setup this MACRO. Default value is $PREFIX/lib */
-        snprintf(lxcfs_lib_path, PATH_MAX, "%s/lxcfs/liblxcfs.so", LIBDIR);
+        ret = snprintf(lxcfs_lib_path, sizeof(lxcfs_lib_path), "%s/lxcfs/liblxcfs.so", LIBDIR);
 #else
-        snprintf(lxcfs_lib_path, PATH_MAX, "/usr/local/lib/lxcfs/liblxcfs.so");
+        ret = snprintf(lxcfs_lib_path, sizeof(lxcfs_lib_path), "/usr/local/lib/lxcfs/liblxcfs.so");
 #endif
+	if (ret < 0 || ret >= sizeof(lxcfs_lib_path))
+		log_exit("Failed to create path to open liblxcfs");
+
         dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
-	if (!dlopen_handle) {
-		lxcfs_error("Failed to open liblxcfs.so: %s.\n", dlerror());
-		_exit(1);
-	}
+	if (!dlopen_handle)
+		log_exit("%s - Failed to open liblxcfs.so", dlerror());
+	else
+		lxcfs_debug("Successfully called dlopen() on %s", lxcfs_lib_path);
 
 good:
 	if (loadavg_pid > 0)
