@@ -1087,7 +1087,7 @@ int main(int argc, char *argv[])
 	int ret = EXIT_FAILURE;
 	int pidfd = -1;
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
-	size_t pidfile_len;
+	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
 	bool debug = false, nonempty = false;
 	bool load_use = false;
 	/*
@@ -1165,9 +1165,8 @@ int main(int argc, char *argv[])
 	newargv[cnt++] = NULL;
 
 	if (!pidfile) {
-		pidfile_len = strlen(RUNTIME_PATH) + strlen("/lxcfs.pid") + 1;
-		pidfile = alloca(pidfile_len);
-		snprintf(pidfile, pidfile_len, "%s/lxcfs.pid", RUNTIME_PATH);
+		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", RUNTIME_PATH);
+		pidfile = pidfile_buf;
 	}
 	if ((pidfd = set_pidfile(pidfile)) < 0)
 		goto out;
