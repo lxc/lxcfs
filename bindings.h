@@ -66,6 +66,7 @@ struct file_info {
 struct lxcfs_opts {
 	bool swap_off;
 	bool use_pidfd;
+	bool use_cfs;
 };
 
 extern pid_t lookup_initpid_in_store(pid_t qpid);

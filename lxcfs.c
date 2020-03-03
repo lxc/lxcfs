@@ -963,6 +963,7 @@ static void usage()
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Options :\n");
 	fprintf(stderr, "-d, --debug		Run lxcfs with debugging enabled\n");
+	fprintf(stderr, "--disable-cfs		Disable cpu virtualization via cpu shares\n");
 	fprintf(stderr, "-f, --foreground	Run lxcfs in the foreground\n");
 	fprintf(stderr, "-n, --help		Print help\n");
 	fprintf(stderr, "-l, --enable-loadavg	Enable loadavg virtualization\n");
@@ -1088,6 +1089,7 @@ int main(int argc, char *argv[])
 	}
 	opts->swap_off = false;
 	opts->use_pidfd = false;
+	opts->use_cfs = true;
 
 	/* accomodate older init scripts */
 	swallow_arg(&argc, argv, "-s");
@@ -1117,6 +1119,10 @@ int main(int argc, char *argv[])
 
 	/* --enable-pidfd */
 	opts->use_pidfd = swallow_arg(&argc, argv, "--enable-pidfd");
+
+	/* --disable-cfs */
+	if (swallow_arg(&argc, argv, "--disable-cfs"))
+		opts->use_cfs = false;
 
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
