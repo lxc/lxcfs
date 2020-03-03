@@ -55,6 +55,12 @@
 		__ret__;				 \
 	})
 
+#define log_error(__ret__, format, ...)             \
+	({                                          \
+		lxcfs_error(format, ##__VA_ARGS__); \
+		__ret__;                            \
+	})
+
 #define STRLITERALLEN(x) (sizeof(""x"") - 1)
 
 /* Calculate the number of chars needed to represent a given integer as a C
