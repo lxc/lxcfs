@@ -53,28 +53,26 @@ static void lock_mutex(pthread_mutex_t *l)
 {
 	int ret;
 
-	if ((ret = pthread_mutex_lock(l)) != 0) {
-		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
-		exit(1);
-	}
+	ret = pthread_mutex_lock(l);
+	if (ret)
+		log_exit("%s - returned: %d\n", strerror(ret), ret);
 }
 
 static void unlock_mutex(pthread_mutex_t *l)
 {
 	int ret;
 
-	if ((ret = pthread_mutex_unlock(l)) != 0) {
-		lxcfs_error("returned:%d %s\n", ret, strerror(ret));
-		exit(1);
-	}
+	ret = pthread_mutex_unlock(l);
+	if (ret)
+		log_exit("%s - returned: %d\n", strerror(ret), ret);
 }
 
-static void users_lock(void)
+static inline void users_lock(void)
 {
 	lock_mutex(&user_count_mutex);
 }
 
-static void users_unlock(void)
+static inline void users_unlock(void)
 {
 	unlock_mutex(&user_count_mutex);
 }
