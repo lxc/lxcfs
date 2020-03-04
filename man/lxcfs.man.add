@@ -1,0 +1,7 @@
+[DESCRIPTION]
+
+LXCFS is a simple fuse- and cgroup-based filesystem virtualizing various aspects of the system to extend the useability of containers.
+
+[SEE ALSO]
+lxc(1),
+lxc.container.conf(5)
