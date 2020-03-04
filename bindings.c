@@ -708,6 +708,8 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	char *cret;
 	char cwd[MAXPATHLEN];
 
+	lxcfs_info("Running constructor %s", __func__);
+
 	cgroup_ops = cgroup_init();
 	if (!cgroup_ops)
 		log_exit("Failed to initialize cgroup support");
@@ -736,28 +738,32 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	if (!init_cpuview())
 		log_exit("Failed to init CPU view");
 
-	fprintf(stderr, "mount namespace: %d\n", cgroup_ops->mntns_fd);
-	fprintf(stderr, "hierarchies:\n");
+	lxcfs_info("mount namespace: %d", cgroup_ops->mntns_fd);
+	lxcfs_info("hierarchies:");
 
 	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++, i++) {
-		__do_free char *controllers = lxc_string_join(",", (const char **)(*h)->controllers, false);
-		fprintf(stderr, " %2d: fd: %3d: %s\n", i, (*h)->fd, controllers ?: "");
+		char **controller_list = (*h)->controllers;
+		__do_free char *controllers = NULL;
+		if (controller_list && *controller_list)
+			controllers = lxc_string_join(",", (const char **)controller_list, false);
+		lxcfs_info(" %2d: fd: %3d: %s", i, (*h)->fd, controllers ?: "");
 	}
 
 	pidfd = pidfd_open(pid, 0);
 	if (pidfd >= 0 && pidfd_send_signal(pidfd, 0, NULL, 0) == 0) {
 		can_use_pidfd = true;
-		fprintf(stderr, "Kernel supports pidfds\n");
+		lxcfs_info("Kernel supports pidfds");
 	}
 
-	fprintf(stderr, "api_extensions:\n");
+	lxcfs_info("api_extensions:");
 	for (i = 0; i < nr_api_extensions; i++)
-		fprintf(stderr, "- %s\n", api_extensions[i]);
+		lxcfs_info("- %s", api_extensions[i]);
 }
 
 static void __attribute__((destructor)) lxcfs_exit(void)
 {
-	lxcfs_debug("%s\n", "Running destructor for liblxcfs");
+	lxcfs_info("Running destructor %s", __func__);
+
 	free_cpuview();
 	cgroup_exit(cgroup_ops);
 }

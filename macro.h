@@ -48,6 +48,11 @@
 #define lxcfs_v(format, ...)
 #endif /* VERBOSE */
 
+#define lxcfs_info(format, ...)                              \
+	do {                                                 \
+		fprintf(stderr, format "\n", ##__VA_ARGS__); \
+	} while (false)
+
 #define log_error_errno(__ret__, __errno__, format, ...) \
 	({						 \
 		errno = __errno__;			 \
