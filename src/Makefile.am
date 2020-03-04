@@ -7,7 +7,7 @@ AM_LDFLAGS = $(FUSE_LIBS) -pthread
 
 AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
-liblxcfs_la_SOURCES = api_extension.h \
+liblxcfs_la_SOURCES = api_extensions.h \
 		      bindings.c bindings.h \
 		      cgroup_fuse.c cgroup_fuse.h \
 		      cgroups/cgfsng.c \
@@ -35,7 +35,7 @@ endif
 
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-liblxcfstest_la_SOURCES = api_extension.h \
+liblxcfstest_la_SOURCES = api_extensions.h \
 			  bindings.c bindings.h \
 			  cgroup_fuse.c cgroup_fuse.h \
 			  cgroups/cgfsng.c \
@@ -63,7 +63,8 @@ endif
 
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
-noinst_HEADERS = bindings.h \
+noinst_HEADERS = api_extensions.h \
+		 bindings.h \
 		 cgroup_fuse.h \
 		 cgroups/cgroup.h \
 		 cgroups/cgroup2_devices.h \
@@ -90,7 +91,7 @@ bin_PROGRAMS = lxcfs
 EXTRA_DIST = ../man/lxcfs.man.add ../lxcfs.spec
 
 if HAVE_HELP2MAN
-man_MANS = lxcfs.1
+man_MANS = ../man/lxcfs.1
 
 lxcfs.1: lxcfs ../man/lxcfs.man.add
 	$(HELP2MAN) -n "System virtualization filesystem for containers" --no-discard-stderr -s 1 -I ../man/lxcfs.man.add -N ./lxcfs > ../man/lxcfs.1
@@ -128,7 +129,7 @@ distclean:
 		libtool \
 		ltmain.sh \
 		lxcfs \
-		lxcfs.1 \
+		../man/lxcfs.1 \
 		lxcfs.o \
 		m4/ \
 		missing \
