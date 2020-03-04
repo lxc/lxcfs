@@ -88,16 +88,6 @@ lxcfs_CFLAGS = $(AM_CFLAGS)
 lxcfs_LDFLAGS = $(AM_LDFLAGS)
 bin_PROGRAMS = lxcfs
 
-EXTRA_DIST = $(top_srcdir)/man/lxcfs.man.add $(top_srcdir)/lxcfs.spec
-
-if HAVE_HELP2MAN
-
-dist_man_MANS = $(top_srcdir)/man/lxcfs.1
-
-lxcfs.1: lxcfs $(top_srcdir)/man/lxcfs.man.add
-	$(HELP2MAN) -n "System virtualization filesystem for containers" --no-discard-stderr -s 1 -I $(top_srcdir)/man/lxcfs.man.add -N ./lxcfs > $(top_srcdir)/man/lxcfs.1
-endif
-
 TEST_READ: tests/test-read.c
 	$(CC) -o tests/test-read \
 		tests/test-read.c
@@ -109,31 +99,3 @@ TEST_SYSCALLS: tests/test_syscalls.c
 	$(CC) -o tests/test_syscalls \
 		tests/test_syscalls.c
 tests: TEST_READ TEST_CPUSET TEST_SYSCALLS
-
-distclean:
-	rm -rf .deps/ \
-		INSTALL \
-		Makefile \
-		Makefile.in \
-		aclocal.m4 \
-		autom4te.cache/ \
-		compile \
-		config.guess \
-		config.h \
-		config.h.in \
-		config.log \
-		config.status \
-		config.sub \
-		configure \
-		depcomp \
-		install-sh \
-		libtool \
-		ltmain.sh \
-		lxcfs \
-		../man/lxcfs.1 \
-		lxcfs.o \
-		m4/ \
-		missing \
-		stamp-h1 \
-		tests/test_syscalls \
-		*.lo *.la

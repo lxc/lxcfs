@@ -1,42 +1,64 @@
-# Process this file with autoconf to produce a configure script.
-
 AC_PREREQ([2.69])
+
 AC_INIT([lxcfs], [3.1.2], [lxc-devel@lists.linuxcontainers.org])
-AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
-AC_CONFIG_MACRO_DIR([m4])
+
+# We need pkg-config
+PKG_PROG_PKG_CONFIG
+
+AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_HEADERS([config.h])
-AC_CONFIG_SRCDIR([configure.ac])
 
-AM_INIT_AUTOMAKE([subdir-objects -Wno-portability])
+AC_SUBST(ACLOCAL_AMFLAGS, "-I m4")
+AC_CONFIG_MACRO_DIR([m4])
+AM_INIT_AUTOMAKE([-Wall -Werror -Wno-portability subdir-objects])
+AC_CANONICAL_HOST
+AM_PROG_CC_C_O
+AC_USE_SYSTEM_EXTENSIONS
 
-AC_GNU_SOURCE
+# Test if we have a new enough compiler.
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#define GCC_VERSION \
+	(__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+
+#define CLANG_VERSION \
+	(__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
+
+#if GCC_VERSION < 40700 && CLANG_VERSION < 10000
+#error Sorry, your compiler is too old - please upgrade it
+#endif
+	]])], [valid_compiler=yes], [valid_compiler=no])
+if test "x$valid_compiler" = "xno"; then
+	AC_MSG_ERROR([Sorry, your compiler is too old - please upgrade it])
+fi
+
+# libtool
+LT_INIT
+AC_SUBST([LIBTOOL_DEPS])
+
 AC_CONFIG_FILES([
 	Makefile
 	lxcfs.spec
+
 	config/Makefile
 	config/init/Makefile
 	config/init/systemd/Makefile
 	config/init/systemd/lxcfs.service
 	config/init/sysvinit/Makefile
 	config/init/upstart/Makefile
+
+	doc/Makefile
+
 	share/Makefile
 	share/00-lxcfs.conf
 	share/lxc.mount.hook
 	share/lxc.reboot.hook
+
 	src/Makefile
+
 	tests/Makefile ])
 
-LT_INIT
-AC_PROG_CC_C99
-AC_CANONICAL_HOST
-AM_PROG_CC_C_O
-AC_USE_SYSTEM_EXTENSIONS
-
 AC_CHECK_LIB(pthread, main)
-
-# We need pkg-config
-PKG_PROG_PKG_CONFIG
 
 PKG_CHECK_MODULES(FUSE, fuse)
 
@@ -61,6 +83,7 @@ AC_ARG_WITH(distro, AS_HELP_STRING([--with-distro=DISTRO], [Specify the Linux di
 if type lsb_release >/dev/null 2>&1 && test "z$with_distro" = "z"; then
 	with_distro=`lsb_release -is`
 fi
+
 if test "z$with_distro" = "z"; then
 	AC_CHECK_FILE(/etc/redhat-release,with_distro="redhat")
 	AC_CHECK_FILE(/etc/oracle-release,with_distro="oracle")
@@ -77,11 +100,13 @@ if test "z$with_distro" = "z"; then
 	AC_CHECK_FILE(/etc/pardus-release,with_distro="pardus")
 	AC_CHECK_FILE(/etc/pld-release,with_distro="pld")
 fi
+
 with_distro=`echo ${with_distro} | tr '[[:upper:]]' '[[:lower:]]'`
 
 if test "z$with_distro" = "z"; then
 	with_distro="unknown"
 fi
+
 case $with_distro in
 	ubuntu)
 		distroconf=default.conf.ubuntu
@@ -93,6 +118,7 @@ case $with_distro in
 		distroconf=default.conf.unknown
 		;;
 esac
+
 AC_MSG_RESULT([$with_distro])
 AM_CONDITIONAL([HAVE_DEBIAN], [test x"$with_distro" = "xdebian" -o x"$with_distro" = "xubuntu"])
 AM_CONDITIONAL([DISTRO_UBUNTU], [test "x$with_distro" = "xubuntu"])
@@ -174,17 +200,11 @@ AC_CHECK_FUNCS([strlcpy],
 	AM_CONDITIONAL(HAVE_STRLCPY, true)
 	AC_DEFINE(HAVE_STRLCPY,1,[Have strlcpy]),
 	AM_CONDITIONAL(HAVE_STRLCPY, false))
+
 AC_CHECK_FUNCS([strlcat],
 	AM_CONDITIONAL(HAVE_STRLCAT, true)
 	AC_DEFINE(HAVE_STRLCAT,1,[Have strlcat]),
 	AM_CONDITIONAL(HAVE_STRLCAT, false))
-
-AC_CHECK_TYPES([struct clone_args], [], [], [[#include <linux/sched.h>]])
-
-AC_CHECK_FUNCS([clone3],
-	AM_CONDITIONAL(HAVE_CLONE3, true)
-	AC_DEFINE(HAVE_CLONE3,1,[Supports clone3]),
-	AM_CONDITIONAL(HAVE_CLONE3, false))
 
 AC_CHECK_FUNCS([pidfd_open],
 	AM_CONDITIONAL(HAVE_PIDFD_OPEN, true)
