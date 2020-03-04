@@ -88,13 +88,14 @@ lxcfs_CFLAGS = $(AM_CFLAGS)
 lxcfs_LDFLAGS = $(AM_LDFLAGS)
 bin_PROGRAMS = lxcfs
 
-EXTRA_DIST = ../man/lxcfs.man.add ../lxcfs.spec
+EXTRA_DIST = $(top_srcdir)/man/lxcfs.man.add $(top_srcdir)/lxcfs.spec
 
 if HAVE_HELP2MAN
-man_MANS = ../man/lxcfs.1
 
-lxcfs.1: lxcfs ../man/lxcfs.man.add
-	$(HELP2MAN) -n "System virtualization filesystem for containers" --no-discard-stderr -s 1 -I ../man/lxcfs.man.add -N ./lxcfs > ../man/lxcfs.1
+dist_man_MANS = $(top_srcdir)/man/lxcfs.1
+
+lxcfs.1: lxcfs $(top_srcdir)/man/lxcfs.man.add
+	$(HELP2MAN) -n "System virtualization filesystem for containers" --no-discard-stderr -s 1 -I $(top_srcdir)/man/lxcfs.man.add -N ./lxcfs > $(top_srcdir)/man/lxcfs.1
 endif
 
 TEST_READ: tests/test-read.c
