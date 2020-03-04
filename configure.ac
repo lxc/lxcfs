@@ -24,6 +24,7 @@ AC_CONFIG_FILES([
 	share/00-lxcfs.conf
 	share/lxc.mount.hook
 	share/lxc.reboot.hook
+	src/Makefile
 	tests/Makefile ])
 
 LT_INIT
