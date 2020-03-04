@@ -128,14 +128,14 @@ static void do_reload(void)
 		stop_loadavg();
 
 	if (dlopen_handle) {
-		lxcfs_debug("%s\n", "Closing liblxcfs.so handle");
+		lxcfs_info("Closed liblxcfs.so");
 		dlclose(dlopen_handle);
 	}
 
 	/* First try loading using ld.so */
 	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
 	if (dlopen_handle) {
-		lxcfs_debug("%s\n", "Successfully called dlopen() on liblxcfs.so");
+		lxcfs_debug("Opened liblxcfs.so");
 		goto good;
 	}
 
@@ -152,14 +152,14 @@ static void do_reload(void)
 	if (!dlopen_handle)
 		log_exit("%s - Failed to open liblxcfs.so", dlerror());
 	else
-		lxcfs_debug("Successfully called dlopen() on %s", lxcfs_lib_path);
+		lxcfs_debug("Opened %s", lxcfs_lib_path);
 
 good:
 	if (loadavg_pid > 0)
 		start_loadavg();
 
 	if (need_reload)
-		lxcfs_error("%s\n", "lxcfs: reloaded");
+		lxcfs_info("Reloaded LXCFS");
 	need_reload = 0;
 }
 
