@@ -26,7 +26,28 @@ Prior to the implementation of cgroup namespaces by Serge Hallyn `LXCFS` also
 provided a container aware `cgroupfs` tree. It took care that the container
 only had access to cgroups underneath it's own cgroups and thus provided
 additional safety. For systems without support for cgroup namespaces `LXCFS`
-will still provide this feature.
+will still provide this feature but it is mostly considered deprecated.
+
+## Upgrading `LXCFS` without restart
+
+`LXCFS` is split into a shared library (a libtool module, to be precise)
+`liblxcfs` and a simple binary `lxcfs`. When upgrading to a newer version of
+`LXCFS` the `lxcfs` binary will not be restarted. Instead it will detect that
+a new version of the shared library is available and will reload it using
+`dlclose(3)` and `dlopen(3)`. This design was chosen so that the fuse main loop
+that `LXCFS` uses will not need to be restarted. If it were then all containers
+using `LXCFS` would need to be restarted since they would otherwise be left
+with broken fuse mounts.
+
+### musl
+
+To achieve smooth upgrades through shared library reloads `LXCFS` also relies
+on the fact that when `dlclose(3)` drops the last reference to the shared
+library destructors are run and when `dlopen(3)` is called constructors are
+run. While this is true for `glibc` it is not true for `musl` (See the section
+[Unloading libraries](https://wiki.musl-libc.org/functional-differences-from-glibc.html).).
+So users of `LXCFS` on `musl` are advised to restart `LXCFS` completely and
+- by extension - all containers.
 
 ## Building
 Build lxcfs as follows:
