@@ -957,22 +957,20 @@ const struct fuse_operations lxcfs_ops = {
 
 static void usage()
 {
-	fprintf(stderr, "Usage: lxcfs <directory>\n");
-	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs set up fuse- and cgroup-based virtualizing filesystem\n");
-	fprintf(stderr, "\n");
-	fprintf(stderr, "Options :\n");
-	fprintf(stderr, "-d, --debug		Run lxcfs with debugging enabled\n");
-	fprintf(stderr, "--disable-cfs		Disable cpu virtualization via cpu shares\n");
-	fprintf(stderr, "-f, --foreground	Run lxcfs in the foreground\n");
-	fprintf(stderr, "-n, --help		Print help\n");
-	fprintf(stderr, "-l, --enable-loadavg	Enable loadavg virtualization\n");
-	fprintf(stderr, "-o			Options to pass directly through fuse\n");
-	fprintf(stderr, "-p, --pidfile=FILE	Path to use for storing lxcfs pid\n");
-	fprintf(stderr, "			Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
-	fprintf(stderr, "-u, --disable-swap	Disable swap virtualization\n");
-	fprintf(stderr, "-v, --version		Print lxcfs version\n");
-	fprintf(stderr, "--enable-pidfd		Use pidfd for process tracking\n");
+	lxcfs_info("Usage: lxcfs <directory>\n");
+	lxcfs_info("lxcfs set up fuse- and cgroup-based virtualizing filesystem\n");
+	lxcfs_info("Options :");
+	lxcfs_info("-d, --debug			Run lxcfs with debugging enabled");
+	lxcfs_info("--disable-cfs		Disable cpu virtualization via cpu shares");
+	lxcfs_info("-f, --foreground		Run lxcfs in the foreground");
+	lxcfs_info("-n, --help			Print help");
+	lxcfs_info("-l, --enable-loadavg	Enable loadavg virtualization");
+	lxcfs_info("-o				Options to pass directly through fuse");
+	lxcfs_info("-p, --pidfile=FILE		Path to use for storing lxcfs pid");
+	lxcfs_info("				Default pidfile is %s/lxcfs.pid", RUNTIME_PATH);
+	lxcfs_info("-u, --disable-swap		Disable swap virtualization");
+	lxcfs_info("-v, --version		Print lxcfs version");
+	lxcfs_info("--enable-pidfd		Use pidfd for process tracking");
 	exit(EXIT_FAILURE);
 }
 
