@@ -106,4 +106,6 @@
 #define PTR_TO_UINT64(p) ((uint64_t)((intptr_t)(p)))
 #define INTTYPE_TO_PTR(u) ((void *)((intptr_t)(u)))
 
+#define __visible __attribute__((visibility("default")))
+
 #endif /* __LXCFS_MACRO_H */

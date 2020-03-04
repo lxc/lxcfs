@@ -39,6 +39,12 @@ that `LXCFS` uses will not need to be restarted. If it were then all containers
 using `LXCFS` would need to be restarted since they would otherwise be left
 with broken fuse mounts.
 
+To force a reload of the shared library at the next possible instance simply
+send `SIGUSR1` to the pid of the running `LXCFS` process. This can be as simple
+as doing:
+
+    kill -s USR1 $(pidof lxcfs)
+
 ### musl
 
 To achieve smooth upgrades through shared library reloads `LXCFS` also relies
@@ -46,8 +52,8 @@ on the fact that when `dlclose(3)` drops the last reference to the shared
 library destructors are run and when `dlopen(3)` is called constructors are
 run. While this is true for `glibc` it is not true for `musl` (See the section
 [Unloading libraries](https://wiki.musl-libc.org/functional-differences-from-glibc.html).).
-So users of `LXCFS` on `musl` are advised to restart `LXCFS` completely and
-- by extension - all containers.
+So users of `LXCFS` on `musl` are advised to restart `LXCFS` completely and all
+containers making use of it.
 
 ## Building
 Build lxcfs as follows:
@@ -81,18 +87,6 @@ lxc.autodev = 1
 lxc.kmsg = 0
 lxc.include = /usr/share/lxc/config/common.conf.d/00-lxcfs.conf
 ```
-
-## Upgrading LXCFS without breaking running containers
-LXCFS is implemented using a simple shared library without any external
-dependencies other than `FUSE`. It is completely reloadable without having to
-umount it. This ensures that container can be kept running even when the shared
-library is upgraded.
-
-To force a reload of the shared library at the next possible instance simply
-send `SIGUSR1` to the pid of the running `LXCFS` process. This can be as simple
-as doing:
-
-    kill -s USR1 $(pidof lxcfs)
 
 ## Using with Docker
 
