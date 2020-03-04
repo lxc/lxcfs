@@ -1123,8 +1123,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 &&
 			   opts && opts->swap_off == false) {
- 			memswlimit -= memlimit;
- 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
+			memswlimit -= memlimit;
+			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
