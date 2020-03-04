@@ -244,7 +244,7 @@ static void save_initpid(struct stat *sb, pid_t pid)
 	struct stat st;
 	int ino_hash;
 
-	if (opts->use_pidfd && can_use_pidfd) {
+	if (opts && opts->use_pidfd && can_use_pidfd) {
 		pidfd = pidfd_open(pid, 0);
 		if (pidfd < 0)
 			return;
