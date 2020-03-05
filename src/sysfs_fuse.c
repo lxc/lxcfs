@@ -51,6 +51,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 {
 	__do_free char *cg = NULL, *cpuset = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
 	bool use_view;
@@ -88,7 +89,10 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	if (!cpuset)
 		return 0;
 
-	use_view = cgroup_ops->can_use_cpuview(cgroup_ops);
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
+		use_view = true;
+	else
+		use_view = false;
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 

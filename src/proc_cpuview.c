@@ -874,9 +874,10 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		return 0;
 
-	if (cgroup_ops->can_use_cpuview(cgroup_ops) && (opts && opts->use_cfs))
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
 		use_view = true;
-
+	else
+		use_view = false;
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 
