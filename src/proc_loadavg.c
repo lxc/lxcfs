@@ -148,6 +148,7 @@ int calc_hash(const char *name)
 {
 	unsigned int hash = 0;
 	unsigned int x = 0;
+
 	/* ELFHash algorithm. */
 	while (*name) {
 		hash = (hash << 4) + *name++;
@@ -156,21 +157,22 @@ int calc_hash(const char *name)
 			hash ^= (x >> 24);
 		hash &= ~x;
 	}
+
 	return (hash & 0x7fffffff);
 }
 
 int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
+	__do_free char *cg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	pid_t initpid;
-	char *cg;
 	size_t total_len = 0;
 	char *cache = d->buf;
 	struct load_node *n;
 	int hash;
-	int cfd, rv = 0;
+	int cfd;
 	unsigned long a, b, c;
 
 	if (offset) {
@@ -212,9 +214,9 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 			 * because delete is not allowed before read has ended.
 			 */
 			pthread_rwlock_unlock(&load_hash[hash].rdlock);
-			rv = 0;
-			goto err;
+			return 0;
 		}
+
 		do {
 			n = malloc(sizeof(struct load_node));
 		} while (!n);
@@ -222,6 +224,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		do {
 			n->cg = malloc(strlen(cg)+1);
 		} while (!n->cg);
+
 		strcpy(n->cg, cg);
 		n->avenrun[0] = 0;
 		n->avenrun[1] = 0;
@@ -235,28 +238,34 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	a = n->avenrun[0] + (FIXED_1/200);
 	b = n->avenrun[1] + (FIXED_1/200);
 	c = n->avenrun[2] + (FIXED_1/200);
-	total_len = snprintf(d->buf, d->buflen, "%lu.%02lu %lu.%02lu %lu.%02lu %d/%d %d\n",
-		LOAD_INT(a), LOAD_FRAC(a),
-		LOAD_INT(b), LOAD_FRAC(b),
-		LOAD_INT(c), LOAD_FRAC(c),
-		n->run_pid, n->total_pid, n->last_pid);
+	total_len = snprintf(d->buf, d->buflen,
+			     "%lu.%02lu "
+			     "%lu.%02lu "
+			     "%lu.%02lu "
+			     "%d/"
+			     "%d"
+			     "%d\n",
+			     LOAD_INT(a),
+			     LOAD_FRAC(a),
+			     LOAD_INT(b),
+			     LOAD_FRAC(b),
+			     LOAD_INT(c),
+			     LOAD_FRAC(c),
+			     n->run_pid,
+			     n->total_pid,
+			     n->last_pid);
 	pthread_rwlock_unlock(&load_hash[hash].rdlock);
-	if (total_len < 0 || total_len >=  d->buflen) {
-		lxcfs_error("%s\n", "Failed to write to cache");
-		rv = 0;
-		goto err;
-	}
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
+
 	d->size = (int)total_len;
 	d->cached = 1;
 
 	if (total_len > size)
 		total_len = size;
-	memcpy(buf, d->buf, total_len);
-	rv = total_len;
 
-err:
-	free(cg);
-	return rv;
+	memcpy(buf, d->buf, total_len);
+	return total_len;
 }
 
 /*
@@ -398,28 +407,27 @@ static int refresh_load(struct load_node *p, char *path)
 		idbuf[i][length] = '\0';
 		ret = snprintf(proc_path, 256, "/proc/%s/task", idbuf[i]);
 		if (ret < 0 || ret > 255) {
-			lxcfs_error("%s\n",
-				    "snprintf() failed in refresh_load.");
 			i = sum;
 			sum = -1;
-			goto err_out;
+			log_error(goto err_out, "snprintf() failed in refresh_load");
 		}
 
 		dp = opendir(proc_path);
-		if (!dp) {
-			lxcfs_error("%s\n",
-				    "Open proc_path failed in refresh_load.");
-			continue;
-		}
+		if (!dp)
+			log_error(continue, "Open proc_path failed in refresh_load");
+
 		while ((file = readdir(dp)) != NULL) {
 			__do_free void *fopen_cache = NULL;
 			__do_fclose FILE *f = NULL;
 
 			if (strncmp(file->d_name, ".", 1) == 0)
 				continue;
+
 			if (strncmp(file->d_name, "..", 1) == 0)
 				continue;
+
 			total_pid++;
+
 			/* We make the biggest pid become last_pid.*/
 			ret = atof(file->d_name);
 			last_pid = (ret > last_pid) ? ret : last_pid;
@@ -427,10 +435,9 @@ static int refresh_load(struct load_node *p, char *path)
 			ret = snprintf(proc_path, 256, "/proc/%s/task/%s/status",
 				       idbuf[i], file->d_name);
 			if (ret < 0 || ret > 255) {
-				lxcfs_error("%s\n", "snprintf() failed in refresh_load.");
 				i = sum;
 				sum = -1;
-				goto err_out;
+				log_error(goto err_out, "snprintf() failed in refresh_load");
 			}
 
 			f = fopen_cached(proc_path, "re", &fopen_cache);
@@ -456,7 +463,7 @@ static int refresh_load(struct load_node *p, char *path)
 
 err_out:
 	for (; i > 0; i--)
-		free(idbuf[i-1]);
+		free(idbuf[i - 1]);
 out:
 	free(idbuf);
 	return sum;
@@ -515,11 +522,9 @@ static void *load_begin(void *arg)
 					goto out;
 
 				ret = snprintf(path, length, "%s%s", dot_or_empty(f->cg), f->cg);
-				if (ret < 0 || ret > length - 1) {
-					/* snprintf failed, ignore the node.*/
-					lxcfs_error("Refresh node %s failed for snprintf().\n", f->cg);
-					goto out;
-				}
+				/* Ignore the node if snprintf fails.*/
+				if (ret < 0 || ret > length - 1)
+					log_error(goto out, "Refresh node %s failed for snprintf()", f->cg);
 
 				sum = refresh_load(f, path);
 				if (sum == 0)
@@ -554,22 +559,26 @@ static int init_load(void)
 	for (i = 0; i < LOAD_SIZE; i++) {
 		load_hash[i].next = NULL;
 		ret = pthread_mutex_init(&load_hash[i].lock, NULL);
-		if (ret != 0) {
-			lxcfs_error("%s\n", "Failed to initialize lock");
+		if (ret) {
+			lxcfs_error("Failed to initialize lock");
 			goto out3;
 		}
+
 		ret = pthread_rwlock_init(&load_hash[i].rdlock, NULL);
-		if (ret != 0) {
-			lxcfs_error("%s\n", "Failed to initialize rdlock");
+		if (ret) {
+			lxcfs_error("Failed to initialize rdlock");
 			goto out2;
 		}
+
 		ret = pthread_rwlock_init(&load_hash[i].rilock, NULL);
-		if (ret != 0) {
-			lxcfs_error("%s\n", "Failed to initialize rilock");
+		if (ret) {
+			lxcfs_error("Failed to initialize rilock");
 			goto out1;
 		}
 	}
+
 	return 0;
+
 out1:
 	pthread_rwlock_destroy(&load_hash[i].rdlock);
 out2:
@@ -581,6 +590,7 @@ out3:
 		pthread_rwlock_destroy(&load_hash[i].rdlock);
 		pthread_rwlock_destroy(&load_hash[i].rilock);
 	}
+
 	return -1;
 }
 
@@ -625,16 +635,15 @@ pthread_t load_daemon(int load_use)
 	pthread_t pid;
 
 	ret = init_load();
-	if (ret == -1) {
-		lxcfs_error("%s\n", "Initialize hash_table fails in load_daemon!");
-		return 0;
-	}
+	if (ret == -1)
+		return log_error(0, "Initialize hash_table fails in load_daemon!");
+
 	ret = pthread_create(&pid, NULL, load_begin, NULL);
 	if (ret != 0) {
-		lxcfs_error("%s\n", "Create pthread fails in load_daemon!");
 		load_free();
-		return 0;
+		return log_error(0, "Create pthread fails in load_daemon!");
 	}
+
 	/* use loadavg, here loadavg = 1*/
 	loadavg = load_use;
 	return pid;
@@ -649,10 +658,8 @@ int stop_load_daemon(pthread_t pid)
 	loadavg_stop = 1;
 
 	s = pthread_join(pid, NULL); /* Make sure sub thread has been canceled. */
-	if (s != 0) {
-		lxcfs_error("%s\n", "stop_load_daemon error: failed to join");
-		return -1;
-	}
+	if (s)
+		return log_error(-1, "stop_load_daemon error: failed to join");
 
 	load_free();
 	loadavg_stop = 0;
