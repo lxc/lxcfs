@@ -79,6 +79,7 @@ int proc_getattr(const char *path, struct stat *sb)
 	memset(sb, 0, sizeof(struct stat));
 	if (clock_gettime(CLOCK_REALTIME, &now) < 0)
 		return -EINVAL;
+
 	sb->st_uid = sb->st_gid = 0;
 	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
 	if (strcmp(path, "/proc") == 0) {
@@ -86,13 +87,14 @@ int proc_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 2;
 		return 0;
 	}
-	if (strcmp(path, "/proc/meminfo") == 0 ||
-			strcmp(path, "/proc/cpuinfo") == 0 ||
-			strcmp(path, "/proc/uptime") == 0 ||
-			strcmp(path, "/proc/stat") == 0 ||
-			strcmp(path, "/proc/diskstats") == 0 ||
-			strcmp(path, "/proc/swaps") == 0 ||
-			strcmp(path, "/proc/loadavg") == 0) {
+
+	if (strcmp(path, "/proc/meminfo")	== 0 ||
+	    strcmp(path, "/proc/cpuinfo")	== 0 ||
+	    strcmp(path, "/proc/uptime")	== 0 ||
+	    strcmp(path, "/proc/stat")		== 0 ||
+	    strcmp(path, "/proc/diskstats")	== 0 ||
+	    strcmp(path, "/proc/swaps")		== 0 ||
+	    strcmp(path, "/proc/loadavg")	== 0) {
 		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -119,19 +121,19 @@ int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static off_t get_procfile_size(const char *which)
+static off_t get_procfile_size(const char *path)
 {
-	FILE *f = fopen(which, "re");
-	char *line = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
 	size_t len = 0;
 	ssize_t sz, answer = 0;
+
+	f = fopen(path, "re");
 	if (!f)
 		return 0;
 
 	while ((sz = getline(&line, &len, f)) != -1)
 		answer += sz;
-	fclose (f);
-	free(line);
 
 	return answer;
 }
@@ -187,6 +189,7 @@ int proc_access(const char *path, int mask)
 	/* these are all read-only */
 	if ((mask & ~R_OK) != 0)
 		return -EACCES;
+
 	return 0;
 }
 
@@ -198,9 +201,9 @@ int proc_release(const char *path, struct fuse_file_info *fi)
 
 static unsigned long get_memlimit(const char *cgroup, bool swap)
 {
-	int ret;
 	__do_free char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
+	int ret;
 
 	if (swap)
 		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memlimit_str);
@@ -219,6 +222,9 @@ static unsigned long get_min_memlimit(const char *cgroup, bool swap)
 	unsigned long retlimit;
 
 	copy = strdup(cgroup);
+	if (!copy)
+		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
+
 	retlimit = get_memlimit(copy, swap);
 
 	while (strcmp(copy, "/") != 0) {
@@ -233,11 +239,9 @@ static unsigned long get_min_memlimit(const char *cgroup, bool swap)
 	return retlimit;
 }
 
-static bool startswith(const char *line, const char *pref)
+static inline bool startswith(const char *line, const char *pref)
 {
-	if (strncmp(line, pref, strlen(pref)) == 0)
-		return true;
-	return false;
+	return strncmp(line, pref, strlen(pref)) == 0;
 }
 
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
@@ -325,16 +329,16 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		total_len += l;
 	}
 
-	if (total_len < 0 || l < 0) {
-		perror("Error writing to cache");
-		return 0;
-	}
+	if (total_len < 0 || l < 0)
+		return log_error(0, "Failed writing to cache");
 
 	d->cached = 1;
 	d->size = (int)total_len;
 
-	if (total_len > size) total_len = size;
+	if (total_len > size)
+		total_len = size;
 	memcpy(buf, d->buf, total_len);
+
 	return total_len;
 }
 
@@ -343,13 +347,13 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor,
 {
 	char *eol;
 	char key[32];
+	size_t len;
 
 	memset(key, 0, 32);
 	snprintf(key, 32, "%u:%u %s", major, minor, iotype);
 
-	size_t len = strlen(key);
 	*v = 0;
-
+	len = strlen(key);
 	while (*str) {
 		if (startswith(str, key)) {
 			sscanf(str + len, "%lu", v);
@@ -487,14 +491,11 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		l = snprintf(cache, cache_size, "%s", lbuf);
-		if (l < 0) {
-			perror("Error writing to fuse buf");
-			return 0;
-		}
-		if (l >= cache_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			return 0;
-		}
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
 		cache += l;
 		cache_size -= l;
 		total_len += l;
@@ -624,18 +625,12 @@ static double get_reaper_start_time_in_sec(pid_t pid)
 	double res = 0;
 
 	clockticks = get_reaper_start_time(pid);
-	if (clockticks == 0 && errno == EINVAL) {
-		lxcfs_debug("failed to retrieve start time of pid %d\n", pid);
-		return 0;
-	}
+	if (clockticks == 0 && errno == EINVAL)
+		return log_debug(0, "Failed to retrieve start time of pid %d", pid);
 
 	ret = sysconf(_SC_CLK_TCK);
-	if (ret < 0 && errno == EINVAL) {
-		lxcfs_debug(
-		    "%s\n",
-		    "failed to determine number of clock ticks in a second");
-		return 0;
-	}
+	if (ret < 0 && errno == EINVAL)
+		return log_debug(0, "Failed to determine number of clock ticks in a second");
 
 	ticks_per_sec = (uint64_t)ret;
 	res = (double)clockticks / ticks_per_sec;
@@ -692,19 +687,25 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	iwashere();
 #endif
 
-	if (offset){
+	if (offset) {
+		int left;
+
 		if (!d->cached)
 			return 0;
+
 		if (offset > d->size)
 			return -EINVAL;
-		int left = d->size - offset;
-		total_len = left > size ? size: left;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
 		memcpy(buf, cache + offset, total_len);
+
 		return total_len;
 	}
 
 	reaperage = get_reaper_age(fc->pid);
-	/* To understand why this is done, please read the comment to the
+	/*
+	 * To understand why this is done, please read the comment to the
 	 * get_reaper_busy() function.
 	 */
 	idletime = reaperage;
@@ -712,15 +713,14 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		idletime = reaperage - busytime;
 
 	total_len = snprintf(d->buf, d->buflen, "%.2lf %.2lf\n", reaperage, idletime);
-	if (total_len < 0 || total_len >=  d->buflen){
-		lxcfs_error("%s\n", "failed to write to cache");
-		return 0;
-	}
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
 
 	d->size = (int)total_len;
 	d->cached = 1;
 
-	if (total_len > size) total_len = size;
+	if (total_len > size)
+		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
 	return total_len;
@@ -800,10 +800,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		return 0;
 
 	//skip first line
-	if (getline(&line, &linelen, f) < 0) {
-		lxcfs_error("%s\n", "proc_stat_read read first line failed.");
-		return 0;
-	}
+	if (getline(&line, &linelen, f) < 0)
+		return log_error(0, "proc_stat_read read first line failed");
 
 	if (cgroup_ops->can_use_cpuview(cgroup_ops) && cg_cpu_usage) {
 		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, cg_cpu_usage_size,
@@ -823,24 +821,24 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		if (sscanf(line, "cpu%9[^ ]", cpu_char) != 1) {
 			/* not a ^cpuN line containing a number N, just print it */
 			l = snprintf(cache, cache_size, "%s", line);
-			if (l < 0) {
-				perror("Error writing to cache");
-				return 0;
-			}
-			if (l >= cache_size) {
-				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				return 0;
-			}
+			if (l < 0)
+				return log_error(0, "Failed to write cache");
+			if (l >= cache_size)
+				return log_error(0, "Write to cache was truncated");
+
 			cache += l;
 			cache_size -= l;
 			total_len += l;
+
 			continue;
 		}
 
 		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
+
 		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
+
 		curcpu++;
 
 		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
@@ -854,21 +852,16 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			   &steal,
 			   &guest,
 			   &guest_nice);
-
 		if (ret != 10 || !cg_cpu_usage) {
 			c = strchr(line, ' ');
 			if (!c)
 				continue;
-			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
-			if (l < 0) {
-				perror("Error writing to cache");
-				return 0;
 
-			}
-			if (l >= cache_size) {
-				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				return 0;
-			}
+			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
+			if (l < 0)
+				return log_error(0, "Failed to write cache");
+			if (l >= cache_size)
+				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -898,16 +891,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				     "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
 				     curcpu, cg_cpu_usage[physcpu].user,
 				     cg_cpu_usage[physcpu].system, new_idle);
-
-			if (l < 0) {
-				perror("Error writing to cache");
-				return 0;
-
-			}
-			if (l >= cache_size) {
-				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				return 0;
-			}
+			if (l < 0)
+				return log_error(0, "Failed to write cache");
+			if (l >= cache_size)
+				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -916,7 +903,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			user_sum += cg_cpu_usage[physcpu].user;
 			system_sum += cg_cpu_usage[physcpu].system;
 			idle_sum += new_idle;
-
 		} else {
 			user_sum += user;
 			nice_sum += nice;
@@ -949,7 +935,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		cache += cpuall_len;
 	} else {
 		/* shouldn't happen */
-		lxcfs_error("proc_stat_read copy cpuall failed, cpuall_len=%d.", cpuall_len);
+		lxcfs_error("proc_stat_read copy cpuall failed, cpuall_len=%d", cpuall_len);
 		cpuall_len = 0;
 	}
 
@@ -972,6 +958,7 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 	__do_close_prot_errno int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_free char *line = NULL;
+	__do_free void *fdopen_cache = NULL;
 	bool unified;
 	size_t len = 0;
 	ssize_t linelen;
@@ -980,11 +967,9 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 	if (fd < 0)
 		return false;
 
-	f = fdopen(fd, "re");
+	f = fdopen_cached(fd, "re", &fdopen_cache);
 	if (!f)
 		return false;
-	/* Transferring ownership to fdopen(). */
-	move_fd(fd);
 
 	unified = pure_unified_layout(cgroup_ops);
 	while ((linelen = getline(&line, &len, f)) != -1) {
@@ -1235,15 +1220,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		}
 
 		l = snprintf(cache, cache_size, "%s", printme);
-		if (l < 0) {
-			perror("Error writing to cache");
-			return 0;
-
-		}
-		if (l >= cache_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			return 0;
-		}
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -1252,7 +1232,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
 	return total_len;

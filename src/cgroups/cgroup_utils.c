@@ -684,10 +684,11 @@ char *readat_file(int dirfd, const char *path)
 	if (fd < 0)
 		return NULL;
 
-	/* transfer ownership of fd */
-	f = fdopen(move_fd(fd), "re");
+	f = fdopen(fd, "re");
 	if (!f)
 		return NULL;
+	/* Transfer ownership of fd */
+	move_fd(fd);
 
 	while ((linelen = getline(&line, &len, f)) != -1) {
 		append_line(&buf, fulllen, line, linelen);
