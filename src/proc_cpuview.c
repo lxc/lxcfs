@@ -72,14 +72,13 @@ struct cg_proc_stat_head {
 #define CPUVIEW_HASH_SIZE 100
 static struct cg_proc_stat_head *proc_stat_history[CPUVIEW_HASH_SIZE];
 
-static void reset_proc_stat_node(struct cg_proc_stat *node, struct cpuacct_usage *usage, int cpu_count)
+static void reset_proc_stat_node(struct cg_proc_stat *node,
+				 struct cpuacct_usage *usage, int cpu_count)
 {
-	int i;
-
 	lxcfs_debug("Resetting stat node for %s\n", node->cg);
 	memcpy(node->usage, usage, sizeof(struct cpuacct_usage) * cpu_count);
 
-	for (i = 0; i < cpu_count; i++) {
+	for (int i = 0; i < cpu_count; i++) {
 		node->view[i].user = 0;
 		node->view[i].system = 0;
 		node->view[i].idle = 0;
@@ -210,10 +209,8 @@ static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int 
 	node->cpu_count = cpu_count;
 	node->next = NULL;
 
-	if (pthread_mutex_init(&node->lock, NULL) != 0) {
-		lxcfs_error("%s\n", "Failed to initialize node lock");
-		goto err;
-	}
+	if (pthread_mutex_init(&node->lock, NULL) != 0)
+		log_error(goto err, "Failed to initialize node lock");
 
 	for (i = 0; i < cpu_count; i++) {
 		node->view[i].user = 0;
@@ -252,11 +249,12 @@ static bool cgfs_param_exist(const char *controller, const char *cgroup,
 
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 {
-	struct cg_proc_stat *first = NULL, *prev, *tmp;
+	struct cg_proc_stat *first = NULL;
 
-	for (prev = NULL; node; ) {
+	for (struct cg_proc_stat *prev = NULL; node; ) {
 		if (!cgfs_param_exist("cpu", node->cg, "cpu.shares")) {
-			tmp = node;
+			struct cg_proc_stat *tmp = node;
+
 			lxcfs_debug("Removing stat node for %s\n", node->cg);
 
 			if (prev)
@@ -280,10 +278,9 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 #define PROC_STAT_PRUNE_INTERVAL 10
 static void prune_proc_stat_history(void)
 {
-	int i;
 	time_t now = time(NULL);
 
-	for (i = 0; i < CPUVIEW_HASH_SIZE; i++) {
+	for (int i = 0; i < CPUVIEW_HASH_SIZE; i++) {
 		pthread_rwlock_wrlock(&proc_stat_history[i]->lock);
 
 		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now) {
@@ -354,9 +351,7 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 
 		if (!expand_proc_stat_node(node, cpu_count)) {
 			pthread_mutex_unlock(&node->lock);
-			lxcfs_debug("Unable to expand stat node %d->%d for %s\n",
-					node->cpu_count, cpu_count, cg);
-			return NULL;
+			return log_debug(NULL, "Unable to expand stat node %d->%d for %s", node->cpu_count, cpu_count, cg);
 		}
 	}
 
@@ -384,16 +379,16 @@ static unsigned long diff_cpu_usage(struct cpuacct_usage *older,
 				    struct cpuacct_usage *newer,
 				    struct cpuacct_usage *diff, int cpu_count)
 {
-	int i;
 	unsigned long sum = 0;
 
-	for (i = 0; i < cpu_count; i++) {
+	for (int i = 0; i < cpu_count; i++) {
 		if (!newer[i].online)
 			continue;
 
-		/* When cpuset is changed on the fly, the CPUs might get reordered.
-		 * We could either reset all counters, or check that the substractions
-		 * below will return expected results.
+		/*
+		 * When cpuset is changed on the fly, the CPUs might get
+		 * reordered. We could either reset all counters, or check
+		 * that the substractions below will return expected results.
 		 */
 		if (newer[i].user > older[i].user)
 			diff[i].user = newer[i].user - older[i].user;
@@ -419,8 +414,9 @@ static unsigned long diff_cpu_usage(struct cpuacct_usage *older,
 }
 
 /*
- * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or `cpu.cfs_period_us`,
- * depending on `param`. Parameter value is returned throuh `value`.
+ * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or
+ * `cpu.cfs_period_us`, depending on `param`. Parameter value is returned
+ * throuh `value`.
  */
 static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
 {
@@ -504,7 +500,6 @@ int max_cpu_count(const char *cg)
 		rv += 1;
 
 	nprocs = get_nprocs();
-
 	if (rv > nprocs)
 		rv = nprocs;
 
@@ -585,7 +580,6 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			   &steal,
 			   &guest,
 			   &guest_nice);
-
 		if (ret != 10)
 			continue;
 
@@ -607,10 +601,8 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		max_cpus = cpu_cnt;
 
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
-	if (!stat_node) {
-		lxcfs_error("unable to find/create stat node for %s\n", cg);
-		return 0;
-	}
+	if (!stat_node)
+		return log_error(0, "Failed to find/create stat node for %s", cg);
 
 	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
 	if (!diff)
@@ -757,15 +749,10 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		     "cpu  %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
 		     user_sum, system_sum, idle_sum);
 	lxcfs_v("cpu-all: %s\n", buf);
-
-	if (l < 0) {
-		perror("Error writing to cache");
-		return 0;
-	}
-	if (l >= buf_size) {
-		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-		return 0;
-	}
+	if (l < 0)
+		return log_error(0, "Failed to write cache");
+	if (l >= buf_size)
+		return log_error(0, "Write to cache was truncated");
 
 	buf += l;
 	buf_size -= l;
@@ -787,16 +774,10 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			     stat_node->view[curcpu].system,
 			     stat_node->view[curcpu].idle);
 		lxcfs_v("cpu: %s\n", buf);
-
-		if (l < 0) {
-			perror("Error writing to cache");
-			return 0;
-
-		}
-		if (l >= buf_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			return 0;
-		}
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= buf_size)
+			return log_error(0, "Write to cache was truncated");
 
 		buf += l;
 		buf_size -= l;
@@ -805,16 +786,10 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	/* Pass the rest of /proc/stat, start with the last line read */
 	l = snprintf(buf, buf_size, "%s", line);
-
-	if (l < 0) {
-		perror("Error writing to cache");
-		return 0;
-
-	}
-	if (l >= buf_size) {
-		lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-		return 0;
-	}
+	if (l < 0)
+		return log_error(0, "Failed to write cache");
+	if (l >= buf_size)
+		return log_error(0, "Write to cache was truncated");
 
 	buf += l;
 	buf_size -= l;
@@ -823,14 +798,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	/* Pass the rest of the host's /proc/stat */
 	while (getline(&line, &linelen, f) != -1) {
 		l = snprintf(buf, buf_size, "%s", line);
-		if (l < 0) {
-			perror("Error writing to cache");
-			return 0;
-		}
-		if (l >= buf_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			return 0;
-		}
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= buf_size)
+			return log_error(0, "Write to cache was truncated");
+
 		buf += l;
 		buf_size -= l;
 		total_len += l;
@@ -838,28 +810,23 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	if (stat_node)
 		pthread_mutex_unlock(&stat_node->lock);
+
 	return total_len;
 }
 
 /*
  * check whether this is a '^processor" line in /proc/cpuinfo
  */
-static bool is_processor_line(const char *line)
+static inline bool is_processor_line(const char *line)
 {
 	int cpu;
-
-	if (sscanf(line, "processor       : %d", &cpu) == 1)
-		return true;
-	return false;
+	return sscanf(line, "processor       : %d", &cpu) == 1;
 }
 
-static bool cpuline_in_cpuset(const char *line, const char *cpuset)
+static inline bool cpuline_in_cpuset(const char *line, const char *cpuset)
 {
 	int cpu;
-
-	if (sscanf(line, "processor       : %d", &cpu) != 1)
-		return false;
-	return cpu_in_cpuset(cpu, cpuset);
+	return sscanf(line, "processor       : %d", &cpu) == 1;
 }
 
 int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
@@ -897,6 +864,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file_fuse("proc/cpuinfo", buf, size, d);
@@ -926,23 +894,22 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				continue;
 			}
 		}
+
 		if (strncmp(line, "# processors:", 12) == 0)
 			continue;
+
 		if (is_processor_line(line)) {
 			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
 				break;
+
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
 				curcpu ++;
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
-				if (l < 0) {
-					perror("Error writing to cache");
-					return 0;
-				}
-				if (l >= cache_size) {
-					lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-					return 0;
-				}
+				if (l < 0)
+					return log_error(0, "Failed to write cache");
+				if (l >= cache_size)
+					return log_error(0, "Write to cache was truncated");
 				cache += l;
 				cache_size -= l;
 				total_len += l;
@@ -950,24 +917,25 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			continue;
 		} else if (is_s390x && sscanf(line, "processor %d:", &cpu) == 1) {
 			char *p;
+
 			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
 				break;
+
 			if (!cpu_in_cpuset(cpu, cpuset))
 				continue;
+
 			curcpu ++;
 			p = strchr(line, ':');
 			if (!p || !*p)
 				return 0;
 			p++;
+
 			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
-			if (l < 0) {
-				perror("Error writing to cache");
-				return 0;
-			}
-			if (l >= cache_size) {
-				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				return 0;
-			}
+			if (l < 0)
+				return log_error(0, "Failed to write cache");
+			if (l >= cache_size)
+				return log_error(0, "Write to cache was truncated");
+
 			cache += l;
 			cache_size -= l;
 			total_len += l;
@@ -976,14 +944,11 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		}
 		if (am_printing) {
 			l = snprintf(cache, cache_size, "%s", line);
-			if (l < 0) {
-				perror("Error writing to cache");
-				return 0;
-			}
-			if (l >= cache_size) {
-				lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-				return 0;
-			}
+			if (l < 0)
+				return log_error(0, "Failed to write cache");
+			if (l >= cache_size)
+				return log_error(0, "Write to cache was truncated");
+
 			cache += l;
 			cache_size -= l;
 			total_len += l;
@@ -1091,11 +1056,8 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 		lxcfs_v("usage_str: %s\n", usage_str);
 	}
 
-	if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0) {
-		lxcfs_error("read_cpuacct_usage_all reading first line from "
-				"%s/cpuacct.usage_all failed.\n", cg);
-		return -1;
-	}
+	if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0)
+		return log_error(-1, "read_cpuacct_usage_all reading first line from %s/cpuacct.usage_all failed", cg);
 
 	read_pos += read_cnt;
 
@@ -1107,11 +1069,8 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 		if (ret == EOF)
 			break;
 
-		if (ret != 3) {
-			lxcfs_error("read_cpuacct_usage_all reading from %s/cpuacct.usage_all "
-					"failed.\n", cg);
-			return -1;
-		}
+		if (ret != 3)
+			return log_error(-1, "read_cpuacct_usage_all reading from %s/cpuacct.usage_all failed", cg);
 
 		read_pos += read_cnt;
 
@@ -1129,18 +1088,15 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 static bool cpuview_init_head(struct cg_proc_stat_head **head)
 {
 	*head = malloc(sizeof(struct cg_proc_stat_head));
-	if (!(*head)) {
-		lxcfs_error("%s\n", strerror(errno));
-		return false;
-	}
+	if (!(*head))
+		return log_error(false, "%s", strerror(errno));
 
 	(*head)->lastcheck = time(NULL);
 	(*head)->next = NULL;
 
 	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
-		lxcfs_error("%s\n", "Failed to initialize list lock");
 		free_disarm(*head);
-		return false;
+		return log_error(false, "Failed to initialize list lock");
 	}
 
 	return true;

@@ -1146,7 +1146,7 @@ int main(int argc, char *argv[])
 		pidfile = v;
 
 	if (argc == 2  && is_version(argv[1])) {
-		fprintf(stderr, "%s\n", VERSION);
+		lxcfs_info("%s", VERSION);
 		exit(EXIT_SUCCESS);
 	}
 

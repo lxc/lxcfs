@@ -76,8 +76,9 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	}
 
 	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
 		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);

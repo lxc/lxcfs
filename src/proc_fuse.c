@@ -273,6 +273,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file_fuse("/proc/swaps", buf, size, d);
@@ -405,6 +406,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
 		return read_file_fuse("/proc/diskstats", buf, size, d);
@@ -748,20 +750,24 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	int cg_cpu_usage_size = 0;
 
-	if (offset){
+	if (offset) {
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
-		total_len = left > size ? size: left;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
 		memcpy(buf, d->buf + offset, total_len);
+
 		return total_len;
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	lxcfs_v("initpid: %d\n", initpid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 
 	/*
@@ -769,12 +775,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * we should return host os's /proc contents.
 	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
 	 */
-	if (initpid == 1) {
+	if (initpid == 1)
 	    return read_file_fuse("/proc/stat", buf, size, d);
-	}
 
 	cg = get_pid_cgroup(initpid, "cpuset");
-	lxcfs_v("cg: %s\n", cg);
 	if (!cg)
 		return read_file_fuse("/proc/stat", buf, size, d);
 	prune_init_slice(cg);
