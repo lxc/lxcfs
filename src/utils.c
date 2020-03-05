@@ -176,47 +176,37 @@ void do_release_file_info(struct fuse_file_info *fi)
 
 bool wait_for_sock(int sock, int timeout)
 {
+	__do_close_prot_errno int epfd = -EBADF;
 	struct epoll_event ev;
-	int epfd, ret, now, starttime, deltatime, saved_errno;
+	int ret, now, starttime, deltatime, saved_errno;
 
 	if ((starttime = time(NULL)) < 0)
 		return false;
 
-	if ((epfd = epoll_create(1)) < 0) {
-		lxcfs_error("%s\n", "Failed to create epoll socket: %m.");
-		return false;
-	}
+	epfd = epoll_create(1);
+	if (epfd < 0)
+		return log_error(false, "%s\n", "Failed to create epoll socket: %m");
 
 	ev.events = POLLIN_SET;
 	ev.data.fd = sock;
-	if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) < 0) {
-		lxcfs_error("%s\n", "Failed adding socket to epoll: %m.");
-		close(epfd);
-		return false;
-	}
+	if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) < 0)
+		return log_error(false, "Failed adding socket to epoll: %m");
 
 again:
-	if ((now = time(NULL)) < 0) {
-		close(epfd);
+	if ((now = time(NULL)) < 0)
 		return false;
-	}
 
 	deltatime = (starttime + timeout) - now;
-	if (deltatime < 0) { // timeout
-		errno = 0;
-		close(epfd);
+	if (deltatime < 0)
 		return false;
-	}
+
 	ret = epoll_wait(epfd, &ev, 1, 1000*deltatime + 1);
 	if (ret < 0 && errno == EINTR)
 		goto again;
-	saved_errno = errno;
-	close(epfd);
 
-	if (ret <= 0) {
-		errno = saved_errno;
+	if (ret <= 0)
 		return false;
-	}
+
 	return true;
 }
 
@@ -236,15 +226,12 @@ bool recv_creds(int sock, struct ucred *cred, char *v)
 	cred->uid = -1;
 	cred->gid = -1;
 
-	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
-		lxcfs_error("Failed to set passcred: %s\n", strerror(errno));
-		return false;
-	}
+	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1)
+		return log_error(false, "Failed to set passcred: %s\n", strerror(errno));
+
 	buf[0] = '1';
-	if (write(sock, buf, 1) != 1) {
-		lxcfs_error("Failed to start write on scm fd: %s\n", strerror(errno));
-		return false;
-	}
+	if (write(sock, buf, 1) != 1)
+		return log_error(false, "Failed to start write on scm fd: %s\n", strerror(errno));
 
 	msg.msg_name = NULL;
 	msg.msg_namelen = 0;
@@ -256,15 +243,12 @@ bool recv_creds(int sock, struct ucred *cred, char *v)
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
 
-	if (!wait_for_sock(sock, 2)) {
-		lxcfs_error("Timed out waiting for scm_cred: %s\n", strerror(errno));
-		return false;
-	}
+	if (!wait_for_sock(sock, 2))
+		return log_error(false, "Timed out waiting for scm_cred: %s\n", strerror(errno));
+
 	ret = recvmsg(sock, &msg, MSG_DONTWAIT);
-	if (ret < 0) {
-		lxcfs_error("Failed to receive scm_cred: %s\n", strerror(errno));
-		return false;
-	}
+	if (ret < 0)
+		return log_error(false, "Failed to receive scm_cred: %s\n", strerror(errno));
 
 	cmsg = CMSG_FIRSTHDR(&msg);
 
@@ -282,6 +266,7 @@ static int msgrecv(int sockfd, void *buf, size_t len)
 {
 	if (!wait_for_sock(sockfd, 2))
 		return -1;
+
 	return recv(sockfd, buf, len, MSG_DONTWAIT);
 }
 
@@ -294,12 +279,9 @@ int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 	char buf[1];
 	buf[0] = 'p';
 
-	if (pingfirst) {
-		if (msgrecv(sock, buf, 1) != 1) {
-			lxcfs_error("%s\n", "Error getting reply from server over socketpair.");
-			return SEND_CREDS_FAIL;
-		}
-	}
+	if (pingfirst && msgrecv(sock, buf, 1) != 1)
+		return log_error(SEND_CREDS_FAIL, "%s - Failed getting reply from server over socketpair: %d",
+				 strerror(errno), SEND_CREDS_FAIL);
 
 	msg.msg_control = cmsgbuf;
 	msg.msg_controllen = sizeof(cmsgbuf);
@@ -320,10 +302,10 @@ int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 	msg.msg_iovlen = 1;
 
 	if (sendmsg(sock, &msg, 0) < 0) {
-		lxcfs_error("Failed at sendmsg: %s.\n",strerror(errno));
 		if (errno == 3)
-			return SEND_CREDS_NOTSK;
-		return SEND_CREDS_FAIL;
+			return log_error(SEND_CREDS_NOTSK, "%s - Failed at sendmsg: %d", strerror(errno), SEND_CREDS_NOTSK);
+
+		return log_error(SEND_CREDS_FAIL, "%s - Failed at sendmsg: %d", strerror(errno), SEND_CREDS_FAIL);
 	}
 
 	return SEND_CREDS_OK;
@@ -343,14 +325,11 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
-		if (l < 0) {
-			perror("Error writing to cache");
-			return 0;
-		}
-		if (l >= cache_size) {
-			lxcfs_error("%s\n", "Internal error: truncated write to cache.");
-			return 0;
-		}
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
 		cache += l;
 		cache_size -= l;
 		total_len += l;
