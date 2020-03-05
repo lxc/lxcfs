@@ -98,10 +98,8 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		total_len = snprintf(d->buf, d->buflen, "0-%d\n", max_cpus - 1);
 	else
 		total_len = snprintf(d->buf, d->buflen, "0\n");
-	if (total_len < 0 || total_len >= d->buflen) {
-		lxcfs_error("%s\n", "failed to write to cache");
-		return 0;
-	}
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
 
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -138,6 +136,7 @@ int sys_getattr(const char *path, struct stat *sb)
 	memset(sb, 0, sizeof(struct stat));
 	if (clock_gettime(CLOCK_REALTIME, &now) < 0)
 		return -EINVAL;
+
 	sb->st_uid = sb->st_gid = 0;
 	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
 	if (strcmp(path, "/sys") == 0) {
@@ -145,21 +144,25 @@ int sys_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strcmp(path, "/sys/devices") == 0) {
 		sb->st_mode = S_IFDIR | 00555;
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strcmp(path, "/sys/devices/system") == 0) {
 		sb->st_mode = S_IFDIR | 00555;
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
 		sb->st_mode = S_IFDIR | 00555;
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
 		sb->st_size = 0;
 		sb->st_mode = S_IFREG | 00444;
@@ -174,31 +177,35 @@ int sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		off_t offset, struct fuse_file_info *fi)
 {
 	if (strcmp(path, "/sys") == 0) {
-		if (filler(buf, ".", NULL, 0) != 0 ||
-		    filler(buf, "..", NULL, 0) != 0 ||
-		    filler(buf, "devices", NULL, 0) != 0)
+		if (filler(buf, ".",		NULL, 0) != 0 ||
+		    filler(buf, "..",		NULL, 0) != 0 ||
+		    filler(buf, "devices",	NULL, 0) != 0)
 			return -ENOENT;
+
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices") == 0) {
-		if (filler(buf, ".", NULL, 0) != 0 ||
-		    filler(buf, "..", NULL, 0) != 0 ||
-		    filler(buf, "system", NULL, 0) != 0)
+		if (filler(buf, ".",		NULL, 0) != 0 ||
+		    filler(buf, "..",		NULL, 0) != 0 ||
+		    filler(buf, "system",	NULL, 0) != 0)
 			return -ENOENT;
+
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system") == 0) {
-		if (filler(buf, ".", NULL, 0) != 0 ||
-		    filler(buf, "..", NULL, 0) != 0 ||
-		    filler(buf, "cpu", NULL, 0) != 0)
+		if (filler(buf, ".",	NULL, 0) != 0 ||
+		    filler(buf, "..",	NULL, 0) != 0 ||
+		    filler(buf, "cpu",	NULL, 0) != 0)
 			return -ENOENT;
+
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
-		if (filler(buf, ".", NULL, 0) != 0 ||
-		    filler(buf, "..", NULL, 0) != 0 ||
-		    filler(buf, "online", NULL, 0) != 0)
+		if (filler(buf, ".",		NULL, 0) != 0 ||
+		    filler(buf, "..",		NULL, 0) != 0 ||
+		    filler(buf, "online",	NULL, 0) != 0)
 			return -ENOENT;
+
 		return 0;
 	}
 
@@ -246,16 +253,21 @@ int sys_access(const char *path, int mask)
 {
 	if (strcmp(path, "/sys") == 0 && access(path, R_OK) == 0)
 		return 0;
+
 	if (strcmp(path, "/sys/devices") == 0 && access(path, R_OK) == 0)
 		return 0;
+
 	if (strcmp(path, "/sys/devices/system") == 0 && access(path, R_OK) == 0)
 		return 0;
+
 	if (strcmp(path, "/sys/devices/system/cpu") == 0 &&
 	    access(path, R_OK) == 0)
 		return 0;
+
 	/* these are all read-only */
 	if ((mask & ~R_OK) != 0)
 		return -EACCES;
+
 	return 0;
 }
 
