@@ -777,7 +777,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
 	 */
 	if (initpid == 1)
-	    return read_file_fuse("/proc/stat", buf, size, d);
+		return read_file_fuse("/proc/stat", buf, size, d);
 
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
