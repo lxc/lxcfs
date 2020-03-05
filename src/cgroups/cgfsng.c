@@ -691,10 +691,8 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 		int fd;
 
 		fd = openat_safe(cgroup_fd, "../");
-		if (fd < 0 || !is_cgroup_fd(fd)) {
-			fprintf(stderr, "2222: %s\n", strerror(errno));
+		if (fd < 0 || !is_cgroup_fd(fd))
 			return -1;
-		}
 
 		close_prot_errno_replace(cgroup_fd, fd);
 
