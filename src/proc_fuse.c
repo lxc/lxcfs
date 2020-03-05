@@ -772,7 +772,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	    return read_file_fuse("/proc/stat", buf, size, d);
 
 	cg = get_pid_cgroup(initpid, "cpuset");
-	lxcfs_v("cg: %s\n", cg);
 	if (!cg)
 		return read_file_fuse("/proc/stat", buf, size, d);
 	prune_init_slice(cg);
