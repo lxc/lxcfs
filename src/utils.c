@@ -460,7 +460,6 @@ static char *fd_to_buf(int fd, size_t *length)
 static char *file_to_buf(const char *path, size_t *length)
 {
 	__do_close_prot_errno int fd = -EBADF;
-	char buf[PATH_MAX];
 
 	if (!length)
 		return NULL;
@@ -487,28 +486,6 @@ FILE *fopen_cached(const char *path, const char *mode, void **caller_freed_buffe
 		return NULL;
 	*caller_freed_buffer = move_ptr(buf);
 	return f;
-}
-
-static int fd_cloexec(int fd, bool cloexec)
-{
-	int oflags, nflags;
-
-	oflags = fcntl(fd, F_GETFD, 0);
-	if (oflags < 0)
-		return -errno;
-
-	if (cloexec)
-		nflags = oflags | FD_CLOEXEC;
-	else
-		nflags = oflags & ~FD_CLOEXEC;
-
-	if (nflags == oflags)
-		return 0;
-
-	if (fcntl(fd, F_SETFD, nflags) < 0)
-		return -errno;
-
-	return 0;
 }
 
 FILE *fdopen_cached(int fd, const char *mode, void **caller_freed_buffer)
