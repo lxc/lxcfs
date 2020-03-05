@@ -1,10 +1,4 @@
-/* lxcfs
- *
- * Copyright © 2014-2016 Canonical, Inc
- * Author: Serge Hallyn <serge.hallyn@ubuntu.com>
- *
- * See COPYING file for details.
- */
+/* SPDX-License-Identifier: LGPL-2.1+ */
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE

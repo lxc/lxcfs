@@ -7,14 +7,6 @@ Proposed changes will then go through code review there and once acked,
 be merged in the main branch.
 
 
-# License and copyright:
-
-By default, any contribution to this project is made under the Apache
-2.0 license.
-
-The author of a change remains the copyright holder of their code
-(no copyright assignment).
-
 
 # Developer Certificate of Origin:
 
