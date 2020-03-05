@@ -141,25 +141,46 @@ static void store_unlock(void)
 #define LXCFS_PROC_PID_LEN \
 	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + +1)
 
+static int initpid_still_valid_pidfd(struct pidns_init_store *entry)
+{
+	int ret;
+
+	if (entry->init_pidfd < 0)
+		return ret_errno(ENOSYS);
+
+	ret = pidfd_send_signal(entry->init_pidfd, 0, NULL, 0);
+	if (ret < 0) {
+		if (errno == ENOSYS)
+			return ret_errno(ENOSYS);
+
+		return 0;
+	}
+
+	return 1;
+}
+
+static int initpid_still_valid_stat(struct pidns_init_store *entry)
+{
+	struct stat st;
+	char path[LXCFS_PROC_PID_LEN];
+
+	snprintf(path, sizeof(path), "/proc/%d", entry->initpid);
+	if (stat(path, &st) || entry->ctime != st.st_ctime)
+		return 0;
+
+	return 1;
+}
+
 /* Must be called under store_lock */
 static bool initpid_still_valid(struct pidns_init_store *entry)
 {
-	bool valid = true;
+	int ret;
 
-	if (entry->init_pidfd >= 0) {
-		if (pidfd_send_signal(entry->init_pidfd, 0, NULL, 0))
-			valid = false;
-	} else {
-		struct stat st;
-		char path[LXCFS_PROC_PID_LEN];
+	ret = initpid_still_valid_pidfd(entry);
+	if (ret < 0)
+		ret = initpid_still_valid_stat(entry);
 
-		snprintf(path, sizeof(path), "/proc/%d", entry->initpid);
-
-		if (stat(path, &st) || entry->ctime != st.st_ctime)
-			valid = false;
-	}
-
-	return valid;
+	return ret == 1;
 }
 
 /* Must be called under store_lock */
