@@ -760,7 +760,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	lxcfs_v("initpid: %d\n", initpid);
 	if (initpid <= 0)
 		initpid = fc->pid;
 
