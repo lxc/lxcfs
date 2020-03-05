@@ -768,9 +768,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * we should return host os's /proc contents.
 	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
 	 */
-	if (initpid == 1) {
+	if (initpid == 1)
 	    return read_file_fuse("/proc/stat", buf, size, d);
-	}
 
 	cg = get_pid_cgroup(initpid, "cpuset");
 	lxcfs_v("cg: %s\n", cg);
