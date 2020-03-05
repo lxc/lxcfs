@@ -1,5 +1,6 @@
 #/bin/bash -eux
 #./lxcfs -s -f -d -o allow_other -o direct_io ${DIR}
+# SPDX-License-Identifier: LGPL-2.1+
 
 red_c() {
      echo -e $2 "\e[31;1m${1}\e[0m"

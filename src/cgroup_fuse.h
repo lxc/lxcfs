@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* SPDX-License-Identifier: LGPL-2.1+ */
 
 #ifndef __LXCFS_CGROUP_FUSE_H
 #define __LXCFS_CGROUP_FUSE_H
