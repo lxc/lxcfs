@@ -106,6 +106,16 @@
 		_exit(EXIT_FAILURE);                    \
 	})
 
+#ifdef DEBUG
+#define log_debug(__ret__, format, ...)                    \
+	({                                                 \
+		lxcfs_debug_stream(format, ##__VA_ARGS__); \
+		__ret__;                                   \
+	})
+#else
+#define log_debug(__ret__, format, ...) ({ __ret__; })
+#endif
+
 #define PTR_TO_INT(p) ((int)((intptr_t)(p)))
 #define INT_TO_PTR(u) ((void *)((intptr_t)(u)))
 #define PTR_TO_UINT64(p) ((uint64_t)((intptr_t)(p)))
