@@ -271,6 +271,7 @@ err:
 static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 {
 	__do_free char *path = NULL;
+	__do_free void *fdopen_cache = NULL;
 	__do_close_prot_errno int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_closedir DIR *dir = NULL;
@@ -322,7 +323,7 @@ static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 	if (fd < 0)
 		return sum;
 
-	f = fdopen(move_fd(fd), "r");
+	f = fdopen_cached(fd, "re", &fdopen_cache);
 	if (!f)
 		return sum;
 
