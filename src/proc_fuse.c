@@ -748,14 +748,19 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	int cg_cpu_usage_size = 0;
 
-	if (offset){
+	if (offset) {
+		int left;
+
 		if (offset > d->size)
 			return -EINVAL;
+
 		if (!d->cached)
 			return 0;
-		int left = d->size - offset;
-		total_len = left > size ? size: left;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
 		memcpy(buf, d->buf + offset, total_len);
+
 		return total_len;
 	}
 
