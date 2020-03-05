@@ -273,6 +273,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "memory");
 	if (!cg)
 		return read_file_fuse("/proc/swaps", buf, size, d);
@@ -405,6 +406,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
+
 	cg = get_pid_cgroup(initpid, "blkio");
 	if (!cg)
 		return read_file_fuse("/proc/diskstats", buf, size, d);
@@ -765,7 +767,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	}
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 0)
+	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 
 	/*
