@@ -331,7 +331,6 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 	struct cg_proc_stat *node;
 
 	node = find_proc_stat_node(head, cg);
-
 	if (!node) {
 		node = new_proc_stat_node(usage, cpu_count, cg);
 		if (!node)
