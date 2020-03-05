@@ -958,6 +958,7 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 	__do_close_prot_errno int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_free char *line = NULL;
+	__do_free void *fdopen_cache = NULL;
 	bool unified;
 	size_t len = 0;
 	ssize_t linelen;
@@ -966,11 +967,9 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 	if (fd < 0)
 		return false;
 
-	f = fdopen(fd, "re");
+	f = fdopen_cached(fd, "re", &fdopen_cache);
 	if (!f)
 		return false;
-	/* Transferring ownership to fdopen(). */
-	move_fd(fd);
 
 	unified = pure_unified_layout(cgroup_ops);
 	while ((linelen = getline(&line, &len, f)) != -1) {
