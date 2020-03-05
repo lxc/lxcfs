@@ -243,7 +243,7 @@ static bool cgfs_param_exist(const char *controller, const char *cgroup,
 	if (cfd < 0)
 		return false;
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, file);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	return (faccessat(cfd, path, F_OK, 0) == 0);
 }
 
