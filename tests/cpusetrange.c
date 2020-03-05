@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "../cpuset_parse.h"
+#include "../src/cpuset_parse.h"
 
 static void verify(bool condition) {
 	if (condition) {
