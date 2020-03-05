@@ -29,6 +29,7 @@ tests/cpusetrange
 tests/test-read
 lxcfs_mkdir
 tests/test_syscalls
+config/init/systemd/lxcfs.service
 *.o
 tags
 lxcfs-*.tar.gz
