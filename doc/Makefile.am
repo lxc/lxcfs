@@ -1,5 +1,4 @@
-EXTRA_DIST = lxcfs.man.add \
-	     lxcfs.1
+EXTRA_DIST = lxcfs.man.add
 
 if HAVE_HELP2MAN
 man_MANS = lxcfs.1
