@@ -178,7 +178,7 @@ bool wait_for_sock(int sock, int timeout)
 {
 	__do_close_prot_errno int epfd = -EBADF;
 	struct epoll_event ev;
-	int ret, now, starttime, deltatime, saved_errno;
+	int ret, now, starttime, deltatime;
 
 	if ((starttime = time(NULL)) < 0)
 		return false;
