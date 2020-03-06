@@ -40,7 +40,7 @@ lxcfs=${topdir}/src/lxcfs
 
 if [ -x ${lxcfs} ]; then
 	if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-		export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${topdir}/src/.libs/"
+		export LD_LIBRARY_PATH="${topdir}/src/.libs/:${LD_LIBRARY_PATH}"
 	else
 		export LD_LIBRARY_PATH="${topdir}/src/.libs/"
 	fi

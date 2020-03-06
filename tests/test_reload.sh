@@ -42,7 +42,7 @@ trap cleanup EXIT HUP INT TERM
 echo "==> Installing lxcfs to temporary path"
 ( cd ${topdir}; DESTDIR=${installdir} make -s install >/dev/null 2>&1)
 if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${libdir}"
+    export LD_LIBRARY_PATH="${libdir}:${LD_LIBRARY_PATH}"
 else
     export LD_LIBRARY_PATH=${libdir}
 fi
@@ -76,8 +76,8 @@ cp ${libdir}/liblxcfstest.so ${libdir}/liblxcfs.so
 
 kill -USR1 ${lxcfspid}
 sleep 1
-
 cat ${testdir}/proc/uptime
+sleep 1
 [ -f /tmp/lxcfs-iwashere ]
 
 FAILED=0
