@@ -1,5 +1,8 @@
-#!/bin/sh -eux
+#!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
 
 PASS=0
 UUID=$(uuidgen)
@@ -17,6 +20,7 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
+echo "==> Setting up memory, freeze and cpuset cgroups"
 for c in memory freezer cpuset; do
 	[ ! -d /sys/fs/cgroup/${c} ] && exit 0
 done
@@ -29,28 +33,28 @@ cpupath=/sys/fs/cgroup/cpuset/${initcpuset}
 mempath=/sys/fs/cgroup/memory/${initmemory}
 frzpath=/sys/fs/cgroup/freezer/${initfreezer}
 
-rmdir ${cpupath}/${UUID} || true
-rmdir ${mempath}/${UUID} || true
-rmdir ${frzpath}/${UUID} || true
+rmdir ${cpupath}/${UUID} 2>/dev/null || true
+rmdir ${mempath}/${UUID} 2>/dev/null || true
+rmdir ${frzpath}/${UUID} 2>/dev/null || true
 mkdir ${cpupath}/${UUID}
 mkdir ${mempath}/${UUID}
 mkdir ${frzpath}/${UUID}
 
 # Check that the fs is readable
 for p in ${mempath} ${frzpath} ${cpupath}; do
+	echo "==> Test that ${p} is readable"
 	find ${p} > /dev/null
 	echo 1 > ${p}/${UUID}/tasks
 done
 
-# set values though lxcfs
+echo "==> Testing memory.limit_in_bytes"
 echo $((64*1024*1024)) > ${LXCFSDIR}/cgroup/memory/${initmemory}/${UUID}/memory.limit_in_bytes
-echo 0 > ${LXCFSDIR}/cgroup/cpuset/${initcpuset}/${UUID}/cpuset.cpus
-
-# and verify them through cgroupfs
 v=`cat $mempath/${UUID}/memory.limit_in_bytes`
 [ "$v" = "$((64*1024*1024))" ]
+
+echo "==> Testing cpuset.cpus"
+echo 0 > ${LXCFSDIR}/cgroup/cpuset/${initcpuset}/${UUID}/cpuset.cpus
 v=`cat ${cpupath}/${UUID}/cpuset.cpus`
 [ "$v" = "0" ]
 
 PASS=1
-echo PASS
