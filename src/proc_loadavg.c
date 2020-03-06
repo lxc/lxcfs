@@ -168,7 +168,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	pid_t initpid;
-	size_t total_len = 0;
+	ssize_t total_len = 0;
 	char *cache = d->buf;
 	struct load_node *n;
 	int hash;
