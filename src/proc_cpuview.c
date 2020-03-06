@@ -243,7 +243,7 @@ static bool cgfs_param_exist(const char *controller, const char *cgroup,
 	if (cfd < 0)
 		return false;
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, file);
+	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
 	return (faccessat(cfd, path, F_OK, 0) == 0);
 }
 
@@ -331,7 +331,6 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 	struct cg_proc_stat *node;
 
 	node = find_proc_stat_node(head, cg);
-
 	if (!node) {
 		node = new_proc_stat_node(usage, cpu_count, cg);
 		if (!node)
@@ -874,9 +873,10 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		return 0;
 
-	if (cgroup_ops->can_use_cpuview(cgroup_ops) && (opts && opts->use_cfs))
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
 		use_view = true;
-
+	else
+		use_view = false;
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 

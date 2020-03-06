@@ -107,10 +107,10 @@
 	})
 
 #ifdef DEBUG
-#define log_debug(__ret__, format, ...)                    \
-	({                                                 \
-		lxcfs_debug_stream(format, ##__VA_ARGS__); \
-		__ret__;                                   \
+#define log_debug(__ret__, format, ...)                            \
+	({                                                         \
+		lxcfs_debug_stream(stderr, format, ##__VA_ARGS__); \
+		__ret__;                                           \
 	})
 #else
 #define log_debug(__ret__, format, ...) ({ __ret__; })

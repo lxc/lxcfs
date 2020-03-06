@@ -97,7 +97,9 @@ static inline int openat_safe(int fd, const char *path)
 
 static inline const char *dot_or_empty(const char *s)
 {
-	return (*s == '/') ? (const char *){"."} : (const char *){""};
+	static const char *dot = ".";
+	static const char *empty = "";
+	return (*s == '/') ? dot : empty;
 }
 
 #endif /* __LXC_CGROUP_UTILS_H */

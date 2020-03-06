@@ -735,6 +735,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	__do_free struct cpuacct_usage *cg_cpu_usage = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
@@ -776,7 +777,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
 	 */
 	if (initpid == 1)
-	    return read_file_fuse("/proc/stat", buf, size, d);
+		return read_file_fuse("/proc/stat", buf, size, d);
 
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
@@ -803,9 +804,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (getline(&line, &linelen, f) < 0)
 		return log_error(0, "proc_stat_read read first line failed");
 
-	if (cgroup_ops->can_use_cpuview(cgroup_ops) && cg_cpu_usage) {
-		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage, cg_cpu_usage_size,
-				f, d->buf, d->buflen);
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs) {
+		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage,
+					      cg_cpu_usage_size, f, d->buf, d->buflen);
 		goto out;
 	}
 
