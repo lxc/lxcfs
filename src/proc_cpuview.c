@@ -597,6 +597,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		}
 	}
 
+	/* Cannot use more CPUs than is available in cpuset. */
+	max_cpus = max_cpu_count(cg);
+	if (max_cpus > cpu_cnt || !max_cpus)
+		max_cpus = cpu_cnt;
+
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
 	if (!stat_node)
 		return log_error(0, "Failed to find/create stat node for %s", cg);
@@ -620,11 +625,6 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	}
 
 	total_sum = diff_cpu_usage(stat_node->usage, cg_cpu_usage, diff, nprocs);
-
-	/* Cannot use more CPUs than is available in cpuset. */
-	max_cpus = max_cpu_count(cg);
-	if (max_cpus > cpu_cnt)
-		max_cpus = cpu_cnt;
 
 	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
 		stat_node->usage[curcpu].online = cg_cpu_usage[curcpu].online;
@@ -851,7 +851,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 
-	if (offset){
+	if (offset) {
 		int left;
 
 		if (offset > d->size)
@@ -1016,7 +1016,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 {
 	__do_free char *usage_str = NULL;
 	__do_free struct cpuacct_usage *cpu_usage = NULL;
-	int cpucount = get_nprocs_conf();
+	int cpucount;
 	int i = 0, j = 0, read_pos = 0, read_cnt = 0;
 	int ret;
 	int cg_cpu;
@@ -1024,7 +1024,6 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 	int64_t ticks_per_sec;
 
 	ticks_per_sec = sysconf(_SC_CLK_TCK);
-
 	if (ticks_per_sec < 0 && errno == EINVAL) {
 		lxcfs_v(
 			"%s\n",
@@ -1033,6 +1032,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 		return -1;
 	}
 
+	cpucount = get_nprocs_conf();
 	cpu_usage = malloc(sizeof(struct cpuacct_usage) * cpucount);
 	if (!cpu_usage)
 		return -ENOMEM;

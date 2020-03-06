@@ -793,8 +793,16 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
 	 * CPU usage. If not, values from the host's /proc/stat are used.
 	 */
-	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) != 0)
-		lxcfs_v("%s\n", "proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
+	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) == 0) {
+		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs) {
+			total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage,
+						      cg_cpu_usage_size, f,
+						      d->buf, d->buflen);
+			goto out;
+		}
+	} else {
+		lxcfs_v("proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
+	}
 
 	f = fopen_cached("/proc/stat", "re", &fopen_cache);
 	if (!f)
@@ -803,12 +811,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	//skip first line
 	if (getline(&line, &linelen, f) < 0)
 		return log_error(0, "proc_stat_read read first line failed");
-
-	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs) {
-		total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage,
-					      cg_cpu_usage_size, f, d->buf, d->buflen);
-		goto out;
-	}
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
