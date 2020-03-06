@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1+
 
-set -ex
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
 
 [ $(id -u) -eq 0 ]
 
@@ -16,6 +17,7 @@ topdir=$(dirname ${dirname})
 p=-1
 FAILED=1
 cleanup() {
+	echo "=> Cleaning up"
 	set +e
 	if [ $p -ne -1 ]; then
 		kill -9 $p
@@ -26,10 +28,10 @@ cleanup() {
 	fi
 	rm -f ${pidfile}
 	if [ ${FAILED} -eq 1 ]; then
-		echo "FAILED at $TESTCASE"
+		echo "=> FAILED at $TESTCASE"
 		exit 1
 	fi
-	echo PASSED
+	echo "=> PASSED"
 	exit 0
 }
 
@@ -38,17 +40,17 @@ lxcfs=${topdir}/src/lxcfs
 
 if [ -x ${lxcfs} ]; then
 	export LD_LIBRARY_PATH="${topdir}/src/.libs/"
-	echo "Running ${lxcfs} ${LXCFSDIR}"
+	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
 	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	p=$!
 else
 	pidof lxcfs
-	echo "Using host lxcfs"
+	echo "=> Re-using host lxcfs"
 	rmdir $LXCFSDIR
 	export LXCFSDIR=/var/lib/lxcfs
 fi
 
-trap cleanup EXIT SIGHUP SIGINT SIGTERM
+trap cleanup EXIT HUP INT TERM
 
 count=1
 while ! mountpoint -q $LXCFSDIR; do
@@ -61,7 +63,14 @@ while ! mountpoint -q $LXCFSDIR; do
 done
 
 RUNTEST() {
-	unshare -fmp --mount-proc $*
+	echo ""
+	echo "=> Running ${TESTCASE}"
+
+	if [ "${UNSHARE:-1}" != "0" ]; then
+		unshare -fmp --mount-proc $*
+	else
+		$*
+	fi
 }
 
 TESTCASE="test_proc"
@@ -75,7 +84,7 @@ RUNTEST ${dirname}/cpusetrange
 TESTCASE="meminfo hierarchy"
 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
 TESTCASE="liblxcfs reloading"
-${dirname}/test_reload.sh
+UNSHARE=0 RUNTEST ${dirname}/test_reload.sh
 
 # Check for any defunct processes - children we didn't reap
 n=`ps -ef | grep lxcfs | grep defunct | wc -l`

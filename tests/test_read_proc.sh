@@ -1,10 +1,9 @@
-#/bin/bash -eux
-#./lxcfs -s -f -d -o allow_other -o direct_io ${DIR}
+#/bin/sh
 # SPDX-License-Identifier: LGPL-2.1+
 
-red_c() {
-     echo -e $2 "\e[31;1m${1}\e[0m"
-}
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
 DIR=${LXCFSDIR:-/var/lib/lxcfs}
 
 if ! mountpoint -q $DIR; then
@@ -12,21 +11,13 @@ if ! mountpoint -q $DIR; then
     exit 1
 fi
 
+echo "==> Testing /proc/cpuinfo"
+tests/test-read $DIR/proc/cpuinfo 3 >/dev/null
 
-PWD=`pwd`
-COUNT=3
+echo "==> Testing /proc/stat"
+tests/test-read $DIR/proc/stat 3 >/dev/null
 
-for i in test-read
-do
-	BIN=$PWD/$i
+echo "==> Testing /proc/meminfo"
+tests/test-read $DIR/proc/meminfo 3 >/dev/null
 
-	red_c "$BIN test cpuinfo"
-	$BIN $DIR/proc/cpuinfo $COUNT
-
-	red_c "$BIN test stat"
-	$BIN $DIR/proc/stat $COUNT
-
-	red_c "$BIN test meminfo"
-	$BIN $DIR/proc/meminfo $COUNT
-done
 exit 0
