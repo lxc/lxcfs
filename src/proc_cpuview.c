@@ -518,16 +518,17 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu, i;
-	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
+	int cpu_cnt = 0;
 	uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0,
 		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	uint64_t user_sum = 0, system_sum = 0, idle_sum = 0;
 	uint64_t user_surplus = 0, system_surplus = 0;
+	int nprocs, max_cpus;
 	ssize_t l;
 	uint64_t total_sum, threshold;
 	struct cg_proc_stat *stat_node;
-	int nprocs = get_nprocs_conf();
 
+	nprocs = get_nprocs_conf();
 	if (cg_cpu_usage_size < nprocs)
 		nprocs = cg_cpu_usage_size;
 
@@ -550,8 +551,8 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		if (physcpu >= cg_cpu_usage_size)
 			continue;
 
-		curcpu ++;
-		cpu_cnt ++;
+		curcpu++;
+		cpu_cnt++;
 
 		if (!cpu_in_cpuset(physcpu, cpuset)) {
 			for (i = curcpu; i <= physcpu; i++)
@@ -596,8 +597,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		}
 	}
 
-	/* Cannot use more CPUs than is available due to cpuset */
-	if (max_cpus > cpu_cnt)
+	/* Cannot use more CPUs than is available in cpuset. */
+	max_cpus = max_cpu_count(cg);
+	if (max_cpus > cpu_cnt || !max_cpus)
 		max_cpus = cpu_cnt;
 
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
@@ -849,7 +851,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 
-	if (offset){
+	if (offset) {
 		int left;
 
 		if (offset > d->size)
@@ -1014,7 +1016,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 {
 	__do_free char *usage_str = NULL;
 	__do_free struct cpuacct_usage *cpu_usage = NULL;
-	int cpucount = get_nprocs_conf();
+	int cpucount;
 	int i = 0, j = 0, read_pos = 0, read_cnt = 0;
 	int ret;
 	int cg_cpu;
@@ -1022,7 +1024,6 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 	int64_t ticks_per_sec;
 
 	ticks_per_sec = sysconf(_SC_CLK_TCK);
-
 	if (ticks_per_sec < 0 && errno == EINVAL) {
 		lxcfs_v(
 			"%s\n",
@@ -1031,6 +1032,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 		return -1;
 	}
 
+	cpucount = get_nprocs_conf();
 	cpu_usage = malloc(sizeof(struct cpuacct_usage) * cpucount);
 	if (!cpu_usage)
 		return -ENOMEM;
