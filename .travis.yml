@@ -37,7 +37,7 @@ script:
  - make -j4
  - (cd tests && make tests)
  - echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
- - sudo -E tests/main.sh
+ - sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" tests/main.sh
 
 notifications:
   email:
