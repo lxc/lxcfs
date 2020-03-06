@@ -904,12 +904,12 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		if (is_processor_line(line)) {
-			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+			if (use_view && max_cpus > 0 && (curcpu + 1) == max_cpus)
 				break;
 
 			am_printing = cpuline_in_cpuset(line, cpuset);
 			if (am_printing) {
-				curcpu ++;
+				curcpu++;
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
 				if (l < 0)
 					return log_error(0, "Failed to write cache");
@@ -923,7 +923,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		} else if (is_s390x && sscanf(line, "processor %d:", &cpu) == 1) {
 			char *p;
 
-			if (use_view && max_cpus > 0 && (curcpu+1) == max_cpus)
+			if (use_view && max_cpus > 0 && (curcpu + 1) == max_cpus)
 				break;
 
 			if (!cpu_in_cpuset(cpu, cpuset))
@@ -995,10 +995,12 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
+
 	return total_len;
 }
 
