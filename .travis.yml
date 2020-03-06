@@ -1,10 +1,21 @@
+dist: bionic
+sudo: required
 language: c
+
 compiler:
  - gcc
  - clang
+
+arch:
+ - amd64
+ - arm64
+ - ppc64le
+ - s390x
+
 env:
   global:
    - secure: "Nu2cNo2RHjZxl2eiuWVRlznMAZu4YCvsbaxf4djolj+MYIw2KfMqMM9cM9EC3/ikljZcrlleOXZDcyNFdlNIbeadXythleNQJRK3eX8x226f6vqAs4i/ppbl4oMnlQx3yzG9+PBHtelv/db8TxXLX51+qB8N0820v0ieTpwYbkI="
+
 addons:
   coverity_scan:
     project:
@@ -13,17 +24,19 @@ addons:
     build_command_prepend: "./bootstrap.sh && ./configure"
     build_command: "make -j4"
     branch_pattern: master
+
 before_install:
  - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
- - sudo add-apt-repository ppa:ubuntu-lxc/daily -y
+
  - sudo apt-get update -qq
- - sudo apt-get -y install -qq libfuse-dev libdbus-glib-1-dev libglib2.0-dev coreutils cgmanager
- - sudo apt-get -y install -qq realpath || true
- - sudo apt-get -y install -qq automake libtool libattr1-dev
+ - sudo apt-get -y install -qq automake coreutils libfuse-dev libtool
+
 # need to modprobe fuse to run the tests...
 #script: ./bootstrap.sh && ./configure && make -j4 && make tests && cd tests && sudo ./main.sh
 script: ./bootstrap.sh && ./configure && make -j4 && make tests
+
 notifications:
   email:
     recipients:
       - serge.hallyn@ubuntu.com
+      - stgraber@ubuntu.com
