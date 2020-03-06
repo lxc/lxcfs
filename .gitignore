@@ -37,3 +37,4 @@ lxcfs-*.tar.gz
 *.lo
 *.la
 .vscode
+src/cgroups/.dirstamp
