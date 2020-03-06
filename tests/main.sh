@@ -39,7 +39,11 @@ TESTCASE="setup"
 lxcfs=${topdir}/src/lxcfs
 
 if [ -x ${lxcfs} ]; then
-	export LD_LIBRARY_PATH="${topdir}/src/.libs/"
+	if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+		export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${topdir}/src/.libs/"
+	else
+		export LD_LIBRARY_PATH="${topdir}/src/.libs/"
+	fi
 	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
 	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	p=$!

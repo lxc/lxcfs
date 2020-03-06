@@ -41,7 +41,11 @@ trap cleanup EXIT HUP INT TERM
 
 echo "==> Installing lxcfs to temporary path"
 ( cd ${topdir}; DESTDIR=${installdir} make -s install >/dev/null 2>&1)
-export LD_LIBRARY_PATH=${libdir}
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${libdir}"
+else
+    export LD_LIBRARY_PATH=${libdir}
+fi
 
 echo "==> Spawning lxcfs"
 ${bindir}/lxcfs -p ${pidfile} ${testdir} &
