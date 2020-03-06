@@ -515,7 +515,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 {
 	__do_free char *line = NULL;
 	__do_free struct cpuacct_usage *diff = NULL;
-	size_t linelen = 0, total_len = 0, l;
+	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu, i;
 	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
@@ -523,6 +523,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	uint64_t user_sum = 0, system_sum = 0, idle_sum = 0;
 	uint64_t user_surplus = 0, system_surplus = 0;
+	ssize_t l;
 	uint64_t total_sum, threshold;
 	struct cg_proc_stat *stat_node;
 	int nprocs = get_nprocs_conf();
