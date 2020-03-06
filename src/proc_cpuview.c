@@ -826,7 +826,11 @@ static inline bool is_processor_line(const char *line)
 static inline bool cpuline_in_cpuset(const char *line, const char *cpuset)
 {
 	int cpu;
-	return sscanf(line, "processor       : %d", &cpu) == 1;
+
+	if (sscanf(line, "processor       : %d", &cpu) == 1)
+		return cpu_in_cpuset(cpu, cpuset);
+
+	return false;
 }
 
 int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
