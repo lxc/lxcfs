@@ -29,7 +29,7 @@ before_install:
  - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
 
  - sudo apt-get update -qq
- - sudo apt-get -y install -qq automake coreutils libfuse-dev libtool
+ - sudo apt-get -y install -qq automake coreutils libfuse-dev libtool uuid-runtime
 
 script:
  - ./bootstrap.sh
