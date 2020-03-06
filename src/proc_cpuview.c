@@ -550,8 +550,8 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		if (physcpu >= cg_cpu_usage_size)
 			continue;
 
-		curcpu ++;
-		cpu_cnt ++;
+		curcpu++;
+		cpu_cnt++;
 
 		if (!cpu_in_cpuset(physcpu, cpuset)) {
 			for (i = curcpu; i <= physcpu; i++)
