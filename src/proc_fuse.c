@@ -788,6 +788,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (!cpuset)
 		return 0;
 
+	f = fopen_cached("/proc/stat", "re", &fopen_cache);
+	if (!f)
+		return 0;
+
 	/*
 	 * Read cpuacct.usage_all for all CPUs.
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
@@ -803,10 +807,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	} else {
 		lxcfs_v("proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 	}
-
-	f = fopen_cached("/proc/stat", "re", &fopen_cache);
-	if (!f)
-		return 0;
 
 	//skip first line
 	if (getline(&line, &linelen, f) < 0)
