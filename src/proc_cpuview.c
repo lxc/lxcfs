@@ -518,16 +518,17 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu, i;
-	int max_cpus = max_cpu_count(cg), cpu_cnt = 0;
+	int cpu_cnt = 0;
 	uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0,
 		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	uint64_t user_sum = 0, system_sum = 0, idle_sum = 0;
 	uint64_t user_surplus = 0, system_surplus = 0;
+	int nprocs, max_cpus;
 	ssize_t l;
 	uint64_t total_sum, threshold;
 	struct cg_proc_stat *stat_node;
-	int nprocs = get_nprocs_conf();
 
+	nprocs = get_nprocs_conf();
 	if (cg_cpu_usage_size < nprocs)
 		nprocs = cg_cpu_usage_size;
 
@@ -596,10 +597,6 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		}
 	}
 
-	/* Cannot use more CPUs than is available due to cpuset */
-	if (max_cpus > cpu_cnt)
-		max_cpus = cpu_cnt;
-
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
 	if (!stat_node)
 		return log_error(0, "Failed to find/create stat node for %s", cg);
@@ -623,6 +620,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	}
 
 	total_sum = diff_cpu_usage(stat_node->usage, cg_cpu_usage, diff, nprocs);
+
+	/* Cannot use more CPUs than is available in cpuset. */
+	max_cpus = max_cpu_count(cg);
+	if (max_cpus > cpu_cnt)
+		max_cpus = cpu_cnt;
 
 	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
 		stat_node->usage[curcpu].online = cg_cpu_usage[curcpu].online;
