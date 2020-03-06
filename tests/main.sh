@@ -34,9 +34,10 @@ cleanup() {
 }
 
 TESTCASE="setup"
-lxcfs=${topdir}/lxcfs
+lxcfs=${topdir}/src/lxcfs
 
 if [ -x ${lxcfs} ]; then
+	export LD_LIBRARY_PATH="${topdir}/src/.libs/"
 	echo "Running ${lxcfs} ${LXCFSDIR}"
 	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	p=$!
