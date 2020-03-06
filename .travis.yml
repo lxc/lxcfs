@@ -33,7 +33,7 @@ before_install:
 
 script:
  - ./bootstrap.sh
- - ./configure
+ - ./configure --prefix=/usr
  - make -j4
  - (cd tests && make tests)
  - echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
