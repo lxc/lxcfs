@@ -203,14 +203,18 @@ static unsigned long get_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *memlimit_str = NULL;
 	unsigned long memlimit = -1;
+	char *ptr;
 	int ret;
 
 	if (swap)
 		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memlimit_str);
 	else
 		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
-	if (ret > 0)
-		memlimit = strtoul(memlimit_str, NULL, 10);
+	if (ret > 0) {
+		memlimit = strtoul(memlimit_str, &ptr, 10);
+		if (ptr == memlimit_str)
+			memlimit = -1;
+	}
 
 	return memlimit;
 }
@@ -226,6 +230,8 @@ static unsigned long get_min_memlimit(const char *cgroup, bool swap)
 		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
 
 	retlimit = get_memlimit(copy, swap);
+	if (retlimit == -1)
+		retlimit = 0;
 
 	while (strcmp(copy, "/") != 0) {
 		char *it = copy;
