@@ -421,13 +421,19 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
 {
 	__do_free char *str = NULL;
 	char file[11 + 6 + 1]; /* cpu.cfs__us + quota/period + \0 */
+	bool first = true;
 
-	snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
+	if (!pure_unified_layout(cgroup_ops)) {
+		snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
+        } else {
+		strcpy(file, "cpu.max");
+		first = !strcmp(param, "quota");
+	}
 
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
-	if (sscanf(str, "%"PRId64, value) != 1)
+	if (sscanf(str, first ? "%"PRId64 : "%*"PRId64" %"PRId64, value) != 1)
 		return false;
 
 	return true;
@@ -443,11 +449,8 @@ static double exact_cpu_count(const char *cg)
 	int nprocs;
 	int64_t cfs_quota, cfs_period;
 
-	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
-		return 0;
-
-	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
-		return 0;
+	read_cpu_cfs_param(cg, "quota", &cfs_quota);
+	read_cpu_cfs_param(cg, "period", &cfs_period);
 
 	if (cfs_quota <= 0 || cfs_period <= 0)
 		return 0;
@@ -473,11 +476,8 @@ int max_cpu_count(const char *cg)
 	int64_t cfs_quota, cfs_period;
 	int nr_cpus_in_cpuset = 0;
 
-	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
-		return 0;
-
-	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
-		return 0;
+	read_cpu_cfs_param(cg, "quota", &cfs_quota);
+	read_cpu_cfs_param(cg, "period", &cfs_period);
 
 	cpuset = get_cpuset(cg);
 	if (cpuset)
