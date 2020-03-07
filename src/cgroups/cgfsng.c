@@ -768,7 +768,7 @@ static bool cgfsng_can_use_cpuview(struct cgroup_ops *ops)
 	struct hierarchy *cpu, *cpuacct;
 
 	if (pure_unified_layout(ops))
-		return false;
+		return true;
 
 	cpu = ops->get_hierarchy(ops, "cpu");
 	if (!cpu || is_unified_hierarchy(cpu))
