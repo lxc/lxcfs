@@ -248,8 +248,8 @@ AX_CHECK_COMPILE_FLAG([-Wnested-externs], [CFLAGS="$CFLAGS -Wnested-externs"],,[
 AX_CHECK_COMPILE_FLAG([-fasynchronous-unwind-tables], [CFLAGS="$CFLAGS -fasynchronous-unwind-tables"],,[-Werror])
 AX_CHECK_COMPILE_FLAG([-pipe], [CFLAGS="$CFLAGS -pipe"],,[-Werror])
 AX_CHECK_COMPILE_FLAG([-fexceptions], [CFLAGS="$CFLAGS -fexceptions"],,[-Werror])
-CFLAGS="$CFLAGS -fvisibility=hidden"
 
+CFLAGS="$CFLAGS -fvisibility=hidden -Wvla -std=gnu11"
 AX_CHECK_LINK_FLAG([-z relro], [LDFLAGS="$LDFLAGS -z relro"],,[])
 AX_CHECK_LINK_FLAG([-z now], [LDFLAGS="$LDFLAGS -z now"],,[])
 
