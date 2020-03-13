@@ -72,7 +72,7 @@ struct memory_stat {
 	uint64_t total_unevictable;
 };
 
-int proc_getattr(const char *path, struct stat *sb)
+__lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
 
@@ -104,8 +104,9 @@ int proc_getattr(const char *path, struct stat *sb)
 	return -ENOENT;
 }
 
-int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		 off_t offset, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
+				  fuse_fill_dir_t filler, off_t offset,
+				  struct fuse_file_info *fi)
 {
 	if (filler(buf, ".",		NULL, 0) != 0 ||
 	    filler(buf, "..",		NULL, 0) != 0 ||
@@ -138,7 +139,7 @@ static off_t get_procfile_size(const char *path)
 	return answer;
 }
 
-int proc_open(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 {
 	__do_free struct file_info *info = NULL;
 	int type = -1;
@@ -181,7 +182,7 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-int proc_access(const char *path, int mask)
+__lxcfs_fuse_ops int proc_access(const char *path, int mask)
 {
 	if (strcmp(path, "/proc") == 0 && access(path, R_OK) == 0)
 		return 0;
@@ -193,7 +194,7 @@ int proc_access(const char *path, int mask)
 	return 0;
 }
 
-int proc_release(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
@@ -397,7 +398,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	int ret;
 	char dev_name[72];
 
-	if (offset){
+	if (offset) {
 		int left;
 
 		if (offset > d->size)
@@ -509,7 +510,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
 	return total_len;
@@ -1248,26 +1250,54 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-int proc_read(const char *path, char *buf, size_t size, off_t offset,
-	      struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
+			       off_t offset, struct fuse_file_info *fi)
 {
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	switch (f->type) {
 	case LXC_TYPE_PROC_MEMINFO:
-		return proc_meminfo_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_meminfo_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_MEMINFO_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_CPUINFO:
-		return proc_cpuinfo_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_cpuinfo_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_CPUINFO_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_UPTIME:
-		return proc_uptime_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_uptime_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_UPTIME_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_STAT:
-		return proc_stat_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_stat_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_STAT_PATH, buf,
+						  size, offset, f);
 	case LXC_TYPE_PROC_DISKSTATS:
-		return proc_diskstats_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_diskstats_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_DISKSTATS_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_SWAPS:
-		return proc_swaps_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_swaps_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_SWAPS_PATH, buf,
+						  size, offset, f);
 	case LXC_TYPE_PROC_LOADAVG:
-		return proc_loadavg_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_loadavg_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_LOADAVG_PATH,
+						  buf, size, offset, f);
 	}
 
 	return -EINVAL;

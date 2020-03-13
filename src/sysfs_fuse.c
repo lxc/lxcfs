@@ -133,7 +133,7 @@ static off_t get_sysfile_size(const char *which)
 	return answer;
 }
 
-int sys_getattr(const char *path, struct stat *sb)
+__lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
 
@@ -177,8 +177,9 @@ int sys_getattr(const char *path, struct stat *sb)
 	return -ENOENT;
 }
 
-int sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		off_t offset, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
+				 fuse_fill_dir_t filler, off_t offset,
+				 struct fuse_file_info *fi)
 {
 	if (strcmp(path, "/sys") == 0) {
 		if (filler(buf, ".",		NULL, 0) != 0 ||
@@ -216,7 +217,7 @@ int sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-int sys_open(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 {
 	__do_free struct file_info *info = NULL;
 	int type = -1;
@@ -253,7 +254,7 @@ int sys_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-int sys_access(const char *path, int mask)
+__lxcfs_fuse_ops int sys_access(const char *path, int mask)
 {
 	if (strcmp(path, "/sys") == 0 && access(path, R_OK) == 0)
 		return 0;
@@ -275,26 +276,30 @@ int sys_access(const char *path, int mask)
 	return 0;
 }
 
-int sys_release(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_release(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
 }
 
-int sys_releasedir(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
 }
 
-int sys_read(const char *path, char *buf, size_t size, off_t offset,
-	     struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
+			      off_t offset, struct fuse_file_info *fi)
 {
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	switch (f->type) {
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
-		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_SYS_DEVICES:
 		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:

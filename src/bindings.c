@@ -50,6 +50,12 @@
 #include "utils.h"
 
 static bool can_use_pidfd;
+static bool reload_successful;
+
+bool liblxcfs_functional(void)
+{
+	return reload_successful;
+}
 
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
@@ -722,28 +728,38 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	int i = 0;
 	pid_t pid;
 
-	lxcfs_info("Running constructor %s", __func__);
+	lxcfs_info("Running constructor %s to reload liblxcfs", __func__);
 
 	cgroup_ops = cgroup_init();
-	if (!cgroup_ops)
-		log_exit("Failed to initialize cgroup support");
+	if (!cgroup_ops) {
+		lxcfs_info("Failed to initialize cgroup support");
+		goto broken_upgrade;
+	}
 
 	/* Preserve initial namespace. */
 	pid = getpid();
 	init_ns = preserve_ns(pid, "mnt");
-	if (init_ns < 0)
-		log_exit("Failed to preserve initial mount namespace");
+	if (init_ns < 0) {
+		lxcfs_info("Failed to preserve initial mount namespace");
+		goto broken_upgrade;
+	}
 
 	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
 	 * to privately mount lxcfs cgroups. */
-	if (!cgfs_setup_controllers())
+	if (!cgfs_setup_controllers()) {
 		log_exit("Failed to setup private cgroup mounts for lxcfs");
+		goto broken_upgrade;
+	}
 
-	if (setns(init_ns, 0) < 0)
+	if (setns(init_ns, 0) < 0) {
 		log_exit("%s - Failed to switch back to initial mount namespace", strerror(errno));
+		goto broken_upgrade;
+	}
 
-	if (!init_cpuview())
+	if (!init_cpuview()) {
 		log_exit("Failed to init CPU view");
+		goto broken_upgrade;
+	}
 
 	lxcfs_info("mount namespace: %d", cgroup_ops->mntns_fd);
 	lxcfs_info("hierarchies:");
@@ -767,13 +783,17 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		lxcfs_info("- %s", api_extensions[i]);
 
 	root_fd = open("/", O_PATH | O_CLOEXEC);
-	if (root_fd < 0) {
-		lxcfs_error("%s - Failed to open root directory", strerror(errno));
-		return;
-	}
+	if (root_fd < 0)
+		lxcfs_info("%s - Failed to open root directory", strerror(errno));
+	else if (fchdir(root_fd) < 0)
+		lxcfs_info("%s - Failed to change to root directory", strerror(errno));
 
-	if (fchdir(root_fd) < 0)
-		lxcfs_error("%s - Failed to change to root directory", strerror(errno));
+	reload_successful = true;
+	return;
+
+broken_upgrade:
+	reload_successful = false;
+	lxcfs_info("Failed to run constructor %s to reload liblxcfs", __func__);
 }
 
 static void __attribute__((destructor)) lxcfs_exit(void)
