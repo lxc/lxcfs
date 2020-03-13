@@ -525,12 +525,12 @@ static int pivot_enter()
 {
 	__do_close_prot_errno int oldroot = -EBADF, newroot = -EBADF;
 
-	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	oldroot = open("/", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (oldroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open old root for fchdir");
 
-	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (newroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open new root for fchdir");
