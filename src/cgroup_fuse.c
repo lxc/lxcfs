@@ -499,7 +499,7 @@ out:
 	return ret;
 }
 
-int cg_getattr(const char *path, struct stat *sb)
+__lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
 	struct fuse_context *fc = fuse_get_context();
@@ -682,7 +682,7 @@ static int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t 
 	return 0;
 }
 
-int cg_mkdir(const char *path, mode_t mode)
+__lxcfs_fuse_ops int cg_mkdir(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *last = NULL, *path1, *cgdir = NULL, *controller, *next = NULL;
@@ -822,7 +822,7 @@ static bool cgfs_remove(const char *controller, const char *cg)
 	return bret;
 }
 
-int cg_rmdir(const char *path)
+__lxcfs_fuse_ops int cg_rmdir(const char *path)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *last = NULL, *cgdir = NULL, *controller, *next = NULL;
@@ -904,7 +904,7 @@ static bool cgfs_chmod_file(const char *controller, const char *file, mode_t mod
 	return true;
 }
 
-int cg_chmod(const char *path, mode_t mode)
+__lxcfs_fuse_ops int cg_chmod(const char *path, mode_t mode)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char * cgdir = NULL, *last = NULL, *path1, *path2, *controller;
@@ -1024,7 +1024,7 @@ static int cgfs_chown_file(const char *controller, const char *file, uid_t uid,
 	return 0;
 }
 
-int cg_chown(const char *path, uid_t uid, gid_t gid)
+__lxcfs_fuse_ops int cg_chown(const char *path, uid_t uid, gid_t gid)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *cgdir = NULL, *last = NULL, *path1, *path2, *controller;
@@ -1090,7 +1090,7 @@ out:
 	return ret;
 }
 
-int cg_open(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_open(const char *path, struct fuse_file_info *fi)
 {
 	const char *cgroup;
 	char *last = NULL, *path1, *path2, * cgdir = NULL, *controller;
@@ -1354,8 +1354,8 @@ out:
 	return answer;
 }
 
-int cg_read(const char *path, char *buf, size_t size, off_t offset,
-	    struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_read(const char *path, char *buf, size_t size,
+			     off_t offset, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
@@ -1421,7 +1421,7 @@ out:
 	return ret;
 }
 
-int cg_opendir(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_opendir(const char *path, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
 	const char *cgroup;
@@ -1472,13 +1472,13 @@ int cg_opendir(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-int cg_release(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_release(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
 }
 
-int cg_releasedir(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
@@ -1805,8 +1805,8 @@ static bool cgfs_set_value(const char *controller, const char *cgroup,
 	return write_string(fnam, value, fd);
 }
 
-int cg_write(const char *path, const char *buf, size_t size, off_t offset,
-	     struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_write(const char *path, const char *buf, size_t size,
+			      off_t offset, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
 	char *localbuf = NULL;
@@ -1974,8 +1974,9 @@ static void free_keys(struct cgfs_files **keys)
 	free_disarm(keys);
 }
 
-int cg_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-	       off_t offset, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
+				fuse_fill_dir_t filler, off_t offset,
+				struct fuse_file_info *fi)
 {
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	struct cgfs_files **list = NULL;
@@ -2065,7 +2066,7 @@ out:
 	return ret;
 }
 
-int cg_access(const char *path, int mode)
+__lxcfs_fuse_ops int cg_access(const char *path, int mode)
 {
 	int ret;
 	const char *cgroup;

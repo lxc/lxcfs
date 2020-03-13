@@ -123,4 +123,6 @@
 
 #define __visible __attribute__((visibility("default")))
 
+#define __lxcfs_fuse_ops
+
 #endif /* __LXCFS_MACRO_H */
