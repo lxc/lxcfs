@@ -295,7 +295,11 @@ __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
 
 	switch (f->type) {
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
-		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_SYS_DEVICES:
 		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:

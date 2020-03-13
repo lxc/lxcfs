@@ -50,6 +50,12 @@
 #include "utils.h"
 
 static bool can_use_pidfd;
+static bool reload_successful;
+
+bool liblxcfs_functional(void)
+{
+	return reload_successful;
+}
 
 /* Define pivot_root() if missing from the C library */
 #ifndef HAVE_PIVOT_ROOT
@@ -782,9 +788,11 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	else if (fchdir(root_fd) < 0)
 		lxcfs_info("%s - Failed to change to root directory", strerror(errno));
 
+	reload_successful = true;
 	return;
 
 broken_upgrade:
+	reload_successful = false;
 	lxcfs_info("Failed to run constructor %s to reload liblxcfs", __func__);
 }
 

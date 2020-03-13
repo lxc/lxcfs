@@ -344,7 +344,32 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 
 	if (d->size > total_len)
 		d->cached = d->size - total_len;
+
 	return total_len;
+}
+
+int read_file_fuse_with_offset(const char *path, char *buf, size_t size,
+			       off_t offset, struct file_info *d)
+{
+	if (offset) {
+		ssize_t total_len = 0;
+		char *cache = d->buf;
+		int left;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	return read_file_fuse(path, buf, size, d);
 }
 
 #define INITSCOPE "/init.scope"

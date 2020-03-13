@@ -398,7 +398,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	int ret;
 	char dev_name[72];
 
-	if (offset){
+	if (offset) {
 		int left;
 
 		if (offset > d->size)
@@ -510,7 +510,8 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size ) total_len = size;
+	if (total_len > size)
+		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
 	return total_len;
@@ -1256,19 +1257,47 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 
 	switch (f->type) {
 	case LXC_TYPE_PROC_MEMINFO:
-		return proc_meminfo_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_meminfo_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_MEMINFO_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_CPUINFO:
-		return proc_cpuinfo_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_cpuinfo_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_CPUINFO_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_UPTIME:
-		return proc_uptime_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_uptime_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_UPTIME_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_STAT:
-		return proc_stat_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_stat_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_STAT_PATH, buf,
+						  size, offset, f);
 	case LXC_TYPE_PROC_DISKSTATS:
-		return proc_diskstats_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_diskstats_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_DISKSTATS_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_PROC_SWAPS:
-		return proc_swaps_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_swaps_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_SWAPS_PATH, buf,
+						  size, offset, f);
 	case LXC_TYPE_PROC_LOADAVG:
-		return proc_loadavg_read(buf, size, offset, fi);
+		if (liblxcfs_functional())
+			return proc_loadavg_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_LOADAVG_PATH,
+						  buf, size, offset, f);
 	}
 
 	return -EINVAL;
