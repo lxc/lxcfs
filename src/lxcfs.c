@@ -1035,7 +1035,7 @@ static int set_pidfile(char *pidfile)
 		fl.l_len	= 0,
 	};
 
-	fd = open(pidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	fd = open(pidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | O_CLOEXEC);
 	if (fd < 0)
 		return log_error(-1, "Could not open pidfile %s: %m", pidfile);
 

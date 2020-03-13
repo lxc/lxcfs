@@ -525,12 +525,12 @@ static int pivot_enter()
 {
 	__do_close_prot_errno int oldroot = -EBADF, newroot = -EBADF;
 
-	oldroot = open("/", O_DIRECTORY | O_RDONLY);
+	oldroot = open("/", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (oldroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open old root for fchdir");
 
-	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY);
+	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (newroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open new root for fchdir");
@@ -717,11 +717,10 @@ static bool cgfs_setup_controllers(void)
 
 static void __attribute__((constructor)) lxcfs_init(void)
 {
-	__do_close_prot_errno int init_ns = -EBADF, pidfd = -EBADF;
+	__do_close_prot_errno int init_ns = -EBADF, root_fd = -EBADF,
+				  pidfd = -EBADF;
 	int i = 0;
 	pid_t pid;
-	char *cret;
-	char cwd[MAXPATHLEN];
 
 	lxcfs_info("Running constructor %s", __func__);
 
@@ -735,10 +734,6 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	if (init_ns < 0)
 		log_exit("Failed to preserve initial mount namespace");
 
-	cret = getcwd(cwd, MAXPATHLEN);
-	if (!cret)
-		log_exit("%s - Could not retrieve current working directory", strerror(errno));
-
 	/* This function calls unshare(CLONE_NEWNS) our initial mount namespace
 	 * to privately mount lxcfs cgroups. */
 	if (!cgfs_setup_controllers())
@@ -746,9 +741,6 @@ static void __attribute__((constructor)) lxcfs_init(void)
 
 	if (setns(init_ns, 0) < 0)
 		log_exit("%s - Failed to switch back to initial mount namespace", strerror(errno));
-
-	if (!cret || chdir(cwd) < 0)
-		log_exit("%s - Could not change back to original working directory", strerror(errno));
 
 	if (!init_cpuview())
 		log_exit("Failed to init CPU view");
@@ -773,6 +765,15 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	lxcfs_info("api_extensions:");
 	for (i = 0; i < nr_api_extensions; i++)
 		lxcfs_info("- %s", api_extensions[i]);
+
+	root_fd = open("/", O_PATH | O_CLOEXEC);
+	if (root_fd < 0) {
+		lxcfs_error("%s - Failed to open root directory", strerror(errno));
+		return;
+	}
+
+	if (fchdir(root_fd) < 0)
+		lxcfs_error("%s - Failed to change to root directory", strerror(errno));
 }
 
 static void __attribute__((destructor)) lxcfs_exit(void)
