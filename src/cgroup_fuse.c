@@ -510,6 +510,8 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 	const char *controller = NULL;
 	int ret = -ENOENT;
 
+	if (!liblxcfs_functional())
+		return -EIO;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
@@ -689,6 +691,9 @@ __lxcfs_fuse_ops int cg_mkdir(const char *path, mode_t mode)
 	const char *cgroup;
 	int ret;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -829,6 +834,9 @@ __lxcfs_fuse_ops int cg_rmdir(const char *path)
 	const char *cgroup;
 	int ret;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -911,6 +919,9 @@ __lxcfs_fuse_ops int cg_chmod(const char *path, mode_t mode)
 	struct cgfs_files *k = NULL;
 	const char *cgroup;
 	int ret;
+
+	if (!liblxcfs_functional())
+		return -EIO;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
@@ -1032,6 +1043,9 @@ __lxcfs_fuse_ops int cg_chown(const char *path, uid_t uid, gid_t gid)
 	const char *cgroup;
 	int ret;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -1098,6 +1112,9 @@ __lxcfs_fuse_ops int cg_open(const char *path, struct fuse_file_info *fi)
 	struct file_info *file_info;
 	struct fuse_context *fc = fuse_get_context();
 	int ret;
+
+	if (!liblxcfs_functional())
+		return -EIO;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
@@ -1364,6 +1381,9 @@ __lxcfs_fuse_ops int cg_read(const char *path, char *buf, size_t size,
 	int ret, s;
 	bool r;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -1427,6 +1447,9 @@ __lxcfs_fuse_ops int cg_opendir(const char *path, struct fuse_file_info *fi)
 	const char *cgroup;
 	struct file_info *dir_info;
 	char *controller = NULL;
+
+	if (!liblxcfs_functional())
+		return -EIO;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
@@ -1814,6 +1837,9 @@ __lxcfs_fuse_ops int cg_write(const char *path, const char *buf, size_t size,
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	bool r;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -1985,6 +2011,9 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	struct fuse_context *fc = fuse_get_context();
 	char **clist = NULL;
 
+	if (!liblxcfs_functional())
+		return -EIO;
+
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
@@ -2074,6 +2103,9 @@ __lxcfs_fuse_ops int cg_access(const char *path, int mode)
 	char *last = NULL, *cgdir = NULL;
 	struct cgfs_files *k = NULL;
 	struct fuse_context *fc = fuse_get_context();
+
+	if (!liblxcfs_functional())
+		return -EIO;
 
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;

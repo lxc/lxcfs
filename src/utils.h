@@ -45,6 +45,8 @@ extern int send_creds(int sock, struct ucred *cred, char v, bool pingfirst);
 extern bool wait_for_sock(int sock, int timeout);
 extern int read_file_fuse(const char *path, char *buf, size_t size,
 			  struct file_info *d);
+extern int read_file_fuse_with_offset(const char *path, char *buf, size_t size,
+				      off_t offset, struct file_info *d);
 extern void prune_init_slice(char *cg);
 extern int wait_for_pid(pid_t pid);
 
