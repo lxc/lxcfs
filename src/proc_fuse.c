@@ -72,7 +72,7 @@ struct memory_stat {
 	uint64_t total_unevictable;
 };
 
-int proc_getattr(const char *path, struct stat *sb)
+__lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
 
@@ -104,8 +104,9 @@ int proc_getattr(const char *path, struct stat *sb)
 	return -ENOENT;
 }
 
-int proc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		 off_t offset, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
+				  fuse_fill_dir_t filler, off_t offset,
+				  struct fuse_file_info *fi)
 {
 	if (filler(buf, ".",		NULL, 0) != 0 ||
 	    filler(buf, "..",		NULL, 0) != 0 ||
@@ -138,7 +139,7 @@ static off_t get_procfile_size(const char *path)
 	return answer;
 }
 
-int proc_open(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 {
 	__do_free struct file_info *info = NULL;
 	int type = -1;
@@ -181,7 +182,7 @@ int proc_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-int proc_access(const char *path, int mask)
+__lxcfs_fuse_ops int proc_access(const char *path, int mask)
 {
 	if (strcmp(path, "/proc") == 0 && access(path, R_OK) == 0)
 		return 0;
@@ -193,7 +194,7 @@ int proc_access(const char *path, int mask)
 	return 0;
 }
 
-int proc_release(const char *path, struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
@@ -1248,8 +1249,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-int proc_read(const char *path, char *buf, size_t size, off_t offset,
-	      struct fuse_file_info *fi)
+__lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
+			       off_t offset, struct fuse_file_info *fi)
 {
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
