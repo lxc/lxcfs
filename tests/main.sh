@@ -9,18 +9,19 @@ set -eu
 # Run lxcfs testsuite
 export LXCFSDIR=$(mktemp -d)
 pidfile=$(mktemp)
+export LXCFSPID=-1
 
 cmdline=$(realpath $0)
 dirname=$(dirname ${cmdline})
 topdir=$(dirname ${dirname})
 
-p=-1
 FAILED=1
+UNSHARE=1
 cleanup() {
 	echo "=> Cleaning up"
 	set +e
-	if [ $p -ne -1 ]; then
-		kill -9 $p
+	if [ $LXCFSPID -ne -1 ]; then
+		kill -9 $LXCFSPID
 	fi
 	if [ ${LXCFSDIR} != "/var/lib/lxcfs" ]; then
 		umount -l ${LXCFSDIR}
@@ -46,9 +47,10 @@ if [ -x ${lxcfs} ]; then
 	fi
 	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
 	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
-	p=$!
+	LXCFSPID=$!
 else
-	pidof lxcfs
+	UNSHARE=0
+	LXCFSPID=$(cat "/run/lxcfs.pid")
 	echo "=> Re-using host lxcfs"
 	rmdir $LXCFSDIR
 	export LXCFSDIR=/var/lib/lxcfs
@@ -89,6 +91,12 @@ TESTCASE="meminfo hierarchy"
 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
 TESTCASE="liblxcfs reloading"
 UNSHARE=0 RUNTEST ${dirname}/test_reload.sh
+TESTCASE="SIGUSR2 virtualization mode switching"
+echo "==> Switching to non-virtualization mode"
+kill -USR2 $LXCFSPID
+RUNTEST ${dirname}/test_sigusr2.sh
+echo "==> Switching to virtualization mode"
+kill -USR2 $LXCFSPID
 
 # Check for any defunct processes - children we didn't reap
 n=`ps -ef | grep lxcfs | grep defunct | wc -l`
