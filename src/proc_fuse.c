@@ -350,7 +350,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 }
 
 static void get_blkio_io_value(char *str, unsigned major, unsigned minor,
-			       char *iotype, unsigned long *v)
+			       char *iotype, uint64_t *v)
 {
 	char *eol;
 	char key[32];
@@ -384,12 +384,12 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	unsigned long read = 0, write = 0;
-	unsigned long read_merged = 0, write_merged = 0;
-	unsigned long read_sectors = 0, write_sectors = 0;
-	unsigned long read_ticks = 0, write_ticks = 0;
-	unsigned long ios_pgr = 0, tot_ticks = 0, rq_ticks = 0;
-	unsigned long rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
+	uint64_t read = 0, write = 0;
+	uint64_t read_merged = 0, write_merged = 0;
+	uint64_t read_sectors = 0, write_sectors = 0;
+	uint64_t read_ticks = 0, write_ticks = 0;
+	uint64_t ios_pgr = 0, tot_ticks = 0, rq_ticks = 0;
+	uint64_t rd_svctm = 0, wr_svctm = 0, rd_wait = 0, wr_wait = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
 	size_t linelen = 0, total_len = 0;
@@ -747,11 +747,11 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu = 0;
-	unsigned long user = 0, nice = 0, system = 0, idle = 0, iowait = 0,
-		      irq = 0, softirq = 0, steal = 0, guest = 0, guest_nice = 0;
-	unsigned long user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0,
-		      iowait_sum = 0, irq_sum = 0, softirq_sum = 0,
-		      steal_sum = 0, guest_sum = 0, guest_nice_sum = 0;
+	uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0,
+		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
+	uint64_t user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0,
+		 iowait_sum = 0, irq_sum = 0, softirq_sum = 0, steal_sum = 0,
+		 guest_sum = 0, guest_nice_sum = 0;
 	char cpuall[CPUALL_MAX_SIZE];
 	/* reserve for cpu all */
 	char *cache = d->buf + CPUALL_MAX_SIZE;

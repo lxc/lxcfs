@@ -90,9 +90,9 @@ struct pidns_init_store {
 	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
 	pid_t initpid; /* the pid of nit in that ns */
 	int init_pidfd;
-	long int ctime; /* the time at which /proc/$initpid was created */
+	int64_t ctime; /* the time at which /proc/$initpid was created */
 	struct pidns_init_store *next;
-	long int lastcheck;
+	int64_t lastcheck;
 };
 
 /* lol - look at how they are allocated in the kernel */
@@ -216,8 +216,8 @@ static void remove_initpid(struct pidns_init_store *entry)
 /* Must be called under store_lock */
 static void prune_initpid_store(void)
 {
-	static long int last_prune = 0;
-	long int now, threshold;
+	static int64_t last_prune = 0;
+	int64_t now, threshold;
 
 	if (!last_prune) {
 		last_prune = time(NULL);

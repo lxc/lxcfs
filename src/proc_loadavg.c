@@ -68,12 +68,15 @@ static int loadavg = 0;
 static volatile sig_atomic_t loadavg_stop = 0;
 
 struct load_node {
-	char *cg;  /*cg */
-	unsigned long avenrun[3];		/* Load averages */
+	/* cgroup */
+	char *cg;
+ 	/* Load averages */
+	uint64_t avenrun[3];
 	unsigned int run_pid;
 	unsigned int total_pid;
 	unsigned int last_pid;
-	int cfd; /* The file descriptor of the mounted cgroup */
+	/* The file descriptor of the mounted cgroup */
+	int cfd;
 	struct  load_node *next;
 	struct  load_node **pre;
 };
@@ -173,7 +176,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	struct load_node *n;
 	int hash;
 	int cfd;
-	unsigned long a, b, c;
+	uint64_t a, b, c;
 
 	if (offset) {
 		int left;
@@ -362,10 +365,9 @@ static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
  * @active: the total number of running pid at this moment.
  * @exp: the fixed-point defined in the beginning.
  */
-static unsigned long calc_load(unsigned long load, unsigned long exp,
-			       unsigned long active)
+static uint64_t calc_load(uint64_t load, uint64_t exp, uint64_t active)
 {
-	unsigned long newload;
+	uint64_t newload;
 
 	active = active > 0 ? active * FIXED_1 : 0;
 	newload = load * exp + active * (FIXED_1 - exp);
