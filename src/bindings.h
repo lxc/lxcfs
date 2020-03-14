@@ -14,6 +14,7 @@
 #define _FILE_OFFSET_BITS 64
 
 #include <fuse.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,5 +91,16 @@ extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
+
+static inline int install_signal_handler(int signo,
+					 void (*handler)(int, siginfo_t *, void *))
+{
+	struct sigaction action = {
+	    .sa_flags = SA_SIGINFO,
+	    .sa_sigaction = handler,
+	};
+
+	return sigaction(signo, &action, NULL);
+}
 
 #endif /* __LXCFS_BINDINGS_H */

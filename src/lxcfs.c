@@ -173,7 +173,7 @@ static void down_users(void)
 	users_unlock();
 }
 
-static void reload_handler(int sig)
+static void sigusr1_reload(int signo, siginfo_t *info, void *extra)
 {
 	need_reload = 1;
 }
@@ -1148,8 +1148,8 @@ int main(int argc, char *argv[])
 		usage();
 
 	do_reload();
-	if (signal(SIGUSR1, reload_handler) == SIG_ERR) {
-		lxcfs_error("Error setting USR1 signal handler: %m");
+	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
+		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
 		goto out;
 	}
 
