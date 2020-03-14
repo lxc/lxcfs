@@ -50,11 +50,12 @@
 #include "utils.h"
 
 static bool can_use_pidfd;
-static bool reload_successful;
+
+static volatile sig_atomic_t reload_successful;
 
 bool liblxcfs_functional(void)
 {
-	return reload_successful;
+	return reload_successful != 0;
 }
 
 /* Define pivot_root() if missing from the C library */
@@ -721,6 +722,54 @@ static bool cgfs_setup_controllers(void)
 	return true;
 }
 
+static void sigusr2_handler(int signo, siginfo_t *info, void *extra)
+{
+	int ret;
+
+	if (reload_successful) {
+		reload_successful = 0;
+
+		/* write() is async signal safe */
+		ret = write(STDERR_FILENO,
+			    "Switched into non-virtualization mode\n",
+			    STRLITERALLEN("Switched into non-virtualization mode\n"));
+		if (ret < 0)
+			goto please_compiler;
+	} else {
+		reload_successful = 1;
+
+		/* write() is async signal safe */
+		ret = write(STDERR_FILENO, "Switched into virtualization mode\n",
+			    STRLITERALLEN("Switched into virtualization mode\n"));
+		if (ret < 0)
+			goto please_compiler;
+	}
+
+please_compiler:
+	/*
+	 * The write() syscall is a function whose return value needs to be
+	 * checked. Otherwise the compiler will warn. This is how we
+	 * please our master. Another one could be to use
+	 * syscall(__NR_write, ...) directly but whatever.
+	 */
+	return;
+}
+
+static int set_sigusr2_handler(void)
+{
+	int ret;
+	struct sigaction action = {
+		.sa_flags = SA_SIGINFO,
+		.sa_sigaction = sigusr2_handler,
+	};
+
+	ret = sigaction(SIGUSR2, &action, NULL);
+	if (ret)
+		return log_error_errno(-1, errno, "Failed to set SIGUSR2 signal handler");
+
+	return 0;
+}
+
 static void __attribute__((constructor)) lxcfs_init(void)
 {
 	__do_close_prot_errno int init_ns = -EBADF, root_fd = -EBADF,
@@ -788,11 +837,14 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	else if (fchdir(root_fd) < 0)
 		lxcfs_info("%s - Failed to change to root directory", strerror(errno));
 
-	reload_successful = true;
+	if (set_sigusr2_handler())
+		goto broken_upgrade;
+
+	reload_successful = 1;
 	return;
 
 broken_upgrade:
-	reload_successful = false;
+	reload_successful = 0;
 	lxcfs_info("Failed to run constructor %s to reload liblxcfs", __func__);
 }
 
