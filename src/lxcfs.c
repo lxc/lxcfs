@@ -952,10 +952,9 @@ const struct fuse_operations lxcfs_ops = {
 static void usage()
 {
 	lxcfs_info("Usage: lxcfs <directory>\n");
-	lxcfs_info("lxcfs set up fuse- and cgroup-based virtualizing filesystem\n");
+	lxcfs_info("lxcfs is a FUSE-based proc, sys and cgroup virtualizing filesystem\n");
 	lxcfs_info("Options :");
 	lxcfs_info("  -d, --debug          Run lxcfs with debugging enabled");
-	lxcfs_info("  --disable-cfs        Disable cpu virtualization via cpu shares");
 	lxcfs_info("  -f, --foreground     Run lxcfs in the foreground");
 	lxcfs_info("  -n, --help           Print help");
 	lxcfs_info("  -l, --enable-loadavg Enable loadavg virtualization");
@@ -964,6 +963,7 @@ static void usage()
 	lxcfs_info("                       Default pidfile is %s/lxcfs.pid", RUNTIME_PATH);
 	lxcfs_info("  -u, --disable-swap   Disable swap virtualization");
 	lxcfs_info("  -v, --version        Print lxcfs version");
+	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
 	exit(EXIT_FAILURE);
 }
