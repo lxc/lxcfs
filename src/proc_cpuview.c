@@ -360,7 +360,7 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 static void add_cpu_usage(uint64_t *surplus, struct cpuacct_usage *usage,
 			  uint64_t *counter, uint64_t threshold)
 {
-	unsigned long free_space, to_add;
+	uint64_t free_space, to_add;
 
 	free_space = threshold - usage->user - usage->system;
 
@@ -374,11 +374,11 @@ static void add_cpu_usage(uint64_t *surplus, struct cpuacct_usage *usage,
 	*surplus -= to_add;
 }
 
-static unsigned long diff_cpu_usage(struct cpuacct_usage *older,
-				    struct cpuacct_usage *newer,
-				    struct cpuacct_usage *diff, int cpu_count)
+static uint64_t diff_cpu_usage(struct cpuacct_usage *older,
+			       struct cpuacct_usage *newer,
+			       struct cpuacct_usage *diff, int cpu_count)
 {
-	unsigned long sum = 0;
+	uint64_t sum = 0;
 
 	for (int i = 0; i < cpu_count; i++) {
 		if (!newer[i].online)
@@ -717,7 +717,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		/* revise cpu usage view to support partial cpu case. */
 		exact_cpus = exact_cpu_count(cg);
 		if (exact_cpus < (double)max_cpus){
-			unsigned long delta = (unsigned long)((double)(diff_user + diff_system + diff_idle) * (1 - exact_cpus / (double)max_cpus));
+			uint64_t delta = (uint64_t)((double)(diff_user + diff_system + diff_idle) * (1 - exact_cpus / (double)max_cpus));
 
 			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
 			lxcfs_v("delta: %lu\n", delta);
