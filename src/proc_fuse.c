@@ -200,10 +200,10 @@ __lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static unsigned long get_memlimit(const char *cgroup, bool swap)
+static uint64_t get_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *memlimit_str = NULL;
-	unsigned long memlimit = -1;
+	uint64_t memlimit = -1;
 	char *ptr;
 	int ret;
 
@@ -212,7 +212,7 @@ static unsigned long get_memlimit(const char *cgroup, bool swap)
 	else
 		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
 	if (ret > 0) {
-		memlimit = strtoul(memlimit_str, &ptr, 10);
+		memlimit = strtoull(memlimit_str, &ptr, 10);
 		if (ptr == memlimit_str)
 			memlimit = -1;
 	}
@@ -220,11 +220,11 @@ static unsigned long get_memlimit(const char *cgroup, bool swap)
 	return memlimit;
 }
 
-static unsigned long get_min_memlimit(const char *cgroup, bool swap)
+static uint64_t get_min_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *copy = NULL;
-	unsigned long memlimit = 0;
-	unsigned long retlimit;
+	uint64_t memlimit = 0;
+	uint64_t retlimit;
 
 	copy = strdup(cgroup);
 	if (!copy)
@@ -258,8 +258,8 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		       *memswusage_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	unsigned long memswlimit = 0, memlimit = 0, memusage = 0,
-		      memswusage = 0, swap_total = 0, swap_free = 0;
+	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
+		 swap_total = 0, swap_free = 0;
 	ssize_t total_len = 0;
 	ssize_t l = 0;
 	char *cache = d->buf;
@@ -296,14 +296,14 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	if (ret < 0)
 		return 0;
 
-	memusage = strtoul(memusage_str, NULL, 10);
+	memusage = strtoull(memusage_str, NULL, 10);
 
 	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cg, &memswlimit_str);
 	if (ret >= 0)
 		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cg, &memswusage_str);
 	if (ret >= 0) {
 		memswlimit = get_min_memlimit(cg, true);
-		memswusage = strtoul(memswusage_str, NULL, 10);
+		memswusage = strtoull(memswusage_str, NULL, 10);
 		swap_total = (memswlimit - memlimit) / 1024;
 		swap_free = (memswusage - memusage) / 1024;
 	}
@@ -323,16 +323,16 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 		while (getline(&line, &linelen, f) != -1) {
 			if (startswith(line, "SwapTotal:"))
-				sscanf(line, "SwapTotal:      %8lu kB", &swap_total);
+				sscanf(line, "SwapTotal:      %8" PRIu64 " kB", &swap_total);
 			else if (startswith(line, "SwapFree:"))
-				sscanf(line, "SwapFree:      %8lu kB", &swap_free);
+				sscanf(line, "SwapFree:      %8" PRIu64 " kB", &swap_free);
 		}
 	}
 
 	if (swap_total > 0) {
 		l = snprintf(d->buf + total_len, d->size - total_len,
-				"none%*svirtual\t\t%lu\t%lu\t0\n", 36, " ",
-				swap_total, swap_free);
+			     "none%*svirtual\t\t%" PRIu64 "\t%" PRIu64 "\t0\n",
+			     36, " ", swap_total, swap_free);
 		total_len += l;
 	}
 
@@ -534,7 +534,7 @@ static inline void iwashere(void)
 static double get_reaper_busy(pid_t task)
 {
 	__do_free char *cgroup = NULL, *usage_str = NULL;
-	unsigned long usage = 0;
+	uint64_t usage = 0;
 	pid_t initpid;
 
 	initpid = lookup_initpid_in_store(task);
@@ -545,11 +545,10 @@ static double get_reaper_busy(pid_t task)
 	if (!cgroup)
 		return 0;
 	prune_init_slice(cgroup);
-	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage",
-			     &usage_str))
+	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		return 0;
 
-	usage = strtoul(usage_str, NULL, 10);
+	usage = strtoull(usage_str, NULL, 10);
 	return ((double)usage / 1000000000);
 }
 
@@ -1091,12 +1090,12 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
 	if (ret >= 0) {
 		memswlimit = get_min_memlimit(cgroup, true);
-		memswusage = strtoul(memswusage_str, NULL, 10);
+		memswusage = strtoull(memswusage_str, NULL, 10);
 		memswlimit = memswlimit / 1024;
 		memswusage = memswusage / 1024;
 	}
 
-	memusage = strtoul(memusage_str, NULL, 10);
+	memusage = strtoull(memusage_str, NULL, 10);
 	memlimit /= 1024;
 	memusage /= 1024;
 
