@@ -1030,8 +1030,7 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi)
 {
-	__do_free char *cgroup = NULL, *line = NULL,
-		       *memusage_str = NULL, *memstat_str = NULL,
+	__do_free char *cgroup = NULL, *line = NULL, *memusage_str = NULL,
 		       *memswlimit_str = NULL, *memswusage_str = NULL;
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
