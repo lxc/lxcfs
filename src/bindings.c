@@ -16,6 +16,8 @@
 #include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
+#include <linux/magic.h>
+#include <linux/sched.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -24,27 +26,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
-#include <wait.h>
-#include <linux/magic.h>
-#include <linux/sched.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/param.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
+#include <time.h>
+#include <unistd.h>
+#include <wait.h>
 
 #include "api_extensions.h"
 #include "bindings.h"
-#include "config.h"
 #include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
+#include "config.h"
 #include "memory_utils.h"
 #include "proc_cpuview.h"
 #include "utils.h"
@@ -722,7 +721,7 @@ static bool cgfs_setup_controllers(void)
 	return true;
 }
 
-static void sigusr2_handler(int signo, siginfo_t *info, void *extra)
+static void sigusr2_toggle_virtualization(int signo, siginfo_t *info, void *extra)
 {
 	int ret;
 
@@ -753,21 +752,6 @@ please_compiler:
 	 * syscall(__NR_write, ...) directly but whatever.
 	 */
 	return;
-}
-
-static int set_sigusr2_handler(void)
-{
-	int ret;
-	struct sigaction action = {
-		.sa_flags = SA_SIGINFO,
-		.sa_sigaction = sigusr2_handler,
-	};
-
-	ret = sigaction(SIGUSR2, &action, NULL);
-	if (ret)
-		return log_error_errno(-1, errno, "Failed to set SIGUSR2 signal handler");
-
-	return 0;
 }
 
 static void __attribute__((constructor)) lxcfs_init(void)
@@ -837,8 +821,10 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	else if (fchdir(root_fd) < 0)
 		lxcfs_info("%s - Failed to change to root directory", strerror(errno));
 
-	if (set_sigusr2_handler())
+	if (install_signal_handler(SIGUSR2, sigusr2_toggle_virtualization)) {
+		lxcfs_info("%s - Failed to install SIGUSR2 signal handler", strerror(errno));
 		goto broken_upgrade;
+	}
 
 	reload_successful = 1;
 	return;
