@@ -60,6 +60,32 @@ struct pid_ns_clone_args {
 	int (*wrapped) (int, pid_t);
 };
 
+static inline int get_cgroup_fd_handle_named(const char *controller)
+{
+	if (strcmp(controller, "systemd") == 0)
+		return get_cgroup_fd("name=systemd");
+
+	return get_cgroup_fd(controller);
+}
+
+static char *get_pid_cgroup_handle_named(pid_t pid, const char *controller)
+{
+	if (strcmp(controller, "systemd") == 0)
+		return get_pid_cgroup(pid, "name=systemd");
+
+	return get_pid_cgroup(pid, controller);
+}
+
+static bool get_cgroup_handle_named(struct cgroup_ops *ops,
+				    const char *controller, const char *cgroup,
+				    const char *file, char **value)
+{
+	if (strcmp(controller, "systemd") == 0)
+		return cgroup_ops->get(ops, "name=systemd", cgroup, file, value);
+
+	return cgroup_ops->get(cgroup_ops, controller, cgroup, file, value);
+}
+
 /*
  * given /cgroup/freezer/a/b, return "freezer".
  * the returned char* should NOT be freed.
@@ -144,7 +170,7 @@ static bool is_child_cgroup(const char *controller, const char *cgroup, const ch
 	int ret;
 	struct stat sb;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -176,7 +202,7 @@ static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 	if (strcmp(cg, "/") == 0 || strcmp(cg, "./") == 0)
 		return true;
 
-	c2 = get_pid_cgroup(pid, contrl);
+	c2 = get_pid_cgroup_handle_named(pid, contrl);
 	if (!c2)
 		return false;
 	prune_init_slice(c2);
@@ -251,7 +277,7 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg, char **nextcg)
 {
 	bool answer = false;
-	char *c2 = get_pid_cgroup(pid, contrl);
+	char *c2 = get_pid_cgroup_handle_named(pid, contrl);
 	char *linecmp;
 
 	if (!c2)
@@ -293,7 +319,7 @@ static struct cgfs_files *cgfs_get_key(const char *controller,
 	struct stat sb;
 	struct cgfs_files *newkey;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -659,7 +685,7 @@ static int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t 
 	size_t len;
 	char *dirnam;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return -EINVAL;
 
@@ -807,7 +833,7 @@ static bool cgfs_remove(const char *controller, const char *cg)
 	char *dirnam;
 	bool bret;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -897,7 +923,7 @@ static bool cgfs_chmod_file(const char *controller, const char *file, mode_t mod
 	size_t len;
 	char *pathname;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1016,7 +1042,7 @@ static int cgfs_chown_file(const char *controller, const char *file, uid_t uid,
 	size_t len;
 	char *pathname;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1299,7 +1325,7 @@ static bool do_read_pids(pid_t tpid, const char *contrl, const char *cg,
 	struct ucred cred;
 	size_t sz = 0, asz = 0;
 
-	if (!cgroup_ops->get(cgroup_ops, contrl, cg, file, &tmpdata))
+	if (!get_cgroup_handle_named(cgroup_ops, contrl, cg, file, &tmpdata))
 		return false;
 
 	/*
@@ -1416,7 +1442,7 @@ __lxcfs_fuse_ops int cg_read(const char *path, char *buf, size_t size,
 		// special case - we have to translate the pids
 		r = do_read_pids(fc->pid, f->controller, f->cgroup, f->file, &data);
 	else
-		r = cgroup_ops->get(cgroup_ops, f->controller, f->cgroup, f->file, &data);
+		r = get_cgroup_handle_named(cgroup_ops, f->controller, f->cgroup, f->file, &data);
 
 	if (!r) {
 		ret = -EINVAL;
@@ -1513,7 +1539,7 @@ static FILE *open_pids_file(const char *controller, const char *cgroup)
 	size_t len;
 	char *pathname;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1808,7 +1834,7 @@ static bool cgfs_set_value(const char *controller, const char *cgroup,
 	size_t len;
 	char *fnam;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
@@ -1894,7 +1920,7 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 	struct dirent *dirent;
 	DIR *dir;
 
-	cfd = get_cgroup_fd(controller);
+	cfd = get_cgroup_fd_handle_named(controller);
 	*list = NULL;
 	if (cfd < 0)
 		return false;
