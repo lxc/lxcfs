@@ -102,4 +102,9 @@ static inline const char *dot_or_empty(const char *s)
 	return (*s == '/') ? dot : empty;
 }
 
+static inline bool is_relative(const char *s)
+{
+	return s && *s != '/';
+}
+
 #endif /* __LXC_CGROUP_UTILS_H */
