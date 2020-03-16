@@ -165,12 +165,6 @@ static struct hierarchy *cgfsng_get_hierarchy(struct cgroup_ops *ops,
 	return NULL;
 }
 
-static inline struct hierarchy *get_hierarchy(struct cgroup_ops *ops,
-					      const char *controller)
-{
-	return cgfsng_get_hierarchy(ops, controller);
-}
-
 /* Given two null-terminated lists of strings, return true if any string is in
  * both.
  */
