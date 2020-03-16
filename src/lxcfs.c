@@ -1159,10 +1159,20 @@ int main(int argc, char *argv[])
 	else
 		newargv[cnt++] = "-f";
 	newargv[cnt++] = "-o";
+
+	/*
+	 * We can't use default_permissions since we still support systems that
+	 * don't have kernels with cgroup namespace support. On such kernels
+	 * lxcfs will provide a namespaced cgroup view and needs explicit
+	 * access helpers to make that work.
+	 * Another reason that came to me is that we can't or at least
+	 * shouldn't guarantee that we don't need more complicated access
+	 * helpers for proc and sys virtualization in the future.
+	 */
 	if (nonempty)
-		newargv[cnt++] = "default_permissions,allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
+		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
 	else
-		newargv[cnt++] = "default_permissions,allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 

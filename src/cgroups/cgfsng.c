@@ -500,7 +500,7 @@ static bool cgfsng_mount(struct cgroup_ops *ops, const char *root)
 					"Error creating cgroup path: %s",
 					controllerpath);
 
-		ret = cg_mount_cgroup_full( h, controllerpath);
+		ret = cg_mount_cgroup_full(h, controllerpath);
 		if (ret < 0)
 			goto on_error;
 	}
@@ -971,7 +971,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->num_hierarchies = cgfsng_num_hierarchies;
 	cgfsng_ops->get = cgfsng_get;
 	cgfsng_ops->get_hierarchies = cgfsng_get_hierarchies;
-	cgfsng_ops->get_hierarchy = get_hierarchy;
+	cgfsng_ops->get_hierarchy = cgfsng_get_hierarchy;
 	cgfsng_ops->driver = "cgfsng";
 	cgfsng_ops->version = "1.0.0";
 	cgfsng_ops->mount = cgfsng_mount;
