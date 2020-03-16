@@ -83,6 +83,20 @@
 				    ? 20          \
 				    : sizeof(int[-2 * (sizeof(type) > 8)])))
 
+#define move_ptr(ptr)                                 \
+	({                                            \
+		typeof(ptr) __internal_ptr__ = (ptr); \
+		(ptr) = NULL;                         \
+		__internal_ptr__;                     \
+	})
+
+#define move_fd(fd)                         \
+	({                                  \
+		int __internal_fd__ = (fd); \
+		(fd) = -EBADF;              \
+		__internal_fd__;            \
+	})
+
 #define ret_errno(__errno__)       \
 	({                         \
 		errno = __errno__; \

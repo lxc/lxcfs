@@ -46,19 +46,6 @@
 #include "cgroup2_devices.h"
 #include "cgroup_utils.h"
 
-static void free_string_list(char **clist)
-{
-	int i;
-
-	if (!clist)
-		return;
-
-	for (i = 0; clist[i]; i++)
-		free(clist[i]);
-
-	free(clist);
-}
-
 /* Given a pointer to a null-terminated array of pointers, realloc to add one
  * entry, and point the new entry to NULL. Do not fail. Return the index to the
  * second-to-last entry - that is, the one which is now available for use
@@ -656,7 +643,7 @@ static char *readat_cpuset(int cgroup_fd)
 static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 				  char **value)
 {
-	__do_close_prot_errno int cgroup_fd = -EBADF;
+	__do_close int cgroup_fd = -EBADF;
 	__do_free char *path = NULL;
 	char *v;
 	struct hierarchy *h;

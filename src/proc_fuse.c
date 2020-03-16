@@ -965,7 +965,7 @@ out:
 /* Note that "memory.stat" in cgroup2 is hierarchical by default. */
 static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mstat)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_free char *line = NULL;
 	__do_free void *fdopen_cache = NULL;

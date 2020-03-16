@@ -289,7 +289,7 @@ static int check_symlink(int fd)
  */
 static int open_if_safe(int dirfd, const char *nextpath)
 {
-	__do_close_prot_errno int newfd = -EBADF;
+	__do_close int newfd = -EBADF;
 
 	newfd = openat(dirfd, nextpath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	if (newfd >= 0) /* Was not a symlink, all good. */
@@ -332,7 +332,7 @@ static int open_if_safe(int dirfd, const char *nextpath)
  */
 static int open_without_symlink(const char *target, const char *prefix_skip)
 {
-	__do_close_prot_errno int dirfd = -EBADF;
+	__do_close int dirfd = -EBADF;
 	__do_free char *dup = NULL;
 	int curlen = 0, fulllen, i;
 
@@ -399,7 +399,7 @@ static int open_without_symlink(const char *target, const char *prefix_skip)
 int safe_mount(const char *src, const char *dest, const char *fstype,
 	       unsigned long flags, const void *data, const char *rootfs)
 {
-	__do_close_prot_errno int destfd = -EBADF, srcfd = -EBADF;
+	__do_close int destfd = -EBADF, srcfd = -EBADF;
 	int ret;
 	/* Only needs enough for /proc/self/fd/<fd>. */
 	char srcbuf[50], destbuf[50];
@@ -464,7 +464,7 @@ size_t strlcat(char *d, const char *s, size_t n)
 
 FILE *fopen_cloexec(const char *path, const char *mode)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	__do_fclose FILE *ret = NULL;
 	int open_mode = 0;
 	int step = 0;
@@ -673,7 +673,7 @@ char *cg_legacy_get_current_cgroup(pid_t pid, const char *controller)
 
 char *readat_file(int dirfd, const char *path)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	__do_free char *line = NULL;
 	__do_fclose FILE *f = NULL;
 	char *buf = NULL;
