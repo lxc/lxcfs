@@ -107,4 +107,14 @@ static inline bool is_relative(const char *s)
 	return s && *s != '/';
 }
 
+#define must_make_path_relative(__first__, ...)                                \
+	({                                                                     \
+		char *__ptr__;                                                 \
+		if (*__first__ == '/')                                         \
+			__ptr__ = must_make_path(".", __first__, __VA_ARGS__); \
+		else                                                           \
+			__ptr__ = must_make_path(__first__, __VA_ARGS__);      \
+		__ptr__;                                                       \
+	})
+
 #endif /* __LXC_CGROUP_UTILS_H */
