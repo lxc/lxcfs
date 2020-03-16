@@ -523,7 +523,7 @@ static void *load_begin(void *arg)
 				if  (!path)
 					goto out;
 
-				ret = snprintf(path, length, "%s%s", dot_or_empty(f->cg), f->cg);
+				ret = snprintf(path, length, "%s%s", !is_relative(f->cg) ? "." : "", f->cg);
 				/* Ignore the node if snprintf fails.*/
 				if (ret < 0 || ret > length - 1)
 					log_error(goto out, "Refresh node %s failed for snprintf()", f->cg);
