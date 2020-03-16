@@ -437,7 +437,7 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
-	if (sscanf(str, first ? "%" PRId64 : "%*" PRId64 " %" PRId64, value) != 1)
+	if (sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) != 1)
 		return false;
 
 	return true;
