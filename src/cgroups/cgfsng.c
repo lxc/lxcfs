@@ -46,19 +46,6 @@
 #include "cgroup2_devices.h"
 #include "cgroup_utils.h"
 
-static void free_string_list(char **clist)
-{
-	int i;
-
-	if (!clist)
-		return;
-
-	for (i = 0; clist[i]; i++)
-		free(clist[i]);
-
-	free(clist);
-}
-
 /* Given a pointer to a null-terminated array of pointers, realloc to add one
  * entry, and point the new entry to NULL. Do not fail. Return the index to the
  * second-to-last entry - that is, the one which is now available for use
@@ -556,7 +543,11 @@ static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
 	if (!h)
 		return false;
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
+	if (is_relative(cgroup))
+		path = must_make_path(cgroup, file, NULL);
+	else
+		path = must_make_path(".", cgroup, file, NULL);
+
 	*value = readat_file(h->fd, path);
 	return *value != NULL;
 }
@@ -586,7 +577,11 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 		ret = CGROUP2_SUPER_MAGIC;
 	}
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
+	if (is_relative(cgroup))
+		path = must_make_path(cgroup, file, NULL);
+	else
+		path = must_make_path(".", cgroup, file, NULL);
+
 	*value = readat_file(h->fd, path);
 	if (!*value)
 		ret = -1;
@@ -603,7 +598,11 @@ static int cgfsng_get_memory_stats_fd(struct cgroup_ops *ops, const char *cgroup
 	if (!h)
 		return -1;
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, "memory.stat", NULL);
+	if (is_relative(cgroup))
+		path = must_make_path(cgroup, "memory.stat", NULL);
+	else
+		path = must_make_path(".", cgroup, "memory.stat", NULL);
+
 	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
@@ -656,7 +655,7 @@ static char *readat_cpuset(int cgroup_fd)
 static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 				  char **value)
 {
-	__do_close_prot_errno int cgroup_fd = -EBADF;
+	__do_close int cgroup_fd = -EBADF;
 	__do_free char *path = NULL;
 	char *v;
 	struct hierarchy *h;
@@ -672,7 +671,10 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 		ret = CGROUP2_SUPER_MAGIC;
 
 	*value = NULL;
-	path = must_make_path(dot_or_empty(cgroup), cgroup, NULL);
+	if (is_relative(cgroup))
+		path = must_make_path(cgroup, NULL);
+	else
+		path = must_make_path(".", cgroup, NULL);
 	cgroup_fd = openat_safe(h->fd, path);
 	if (cgroup_fd < 0) {
 		return -1;
@@ -722,7 +724,11 @@ static int cgfsng_get_io(struct cgroup_ops *ops, const char *cgroup,
 	else
 		ret = CGROUP2_SUPER_MAGIC;
 
-	path = must_make_path(dot_or_empty(cgroup), cgroup, file, NULL);
+	if (is_relative(cgroup))
+		path = must_make_path(cgroup, file, NULL);
+	else
+		path = must_make_path(".", cgroup, file, NULL);
+
 	*value = readat_file(h->fd, path);
 	if (!*value) {
 		if (errno == ENOENT)

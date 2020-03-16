@@ -284,7 +284,7 @@ static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 {
 	__do_free char *path = NULL;
 	__do_free void *fdopen_cache = NULL;
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_closedir DIR *dir = NULL;
 	struct dirent *file;
@@ -523,7 +523,7 @@ static void *load_begin(void *arg)
 				if  (!path)
 					goto out;
 
-				ret = snprintf(path, length, "%s%s", dot_or_empty(f->cg), f->cg);
+				ret = snprintf(path, length, "%s%s", !is_relative(f->cg) ? "." : "", f->cg);
 				/* Ignore the node if snprintf fails.*/
 				if (ret < 0 || ret > length - 1)
 					log_error(goto out, "Refresh node %s failed for snprintf()", f->cg);

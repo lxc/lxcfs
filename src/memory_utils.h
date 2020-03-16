@@ -3,42 +3,24 @@
 #ifndef __LXCFS_MEMORY_UTILS_H
 #define __LXCFS_MEMORY_UTILS_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "config.h"
 #include "macro.h"
 
-static inline void __auto_free__(void *p)
-{
-	free(*(void **)p);
-}
+#define define_cleanup_function(type, cleaner)           \
+	static inline void cleaner##_function(type *ptr) \
+	{                                                \
+		if (*ptr)                                \
+			cleaner(*ptr);                   \
+	}
 
-static inline void __auto_fclose__(FILE **f)
-{
-	if (*f)
-		fclose(*f);
-}
-
-static inline void __auto_closedir__(DIR **d)
-{
-	if (*d)
-		closedir(*d);
-}
+#define call_cleaner(cleaner) __attribute__((__cleanup__(cleaner##_function)))
 
 #define close_prot_errno_disarm(fd) \
 	if (fd >= 0) {              \
@@ -49,12 +31,24 @@ static inline void __auto_closedir__(DIR **d)
 	}
 
 #define close_prot_errno_replace(fd, new_fd) \
-	if (fd >= 0) {                       \
-		int _e_ = errno;             \
-		close(fd);                   \
-		errno = _e_;                 \
-		fd = new_fd;                 \
-	}
+       if (fd >= 0) {                       \
+               int _e_ = errno;             \
+               close(fd);                   \
+               errno = _e_;                 \
+               fd = new_fd;                 \
+       }
+
+static inline void close_prot_errno_disarm_function(int *fd)
+{
+       close_prot_errno_disarm(*fd);
+}
+#define __do_close call_cleaner(close_prot_errno_disarm)
+
+define_cleanup_function(FILE *, fclose);
+#define __do_fclose call_cleaner(fclose)
+
+define_cleanup_function(DIR *, closedir);
+#define __do_closedir call_cleaner(closedir)
 
 #define free_disarm(ptr)       \
 	({                     \
@@ -62,29 +56,30 @@ static inline void __auto_closedir__(DIR **d)
 		move_ptr(ptr); \
 	})
 
-static inline void __auto_close__(int *fd)
+static inline void free_disarm_function(void *ptr)
 {
-	close_prot_errno_disarm(*fd);
+	free_disarm(*(void **)ptr);
 }
+#define __do_free call_cleaner(free_disarm)
 
-#define __do_close_prot_errno __attribute__((__cleanup__(__auto_close__)))
-#define __do_free __attribute__((__cleanup__(__auto_free__)))
-#define __do_fclose __attribute__((__cleanup__(__auto_fclose__)))
-#define __do_closedir __attribute__((__cleanup__(__auto_closedir__)))
+static inline void free_string_list(char **list)
+{
+	if (list) {
+		for (int i = 0; list[i]; i++)
+			free(list[i]);
+		free_disarm(list);
+	}
+}
+define_cleanup_function(char **, free_string_list);
+#define __do_free_string_list call_cleaner(free_string_list)
 
-#define move_ptr(ptr)                                 \
-	({                                            \
-		typeof(ptr) __internal_ptr__ = (ptr); \
-		(ptr) = NULL;                         \
-		__internal_ptr__;                     \
-	})
+static inline void *memdup(const void *data, size_t len)
+{
+	void *copy = NULL;
 
-#define move_fd(fd)                         \
-	({                                  \
-		int __internal_fd__ = (fd); \
-		(fd) = -EBADF;              \
-		__internal_fd__;            \
-	})
+	copy = len ? malloc(len) : NULL;
+	return copy ? memcpy(copy, data, len) : NULL;
+}
 
 #define zalloc(__size__) (calloc(1, __size__))
 
