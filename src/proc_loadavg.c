@@ -284,7 +284,7 @@ static int calc_pid(char ***pid_buf, char *dpath, int depth, int sum, int cfd)
 {
 	__do_free char *path = NULL;
 	__do_free void *fdopen_cache = NULL;
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_closedir DIR *dir = NULL;
 	struct dirent *file;

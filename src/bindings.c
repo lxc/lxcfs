@@ -259,7 +259,7 @@ static void prune_initpid_store(void)
 static void save_initpid(struct stat *sb, pid_t pid)
 {
 	__do_free struct pidns_init_store *entry = NULL;
-	__do_close_prot_errno int pidfd = -EBADF;
+	__do_close int pidfd = -EBADF;
 	char path[LXCFS_PROC_PID_LEN];
 	struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	struct stat st;
@@ -371,7 +371,7 @@ static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
  */
 static void write_task_init_pid_exit(int sock, pid_t target)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	pid_t pid;
 
@@ -529,7 +529,7 @@ static bool is_on_ramfs(void)
 
 static int pivot_enter()
 {
-	__do_close_prot_errno int oldroot = -EBADF, newroot = -EBADF;
+	__do_close int oldroot = -EBADF, newroot = -EBADF;
 
 	oldroot = open("/", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (oldroot < 0)
@@ -756,7 +756,7 @@ please_compiler:
 
 static void __attribute__((constructor)) lxcfs_init(void)
 {
-	__do_close_prot_errno int init_ns = -EBADF, root_fd = -EBADF,
+	__do_close int init_ns = -EBADF, root_fd = -EBADF,
 				  pidfd = -EBADF;
 	int i = 0;
 	pid_t pid;

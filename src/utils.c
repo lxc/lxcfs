@@ -87,7 +87,7 @@ char *must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...)
  */
 static int in_same_namespace(pid_t pid1, pid_t pid2, const char *ns)
 {
-	__do_close_prot_errno int ns_fd1 = -1, ns_fd2 = -1;
+	__do_close int ns_fd1 = -1, ns_fd2 = -1;
 	int ret = -1;
 	struct stat ns_st1, ns_st2;
 
@@ -176,7 +176,7 @@ void do_release_file_info(struct fuse_file_info *fi)
 
 bool wait_for_sock(int sock, int timeout)
 {
-	__do_close_prot_errno int epfd = -EBADF;
+	__do_close int epfd = -EBADF;
 	struct epoll_event ev;
 	int ret, now, starttime, deltatime;
 
@@ -463,7 +463,7 @@ static char *fd_to_buf(int fd, size_t *length)
 
 static char *file_to_buf(const char *path, size_t *length)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 
 	if (!length)
 		return NULL;

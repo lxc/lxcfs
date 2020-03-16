@@ -1025,7 +1025,7 @@ static bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
 
 static int set_pidfile(char *pidfile)
 {
-	__do_close_prot_errno int fd = -EBADF;
+	__do_close int fd = -EBADF;
 	char buf[INTTYPE_TO_STRLEN(long)];
 	int ret;
 	struct flock fl = {
@@ -1060,7 +1060,7 @@ static int set_pidfile(char *pidfile)
 
 int main(int argc, char *argv[])
 {
-	__do_close_prot_errno int pidfile_fd = -EBADF;
+	int pidfile_fd = -EBADF;
 	int ret = EXIT_FAILURE;
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
@@ -1198,5 +1198,6 @@ out:
 		dlclose(dlopen_handle);
 	if (pidfile)
 		unlink(pidfile);
+	close_prot_errno_disarm(pidfile_fd);
 	exit(ret);
 }
