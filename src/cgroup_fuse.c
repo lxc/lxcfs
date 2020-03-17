@@ -304,11 +304,10 @@ out:
 static struct cgfs_files *cgfs_get_key(const char *controller,
 				       const char *cgroup, const char *file)
 {
-	int ret, cfd;
-	size_t len;
-	char *fnam;
-	struct stat sb;
+	__do_free char *path = NULL;
 	struct cgfs_files *newkey;
+	int cfd, ret;
+	struct stat sb;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
@@ -320,23 +319,16 @@ static struct cgfs_files *cgfs_get_key(const char *controller,
 	if (file && strchr(file, '/'))
 		return NULL;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + 3;
 	if (file)
-		len += strlen(file) + 1;
-	fnam = alloca(len);
-	snprintf(fnam, len, "%s%s%s%s", dot_or_empty(cgroup), cgroup,
-		 file ? "/" : "", file ? file : "");
-
-	ret = fstatat(cfd, fnam, &sb, 0);
+		path = must_make_path_relative(cgroup, file, NULL);
+	else
+		path = must_make_path_relative(cgroup, NULL);
+	ret = fstatat(cfd, path, &sb, 0);
 	if (ret < 0)
 		return NULL;
 
-	do {
-		newkey = malloc(sizeof(struct cgfs_files));
-	} while (!newkey);
+	newkey = must_realloc(NULL, sizeof(struct cgfs_files));
+
 	if (file)
 		newkey->name = must_copy_string(file);
 	else if (strrchr(cgroup, '/'))
@@ -471,10 +463,10 @@ static bool perms_include(int fmode, mode_t req_mode)
 
 static void free_key(struct cgfs_files *k)
 {
-	if (!k)
-		return;
-	free_disarm(k->name);
-	free_disarm(k);
+	if (k) {
+		free_disarm(k->name);
+		free_disarm(k);
+	}
 }
 
 /*
