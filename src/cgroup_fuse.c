@@ -1487,26 +1487,27 @@ __lxcfs_fuse_ops int cg_releasedir(const char *path, struct fuse_file_info *fi)
 
 static FILE *open_pids_file(const char *controller, const char *cgroup)
 {
-	int fd, cfd;
-	size_t len;
-	char *pathname;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
+	FILE *f;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / "cgroup.procs" + \0
-	 */
-	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s/cgroup.procs", dot_or_empty(cgroup), cgroup);
-
-	fd = openat(cfd, pathname, O_WRONLY);
+	path = must_make_path_relative(cgroup, "cgroup.procs", NULL);
+	fd = openat(cfd, path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0)
 		return NULL;
 
-	return fdopen(fd, "w");
+	f = fdopen(fd, "we");
+	if (!f)
+		return NULL;
+	/* Transfer ownership of fd to fdopen(). */
+	move_fd(fd);
+
+	return f;
 }
 
 static int pid_from_ns(int sock, pid_t tpid)
