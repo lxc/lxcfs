@@ -162,28 +162,19 @@ static void get_cgdir_and_path(const char *cg, char **dir, char **last)
 	*p = '\0';
 }
 
-static bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
+static bool is_child_cgroup(const char *controller, const char *cgroup,
+			    const char *file)
 {
-	int cfd;
-	size_t len;
-	char *fnam;
-	int ret;
+	__do_free char *path = NULL;
+	int cfd, ret;
 	struct stat sb;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + f + \0
-	 */
-	len = strlen(cgroup) + strlen(f) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, f);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
-
-	ret = fstatat(cfd, fnam, &sb, 0);
+	path = must_make_path_relative(cgroup, file, NULL);
+	ret = fstatat(cfd, path, &sb, 0);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
 		return false;
 
