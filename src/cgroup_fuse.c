@@ -886,22 +886,17 @@ out:
 
 static bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *pathname;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /file + \0
-	 */
-	len = strlen(file) + 2;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
-	if (fchmodat(cfd, pathname, mode, 0) < 0)
+	path = must_make_path_relative(file, NULL);
+	if (fchmodat(cfd, path, mode, 0) < 0)
 		return false;
+
 	return true;
 }
 
