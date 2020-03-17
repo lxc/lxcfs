@@ -664,31 +664,24 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid, in
 
 static int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *dirnam;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return -EINVAL;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cg + \0
-	 */
-	len = strlen(cg) + 2;
-	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
-
-	if (mkdirat(cfd, dirnam, 0755) < 0)
+	path = must_make_path_relative(cg, NULL);
+	if (mkdirat(cfd, path, 0755) < 0)
 		return -errno;
 
 	if (uid == 0 && gid == 0)
 		return 0;
 
-	if (fchownat(cfd, dirnam, uid, gid, 0) < 0)
+	if (fchownat(cfd, path, uid, gid, 0) < 0)
 		return -errno;
 
-	chown_all_cgroup_files(dirnam, uid, gid, cfd);
+	chown_all_cgroup_files(path, uid, gid, cfd);
 
 	return 0;
 }
