@@ -95,18 +95,6 @@ static inline int openat_safe(int fd, const char *path)
 	return openat(fd, path, O_DIRECTORY | O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
-static inline const char *dot_or_empty(const char *s)
-{
-	static const char *dot = ".";
-	static const char *empty = "";
-	return (*s == '/') ? dot : empty;
-}
-
-static inline bool is_relative(const char *s)
-{
-	return s && *s != '/';
-}
-
 #define must_make_path_relative(__first__, ...)                                \
 	({                                                                     \
 		char *__ptr__;                                                 \

@@ -162,28 +162,19 @@ static void get_cgdir_and_path(const char *cg, char **dir, char **last)
 	*p = '\0';
 }
 
-static bool is_child_cgroup(const char *controller, const char *cgroup, const char *f)
+static bool is_child_cgroup(const char *controller, const char *cgroup,
+			    const char *file)
 {
-	int cfd;
-	size_t len;
-	char *fnam;
-	int ret;
+	__do_free char *path = NULL;
+	int cfd, ret;
 	struct stat sb;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + f + \0
-	 */
-	len = strlen(cgroup) + strlen(f) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, f);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
-
-	ret = fstatat(cfd, fnam, &sb, 0);
+	path = must_make_path_relative(cgroup, file, NULL);
+	ret = fstatat(cfd, path, &sb, 0);
 	if (ret < 0 || !S_ISDIR(sb.st_mode))
 		return false;
 
@@ -313,11 +304,10 @@ out:
 static struct cgfs_files *cgfs_get_key(const char *controller,
 				       const char *cgroup, const char *file)
 {
-	int ret, cfd;
-	size_t len;
-	char *fnam;
-	struct stat sb;
+	__do_free char *path = NULL;
 	struct cgfs_files *newkey;
+	int cfd, ret;
+	struct stat sb;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
@@ -329,23 +319,16 @@ static struct cgfs_files *cgfs_get_key(const char *controller,
 	if (file && strchr(file, '/'))
 		return NULL;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + 3;
 	if (file)
-		len += strlen(file) + 1;
-	fnam = alloca(len);
-	snprintf(fnam, len, "%s%s%s%s", dot_or_empty(cgroup), cgroup,
-		 file ? "/" : "", file ? file : "");
-
-	ret = fstatat(cfd, fnam, &sb, 0);
+		path = must_make_path_relative(cgroup, file, NULL);
+	else
+		path = must_make_path_relative(cgroup, NULL);
+	ret = fstatat(cfd, path, &sb, 0);
 	if (ret < 0)
 		return NULL;
 
-	do {
-		newkey = malloc(sizeof(struct cgfs_files));
-	} while (!newkey);
+	newkey = must_realloc(NULL, sizeof(struct cgfs_files));
+
 	if (file)
 		newkey->name = must_copy_string(file);
 	else if (strrchr(cgroup, '/'))
@@ -480,10 +463,10 @@ static bool perms_include(int fmode, mode_t req_mode)
 
 static void free_key(struct cgfs_files *k)
 {
-	if (!k)
-		return;
-	free_disarm(k->name);
-	free_disarm(k);
+	if (k) {
+		free_disarm(k->name);
+		free_disarm(k);
+	}
 }
 
 /*
@@ -681,31 +664,24 @@ static void chown_all_cgroup_files(const char *dirname, uid_t uid, gid_t gid, in
 
 static int cgfs_create(const char *controller, const char *cg, uid_t uid, gid_t gid)
 {
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *dirnam;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return -EINVAL;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cg + \0
-	 */
-	len = strlen(cg) + 2;
-	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
-
-	if (mkdirat(cfd, dirnam, 0755) < 0)
+	path = must_make_path_relative(cg, NULL);
+	if (mkdirat(cfd, path, 0755) < 0)
 		return -errno;
 
 	if (uid == 0 && gid == 0)
 		return 0;
 
-	if (fchownat(cfd, dirnam, uid, gid, 0) < 0)
+	if (fchownat(cfd, path, uid, gid, 0) < 0)
 		return -errno;
 
-	chown_all_cgroup_files(dirnam, uid, gid, cfd);
+	chown_all_cgroup_files(path, uid, gid, cfd);
 
 	return 0;
 }
@@ -826,31 +802,22 @@ static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 	return ret;
 }
 
-static bool cgfs_remove(const char *controller, const char *cg)
+static bool cgfs_remove(const char *controller, const char *cgroup)
 {
-	int fd, cfd;
-	size_t len;
-	char *dirnam;
-	bool bret;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . +  /cg + \0
-	 */
-	len = strlen(cg) + 2;
-	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
-
-	fd = openat(cfd, dirnam, O_DIRECTORY);
+	path = must_make_path_relative(cgroup, NULL);
+	fd = openat(cfd, path, O_DIRECTORY);
 	if (fd < 0)
 		return false;
 
-	bret = recursive_rmdir(dirnam, fd, cfd);
-	close(fd);
-	return bret;
+	return recursive_rmdir(path, fd, cfd);
 }
 
 __lxcfs_fuse_ops int cg_rmdir(const char *path)
@@ -919,22 +886,17 @@ out:
 
 static bool cgfs_chmod_file(const char *controller, const char *file, mode_t mode)
 {
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *pathname;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /file + \0
-	 */
-	len = strlen(file) + 2;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
-	if (fchmodat(cfd, pathname, mode, 0) < 0)
+	path = must_make_path_relative(file, NULL);
+	if (fchmodat(cfd, path, mode, 0) < 0)
 		return false;
+
 	return true;
 }
 
@@ -1010,53 +972,43 @@ out:
 	return ret;
 }
 
-static int is_dir(const char *path, int fd)
+static inline bool is_dir(int dirfd, const char *path)
 {
-	struct stat statbuf;
-	int ret = fstatat(fd, path, &statbuf, fd);
-	if (ret == 0 && S_ISDIR(statbuf.st_mode))
-		return 1;
+	struct stat st;
+	return fstatat(dirfd, path, &st, 0) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int chown_tasks_files(int dirfd, const char *dirname, uid_t uid, gid_t gid)
+{
+	__do_free char *path;
+
+	path = must_make_path_relative(dirname, "tasks", NULL);
+	if (fchownat(dirfd, path, uid, gid, 0) != 0)
+		return -errno;
+
+	free_disarm(path);
+	path = must_make_path_relative(dirname, "cgroup.procs", NULL);
+	if (fchownat(dirfd, path, uid, gid, 0) != 0)
+		return -errno;
+
 	return 0;
 }
 
-static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid, int fd)
+static int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
-	size_t len;
-	char *fname;
-
-	len = strlen(dirname) + strlen("/cgroup.procs") + 1;
-	fname = alloca(len);
-	snprintf(fname, len, "%s/tasks", dirname);
-	if (fchownat(fd, fname, uid, gid, 0) != 0)
-		return -errno;
-	snprintf(fname, len, "%s/cgroup.procs", dirname);
-	if (fchownat(fd, fname, uid, gid, 0) != 0)
-		return -errno;
-	return 0;
-}
-
-static int cgfs_chown_file(const char *controller, const char *file, uid_t uid,
-			   gid_t gid)
-{
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *pathname;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /file + \0
-	 */
-	len = strlen(file) + 2;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
-	if (fchownat(cfd, pathname, uid, gid, 0) < 0)
+	path = must_make_path_relative(file, NULL);
+	if (fchownat(cfd, path, uid, gid, 0) < 0)
 		return -errno;
 
-	if (is_dir(pathname, cfd))
-		return chown_tasks_files(pathname, uid, gid, cfd);
+	if (is_dir(cfd, path))
+		return chown_tasks_files(cfd, path, uid, gid);
 
 	return 0;
 }
@@ -1535,26 +1487,27 @@ __lxcfs_fuse_ops int cg_releasedir(const char *path, struct fuse_file_info *fi)
 
 static FILE *open_pids_file(const char *controller, const char *cgroup)
 {
-	int fd, cfd;
-	size_t len;
-	char *pathname;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
+	FILE *f;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / "cgroup.procs" + \0
-	 */
-	len = strlen(cgroup) + strlen("cgroup.procs") + 3;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s/cgroup.procs", dot_or_empty(cgroup), cgroup);
-
-	fd = openat(cfd, pathname, O_WRONLY);
+	path = must_make_path_relative(cgroup, "cgroup.procs", NULL);
+	fd = openat(cfd, path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0)
 		return NULL;
 
-	return fdopen(fd, "w");
+	f = fdopen(fd, "we");
+	if (!f)
+		return NULL;
+	/* Transfer ownership of fd to fdopen(). */
+	move_fd(fd);
+
+	return f;
 }
 
 static int pid_from_ns(int sock, pid_t tpid)
@@ -1801,57 +1754,26 @@ out:
 	return answer;
 }
 
-static bool write_string(const char *fnam, const char *string, int fd)
-{
-	FILE *f;
-	size_t len, ret;
-
-	f = fdopen(fd, "w");
-	if (!f)
-		return false;
-
-	len = strlen(string);
-	ret = fwrite(string, 1, len, f);
-	if (ret != len) {
-		lxcfs_error("%s - Error writing \"%s\" to \"%s\"\n",
-			    strerror(errno), string, fnam);
-		fclose(f);
-		return false;
-	}
-
-	if (fclose(f) < 0) {
-		lxcfs_error("%s - Failed to close \"%s\"\n", strerror(errno), fnam);
-		return false;
-	}
-
-	return true;
-}
-
 static bool cgfs_set_value(const char *controller, const char *cgroup,
 			   const char *file, const char *value)
 {
-	int ret, fd, cfd;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
 	size_t len;
-	char *fnam;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + strlen(file) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
+	path = must_make_path_relative(cgroup, file, NULL);
 
-	fd = openat(cfd, fnam, O_WRONLY);
+	fd = openat(cfd, path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
-	return write_string(fnam, value, fd);
+	len = strlen(value);
+	return write_nointr(fd, value, len) == len;
 }
 
 __lxcfs_fuse_ops int cg_write(const char *path, const char *buf, size_t size,
@@ -1912,46 +1834,43 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 				bool directories, void ***list, size_t typesize,
 				void *(*iterator)(const char *, const char *, const char *))
 {
-	int cfd, fd, ret;
-	size_t len;
-	char *cg;
-	char pathname[MAXPATHLEN];
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	__do_closedir DIR *dir = NULL;
 	size_t sz = 0, asz = 0;
+	int cfd;
 	struct dirent *dirent;
-	DIR *dir;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	*list = NULL;
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions. */
-	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
-	cg = alloca(len);
-	ret = snprintf(cg, len, "%s%s", dot_or_empty(cgroup), cgroup);
-	if (ret < 0 || (size_t)ret >= len) {
-		lxcfs_error("Pathname too long under %s\n", cgroup);
-		return false;
-	}
-
-	fd = openat(cfd, cg, O_DIRECTORY);
+	path = must_make_path_relative(cgroup, NULL);
+	fd = openat(cfd, path, O_DIRECTORY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
 	dir = fdopendir(fd);
 	if (!dir)
 		return false;
+	/* Transfer ownership of fd to fdopendir(). */
+	move_fd(fd);
 
 	while ((dirent = readdir(dir))) {
+		int ret;
+		char pathname[MAXPATHLEN];
 		struct stat mystat;
 
-		if (!strcmp(dirent->d_name, ".") ||
-		    !strcmp(dirent->d_name, ".."))
+		if (strcmp(dirent->d_name, ".") == 0)
 			continue;
 
-		ret = snprintf(pathname, MAXPATHLEN, "%s/%s", cg, dirent->d_name);
-		if (ret < 0 || ret >= MAXPATHLEN) {
-			lxcfs_error("Pathname too long under %s\n", cg);
+		if (strcmp(dirent->d_name, "..") == 0)
+			continue;
+
+		ret = snprintf(pathname, sizeof(pathname), "%s/%s", path, dirent->d_name);
+		if (ret < 0 || ret >= sizeof(pathname)) {
+			lxcfs_error("Pathname too long under %s\n", path);
 			continue;
 		}
 
@@ -1960,26 +1879,20 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 			lxcfs_error("Failed to stat %s: %s\n", pathname, strerror(errno));
 			continue;
 		}
-		if ((!directories && !S_ISREG(mystat.st_mode)) ||
-		    (directories && !S_ISDIR(mystat.st_mode)))
+
+		if (!directories && !S_ISREG(mystat.st_mode))
 			continue;
 
-		if (sz+2 >= asz) {
-			void **tmp;
-			asz += BATCH_SIZE;
-			do {
-				tmp = realloc(*list, asz * typesize);
-			} while  (!tmp);
-			*list = tmp;
-		}
-		(*list)[sz] = (*iterator)(controller, cg, dirent->d_name);
-		(*list)[sz+1] = NULL;
+		if (directories && !S_ISDIR(mystat.st_mode))
+			continue;
+
+		if (sz + 2 >= asz)
+			*list = must_realloc(*list, asz * typesize);
+		(*list)[sz] = (*iterator)(controller, path, dirent->d_name);
+		(*list)[sz + 1] = NULL;
 		sz++;
 	}
-	if (closedir(dir) < 0) {
-		lxcfs_error("Failed closedir for %s: %s\n", cgroup, strerror(errno));
-		return false;
-	}
+
 	return true;
 }
 

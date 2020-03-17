@@ -74,5 +74,6 @@ static inline int pidfd_send_signal(int pidfd, int sig, siginfo_t *info,
 extern FILE *fopen_cached(const char *path, const char *mode,
 			  void **caller_freed_buffer);
 extern FILE *fdopen_cached(int fd, const char *mode, void **caller_freed_buffer);
+extern ssize_t write_nointr(int fd, const void *buf, size_t count);
 
 #endif /* __LXCFS_UTILS_H */

@@ -499,9 +499,8 @@ static struct load_node *del_node(struct load_node *n, int locate)
 static void *load_begin(void *arg)
 {
 
-	int sum, length, ret;
+	int first_node, sum;
 	struct load_node *f;
-	int first_node;
 	clock_t time1, time2;
 
 	for (;;) {
@@ -521,22 +520,14 @@ static void *load_begin(void *arg)
 			while (f) {
 				__do_free char *path = NULL;
 
-				length = strlen(f->cg) + 2;
-					/* strlen(f->cg) + '.' or '' + \0 */
-				path = malloc(length);
-				if  (!path)
-					goto out;
-
-				ret = snprintf(path, length, "%s%s", !is_relative(f->cg) ? "." : "", f->cg);
-				/* Ignore the node if snprintf fails.*/
-				if (ret < 0 || ret > length - 1)
-					log_error(goto out, "Refresh node %s failed for snprintf()", f->cg);
+				path = must_make_path_relative(f->cg, NULL);
 
 				sum = refresh_load(f, path);
 				if (sum == 0)
 					f = del_node(f, i);
 				else
-out:					f = f->next;
+					f = f->next;
+
 				/* load_hash[i].lock locks only on the first node.*/
 				if (first_node == 1) {
 					first_node = 0;
@@ -549,7 +540,8 @@ out:					f = f->next;
 			return NULL;
 
 		time2 = clock();
-		usleep(FLUSH_TIME * 1000000 - (int)((time2 - time1) * 1000000 / CLOCKS_PER_SEC));
+		usleep(FLUSH_TIME * 1000000 -
+		       (int)((time2 - time1) * 1000000 / CLOCKS_PER_SEC));
 	}
 }
 
