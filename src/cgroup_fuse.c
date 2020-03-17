@@ -1754,57 +1754,26 @@ out:
 	return answer;
 }
 
-static bool write_string(const char *fnam, const char *string, int fd)
-{
-	FILE *f;
-	size_t len, ret;
-
-	f = fdopen(fd, "w");
-	if (!f)
-		return false;
-
-	len = strlen(string);
-	ret = fwrite(string, 1, len, f);
-	if (ret != len) {
-		lxcfs_error("%s - Error writing \"%s\" to \"%s\"\n",
-			    strerror(errno), string, fnam);
-		fclose(f);
-		return false;
-	}
-
-	if (fclose(f) < 0) {
-		lxcfs_error("%s - Failed to close \"%s\"\n", strerror(errno), fnam);
-		return false;
-	}
-
-	return true;
-}
-
 static bool cgfs_set_value(const char *controller, const char *cgroup,
 			   const char *file, const char *value)
 {
-	int ret, fd, cfd;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
 	size_t len;
-	char *fnam;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /cgroup + / + file + \0
-	 */
-	len = strlen(cgroup) + strlen(file) + 3;
-	fnam = alloca(len);
-	ret = snprintf(fnam, len, "%s%s/%s", dot_or_empty(cgroup), cgroup, file);
-	if (ret < 0 || (size_t)ret >= len)
-		return false;
+	path = must_make_path_relative(cgroup, file, NULL);
 
-	fd = openat(cfd, fnam, O_WRONLY);
+	fd = openat(cfd, path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
-	return write_string(fnam, value, fd);
+	len = strlen(value);
+	return write_nointr(fd, value, len) == len;
 }
 
 __lxcfs_fuse_ops int cg_write(const char *path, const char *buf, size_t size,
