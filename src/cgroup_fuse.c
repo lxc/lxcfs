@@ -802,31 +802,22 @@ static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 	return ret;
 }
 
-static bool cgfs_remove(const char *controller, const char *cg)
+static bool cgfs_remove(const char *controller, const char *cgroup)
 {
-	int fd, cfd;
-	size_t len;
-	char *dirnam;
-	bool bret;
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	int cfd;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . +  /cg + \0
-	 */
-	len = strlen(cg) + 2;
-	dirnam = alloca(len);
-	snprintf(dirnam, len, "%s%s", dot_or_empty(cg), cg);
-
-	fd = openat(cfd, dirnam, O_DIRECTORY);
+	path = must_make_path_relative(cgroup, NULL);
+	fd = openat(cfd, path, O_DIRECTORY);
 	if (fd < 0)
 		return false;
 
-	bret = recursive_rmdir(dirnam, fd, cfd);
-	close(fd);
-	return bret;
+	return recursive_rmdir(path, fd, cfd);
 }
 
 __lxcfs_fuse_ops int cg_rmdir(const char *path)
