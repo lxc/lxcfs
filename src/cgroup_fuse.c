@@ -972,53 +972,43 @@ out:
 	return ret;
 }
 
-static int is_dir(const char *path, int fd)
+static inline bool is_dir(int dirfd, const char *path)
 {
-	struct stat statbuf;
-	int ret = fstatat(fd, path, &statbuf, fd);
-	if (ret == 0 && S_ISDIR(statbuf.st_mode))
-		return 1;
+	struct stat st;
+	return fstatat(dirfd, path, &st, 0) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int chown_tasks_files(int dirfd, const char *dirname, uid_t uid, gid_t gid)
+{
+	__do_free char *path;
+
+	path = must_make_path_relative(dirname, "tasks", NULL);
+	if (fchownat(dirfd, path, uid, gid, 0) != 0)
+		return -errno;
+
+	free_disarm(path);
+	path = must_make_path_relative(dirname, "cgroup.procs", NULL);
+	if (fchownat(dirfd, path, uid, gid, 0) != 0)
+		return -errno;
+
 	return 0;
 }
 
-static int chown_tasks_files(const char *dirname, uid_t uid, gid_t gid, int fd)
+static int cgfs_chown_file(const char *controller, const char *file, uid_t uid, gid_t gid)
 {
-	size_t len;
-	char *fname;
-
-	len = strlen(dirname) + strlen("/cgroup.procs") + 1;
-	fname = alloca(len);
-	snprintf(fname, len, "%s/tasks", dirname);
-	if (fchownat(fd, fname, uid, gid, 0) != 0)
-		return -errno;
-	snprintf(fname, len, "%s/cgroup.procs", dirname);
-	if (fchownat(fd, fname, uid, gid, 0) != 0)
-		return -errno;
-	return 0;
-}
-
-static int cgfs_chown_file(const char *controller, const char *file, uid_t uid,
-			   gid_t gid)
-{
+	__do_free char *path = NULL;
 	int cfd;
-	size_t len;
-	char *pathname;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions.
-	 * . + /file + \0
-	 */
-	len = strlen(file) + 2;
-	pathname = alloca(len);
-	snprintf(pathname, len, "%s%s", dot_or_empty(file), file);
-	if (fchownat(cfd, pathname, uid, gid, 0) < 0)
+	path = must_make_path_relative(file, NULL);
+	if (fchownat(cfd, path, uid, gid, 0) < 0)
 		return -errno;
 
-	if (is_dir(pathname, cfd))
-		return chown_tasks_files(pathname, uid, gid, cfd);
+	if (is_dir(cfd, path))
+		return chown_tasks_files(cfd, path, uid, gid);
 
 	return 0;
 }
