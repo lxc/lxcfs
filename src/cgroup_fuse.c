@@ -1834,46 +1834,43 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 				bool directories, void ***list, size_t typesize,
 				void *(*iterator)(const char *, const char *, const char *))
 {
-	int cfd, fd, ret;
-	size_t len;
-	char *cg;
-	char pathname[MAXPATHLEN];
+	__do_close int fd = -EBADF;
+	__do_free char *path = NULL;
+	__do_closedir DIR *dir = NULL;
 	size_t sz = 0, asz = 0;
+	int cfd;
 	struct dirent *dirent;
-	DIR *dir;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	*list = NULL;
 	if (cfd < 0)
 		return false;
 
-	/* Make sure we pass a relative path to *at() family of functions. */
-	len = strlen(cgroup) + 1 /* . */ + 1 /* \0 */;
-	cg = alloca(len);
-	ret = snprintf(cg, len, "%s%s", dot_or_empty(cgroup), cgroup);
-	if (ret < 0 || (size_t)ret >= len) {
-		lxcfs_error("Pathname too long under %s\n", cgroup);
-		return false;
-	}
-
-	fd = openat(cfd, cg, O_DIRECTORY);
+	path = must_make_path_relative(cgroup, NULL);
+	fd = openat(cfd, path, O_DIRECTORY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
 	dir = fdopendir(fd);
 	if (!dir)
 		return false;
+	/* Transfer ownership of fd to fdopendir(). */
+	move_fd(fd);
 
 	while ((dirent = readdir(dir))) {
+		int ret;
+		char pathname[MAXPATHLEN];
 		struct stat mystat;
 
-		if (!strcmp(dirent->d_name, ".") ||
-		    !strcmp(dirent->d_name, ".."))
+		if (strcmp(dirent->d_name, ".") == 0)
 			continue;
 
-		ret = snprintf(pathname, MAXPATHLEN, "%s/%s", cg, dirent->d_name);
-		if (ret < 0 || ret >= MAXPATHLEN) {
-			lxcfs_error("Pathname too long under %s\n", cg);
+		if (strcmp(dirent->d_name, "..") == 0)
+			continue;
+
+		ret = snprintf(pathname, sizeof(pathname), "%s/%s", path, dirent->d_name);
+		if (ret < 0 || ret >= sizeof(pathname)) {
+			lxcfs_error("Pathname too long under %s\n", path);
 			continue;
 		}
 
@@ -1882,26 +1879,20 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 			lxcfs_error("Failed to stat %s: %s\n", pathname, strerror(errno));
 			continue;
 		}
-		if ((!directories && !S_ISREG(mystat.st_mode)) ||
-		    (directories && !S_ISDIR(mystat.st_mode)))
+
+		if (!directories && !S_ISREG(mystat.st_mode))
 			continue;
 
-		if (sz+2 >= asz) {
-			void **tmp;
-			asz += BATCH_SIZE;
-			do {
-				tmp = realloc(*list, asz * typesize);
-			} while  (!tmp);
-			*list = tmp;
-		}
-		(*list)[sz] = (*iterator)(controller, cg, dirent->d_name);
-		(*list)[sz+1] = NULL;
+		if (directories && !S_ISDIR(mystat.st_mode))
+			continue;
+
+		if (sz + 2 >= asz)
+			*list = must_realloc(*list, asz * typesize);
+		(*list)[sz] = (*iterator)(controller, path, dirent->d_name);
+		(*list)[sz + 1] = NULL;
 		sz++;
 	}
-	if (closedir(dir) < 0) {
-		lxcfs_error("Failed closedir for %s: %s\n", cgroup, strerror(errno));
-		return false;
-	}
+
 	return true;
 }
 
