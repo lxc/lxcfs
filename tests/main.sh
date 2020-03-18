@@ -79,6 +79,8 @@ RUNTEST() {
 	fi
 }
 
+TESTCASE="Stress readdir"
+RUNTEST ${dirname}/test_readdir
 TESTCASE="test_proc"
 RUNTEST ${dirname}/test_proc
 TESTCASE="test_cgroup"

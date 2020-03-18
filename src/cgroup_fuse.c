@@ -1886,8 +1886,10 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 		if (directories && !S_ISDIR(mystat.st_mode))
 			continue;
 
-		if (sz + 2 >= asz)
+		if (sz + 2 >= asz) {
+			asz += BATCH_SIZE;
 			*list = must_realloc(*list, asz * typesize);
+		}
 		(*list)[sz] = (*iterator)(controller, path, dirent->d_name);
 		(*list)[sz + 1] = NULL;
 		sz++;
