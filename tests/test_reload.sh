@@ -70,7 +70,7 @@ cat ${testdir}/proc/uptime
   make -s liblxcfstest.la
   gcc -shared -fPIC -DPIC -Wl,-soname,liblxcfs.so .libs/liblxcfstest_la-*.o cgroups/.libs/liblxcfstest_la-*.o -lpthread -pthread -o .libs/liblxcfstest.so
   cp .libs/liblxcfstest.* "${libdir}"
-)
+) > /dev/null
 rm -f ${libdir}/liblxcfs.so* ${libdir}/liblxcfs.la
 cp ${libdir}/liblxcfstest.so ${libdir}/liblxcfs.so
 
