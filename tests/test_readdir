@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+PASS=0
+UUID=$(uuidgen)
+
+cleanup() {
+    [ "$PASS" = "1" ] || (echo FAIL && exit 1)
+}
+
+LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
+
+trap cleanup EXIT HUP INT TERM
+
+if ! mountpoint -q ${LXCFSDIR}; then
+    echo "lxcfs isn't mounted on ${LXCFSDIR}"
+    exit 1
+fi
+
+echo "==> Checking for cpuset cgroups"
+[ ! -d /sys/fs/cgroup/cpuset ] && exit 0
+
+TESTCASE="Stress readdir"
+for i in `seq 1 1000`;do ls -al "${LXCFSDIR}/cgroup/cpuset" >/dev/null; done
+
+PASS=1
