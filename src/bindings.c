@@ -46,6 +46,7 @@
 #include "config.h"
 #include "memory_utils.h"
 #include "proc_cpuview.h"
+#include "syscall_numbers.h"
 #include "utils.h"
 
 static bool can_use_pidfd;
@@ -61,12 +62,7 @@ bool liblxcfs_functional(void)
 #ifndef HAVE_PIVOT_ROOT
 static int pivot_root(const char *new_root, const char *put_old)
 {
-#ifdef __NR_pivot_root
 	return syscall(__NR_pivot_root, new_root, put_old);
-#else
-	errno = ENOSYS;
-	return -1;
-#endif
 }
 #else
 extern int pivot_root(const char *new_root, const char *put_old);

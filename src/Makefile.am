@@ -20,6 +20,7 @@ liblxcfs_la_SOURCES = api_extensions.h \
 		      proc_cpuview.c proc_cpuview.h \
 		      proc_fuse.c proc_fuse.h \
 		      proc_loadavg.c proc_loadavg.h \
+		      syscall_numbers.h \
 		      sysfs_fuse.c sysfs_fuse.h \
 		      utils.c utils.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
@@ -48,6 +49,7 @@ liblxcfstest_la_SOURCES = api_extensions.h \
 			  proc_cpuview.c proc_cpuview.h \
 			  proc_fuse.c proc_fuse.h \
 			  proc_loadavg.c proc_loadavg.h \
+			  syscall_numbers.h \
 			  sysfs_fuse.c sysfs_fuse.h \
 			  utils.c utils.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
@@ -75,6 +77,7 @@ noinst_HEADERS = api_extensions.h \
 		 proc_cpuview.h \
 		 proc_fuse.h \
 		 proc_loadavg.h \
+		 syscall_numbers.h \
 		 sysfs_fuse.h \
 		 utils.h
 
