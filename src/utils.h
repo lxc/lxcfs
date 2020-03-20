@@ -24,6 +24,7 @@
 
 #include "config.h"
 #include "macro.h"
+#include "syscall_numbers.h"
 
 /* Reserve buffer size to account for file size changes. */
 #define BUF_RESERVE_SIZE 512
@@ -51,11 +52,7 @@ extern int wait_for_pid(pid_t pid);
 #ifndef HAVE_PIDFD_OPEN
 static inline int pidfd_open(pid_t pid, unsigned int flags)
 {
-#ifdef __NR_pidfd_open
 	return syscall(__NR_pidfd_open, pid, flags);
-#else
-	return ret_errno(ENOSYS);
-#endif
 }
 #endif
 
@@ -63,11 +60,7 @@ static inline int pidfd_open(pid_t pid, unsigned int flags)
 static inline int pidfd_send_signal(int pidfd, int sig, siginfo_t *info,
 				    unsigned int flags)
 {
-#ifdef __NR_pidfd_send_signal
 	return syscall(__NR_pidfd_send_signal, pidfd, sig, info, flags);
-#else
-	return ret_errno(ENOSYS);
-#endif
 }
 #endif
 
