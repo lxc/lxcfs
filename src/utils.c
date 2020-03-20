@@ -10,13 +10,13 @@
 
 #define _FILE_OFFSET_BITS 64
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
 #include <inttypes.h>
 #include <sched.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -519,4 +519,27 @@ ssize_t write_nointr(int fd, const void *buf, size_t count)
 	} while (ret < 0 && errno == EINTR);
 
 	return ret;
+}
+
+int safe_uint64(const char *numstr, uint64_t *converted, int base)
+{
+	char *err = NULL;
+	uint64_t u;
+
+	while (isspace(*numstr))
+		numstr++;
+
+	if (*numstr == '-')
+		return -EINVAL;
+
+	errno = 0;
+	u = strtoull(numstr, &err, base);
+	if (errno == ERANGE && u == UINT64_MAX)
+		return -ERANGE;
+
+	if (err == numstr || *err != '\0')
+		return -EINVAL;
+
+	*converted = u;
+	return 0;
 }
