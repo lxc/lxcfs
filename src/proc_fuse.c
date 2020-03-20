@@ -521,7 +521,8 @@ static inline void iwashere(void)
 }
 #endif
 
-/* This function retrieves the busy time of a group of tasks by looking at
+/*
+ * This function retrieves the busy time of a group of tasks by looking at
  * cpuacct.usage. Unfortunately, this only makes sense when the container has
  * been given it's own cpuacct cgroup. If not, this function will take the busy
  * time of all other taks that do not actually belong to the container into
@@ -542,6 +543,7 @@ static double get_reaper_busy(pid_t task)
 	if (!cgroup)
 		return 0;
 	prune_init_slice(cgroup);
+
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		return 0;
 
@@ -557,38 +559,21 @@ static uint64_t get_reaper_start_time(pid_t pid)
 	__do_fclose FILE *f = NULL;
 	int ret;
 	uint64_t starttime;
-	/* strlen("/proc/") = 6
-	 * +
-	 * LXCFS_NUMSTRLEN64
-	 * +
-	 * strlen("/stat") = 5
-	 * +
-	 * \0 = 1
-	 * */
-#define __PROC_PID_STAT_LEN (6 + LXCFS_NUMSTRLEN64 + 5 + 1)
-	char path[__PROC_PID_STAT_LEN];
+	char path[STRLITERALLEN("/proc/") + LXCFS_NUMSTRLEN64 +
+		  STRLITERALLEN("/stat") + 1];
 	pid_t qpid;
 
 	qpid = lookup_initpid_in_store(pid);
-	if (qpid <= 0) {
-		/* Caller can check for EINVAL on 0. */
-		errno = EINVAL;
-		return 0;
-	}
+	if (qpid <= 0)
+		return ret_errno(EINVAL);
 
-	ret = snprintf(path, __PROC_PID_STAT_LEN, "/proc/%d/stat", qpid);
-	if (ret < 0 || ret >= __PROC_PID_STAT_LEN) {
-		/* Caller can check for EINVAL on 0. */
-		errno = EINVAL;
-		return 0;
-	}
+	ret = snprintf(path, sizeof(path), "/proc/%d/stat", qpid);
+	if (ret < 0 || (size_t)ret >= sizeof(path))
+		return ret_errno(EINVAL);
 
 	f = fopen_cached(path, "re", &fopen_cache);
-	if (!f) {
-		/* Caller can check for EINVAL on 0. */
-		errno = EINVAL;
-		return 0;
-	}
+	if (!f)
+		return ret_errno(EINVAL);
 
 	/* Note that the *scanf() argument supression requires that length
 	 * modifiers such as "l" are omitted. Otherwise some compilers will yell
@@ -619,7 +604,7 @@ static uint64_t get_reaper_start_time(pid_t pid)
 			"%" PRIu64, /* (22) starttime   %llu */
 		     &starttime);
 	if (ret != 1)
-		return ret_set_errno(0, EINVAL);
+		return ret_errno(EINVAL);
 
 	return ret_set_errno(starttime, 0);
 }
@@ -631,11 +616,11 @@ static double get_reaper_start_time_in_sec(pid_t pid)
 	double res = 0;
 
 	clockticks = get_reaper_start_time(pid);
-	if (clockticks == 0 && errno == EINVAL)
+	if (clockticks <= 0)
 		return log_debug(0, "Failed to retrieve start time of pid %d", pid);
 
 	ret = sysconf(_SC_CLK_TCK);
-	if (ret < 0 && errno == EINVAL)
+	if (ret < 0)
 		return log_debug(0, "Failed to determine number of clock ticks in a second");
 
 	ticks_per_sec = (uint64_t)ret;
@@ -648,7 +633,8 @@ static double get_reaper_age(pid_t pid)
 	uint64_t uptime_ms;
 	double procstart, procage;
 
-	/* We need to substract the time the process has started since system
+	/*
+	 * We need to substract the time the process has started since system
 	 * boot minus the time when the system has started to get the actual
 	 * reaper age.
 	 */
@@ -662,11 +648,6 @@ static double get_reaper_age(pid_t pid)
 		if (ret < 0)
 			return 0;
 
-		/* We could make this more precise here by using the tv_nsec
-		 * field in the timespec struct and convert it to milliseconds
-		 * and then create a double for the seconds and milliseconds but
-		 * that seems more work than it is worth.
-		 */
 		uptime_ms = (spec.tv_sec * 1000) + (spec.tv_nsec * 1e-6);
 		procage = (uptime_ms - (procstart * 1000)) / 1000;
 	}
@@ -720,7 +701,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 
 	total_len = snprintf(d->buf, d->buflen, "%.2lf %.2lf\n", reaperage, idletime);
 	if (total_len < 0 || total_len >= d->buflen)
-		return log_error(0, "Failed to write to cache");
+		return read_file_fuse("/proc/uptime", buf, size, d);
 
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -729,6 +710,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
+
 	return total_len;
 }
 
