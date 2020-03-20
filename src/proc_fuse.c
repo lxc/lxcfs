@@ -203,19 +203,15 @@ __lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
 static uint64_t get_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *memlimit_str = NULL;
-	uint64_t memlimit = -1;
-	char *ptr;
+	uint64_t memlimit = 0;
 	int ret;
 
 	if (swap)
 		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memlimit_str);
 	else
 		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
-	if (ret > 0) {
-		memlimit = strtoull(memlimit_str, &ptr, 10);
-		if (ptr == memlimit_str)
-			memlimit = -1;
-	}
+	if (ret > 0 && safe_uint64(memlimit_str, &memlimit, 10) < 0)
+		lxcfs_error("Failed to convert memlimit %s", memlimit_str);
 
 	return memlimit;
 }
@@ -223,23 +219,20 @@ static uint64_t get_memlimit(const char *cgroup, bool swap)
 static uint64_t get_min_memlimit(const char *cgroup, bool swap)
 {
 	__do_free char *copy = NULL;
-	uint64_t memlimit = 0;
-	uint64_t retlimit;
+	uint64_t memlimit = 0, retlimit = 0;
 
 	copy = strdup(cgroup);
 	if (!copy)
 		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
 
 	retlimit = get_memlimit(copy, swap);
-	if (retlimit == -1)
-		retlimit = 0;
 
 	while (strcmp(copy, "/") != 0) {
 		char *it = copy;
 
 		it = dirname(it);
 		memlimit = get_memlimit(it, swap);
-		if (memlimit != -1 && memlimit < retlimit)
+		if (memlimit > 0 && memlimit < retlimit)
 			retlimit = memlimit;
 	};
 
@@ -296,14 +289,18 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	if (ret < 0)
 		return 0;
 
-	memusage = strtoull(memusage_str, NULL, 10);
+	if (safe_uint64(memusage_str, &memusage, 10) < 0)
+		lxcfs_error("Failed to convert memusage %s", memusage_str);
 
 	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cg, &memswlimit_str);
 	if (ret >= 0)
 		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cg, &memswusage_str);
 	if (ret >= 0) {
 		memswlimit = get_min_memlimit(cg, true);
-		memswusage = strtoull(memswusage_str, NULL, 10);
+
+		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
+			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
+
 		swap_total = (memswlimit - memlimit) / 1024;
 		swap_free = (memswusage - memusage) / 1024;
 	}
@@ -548,7 +545,9 @@ static double get_reaper_busy(pid_t task)
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		return 0;
 
-	usage = strtoull(usage_str, NULL, 10);
+	if (safe_uint64(usage_str, &usage, 10) < 0)
+		lxcfs_error("Failed to convert usage %s", usage_str);
+
 	return ((double)usage / 1000000000);
 }
 
@@ -1091,12 +1090,12 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		memswlimit = get_min_memlimit(cgroup, true);
 		memswlimit = memswlimit / 1024;
 		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
-			memswusage = 0;
+			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
 		memswusage = memswusage / 1024;
 	}
 
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
-		memusage = 0;
+		lxcfs_error("Failed to convert memusage %s", memswusage_str);
 	memlimit /= 1024;
 	memusage /= 1024;
 
