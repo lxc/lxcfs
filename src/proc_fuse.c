@@ -1075,10 +1075,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 	ret = cgroup_ops->get_memory_current(cgroup_ops, cgroup, &memusage_str);
 	if (ret < 0)
-		return 0;
+		return read_file_fuse("/proc/meminfo", buf, size, d);
 
 	if (!cgroup_parse_memory_stat(cgroup, &mstat))
-		return 0;
+		return read_file_fuse("/proc/meminfo", buf, size, d);
 
 	/*
 	 * Following values are allowed to fail, because swapaccount might be
@@ -1089,18 +1089,20 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
 	if (ret >= 0) {
 		memswlimit = get_min_memlimit(cgroup, true);
-		memswusage = strtoull(memswusage_str, NULL, 10);
 		memswlimit = memswlimit / 1024;
+		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
+			memswusage = 0;
 		memswusage = memswusage / 1024;
 	}
 
-	memusage = strtoull(memusage_str, NULL, 10);
+	if (safe_uint64(memusage_str, &memusage, 10) < 0)
+		memusage = 0;
 	memlimit /= 1024;
 	memusage /= 1024;
 
 	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
 	if (!f)
-		return 0;
+		return read_file_fuse("/proc/meminfo", buf, size, d);
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
@@ -1119,10 +1121,11 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "MemAvailable:")) {
 			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + mstat.total_cache / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 &&
-			   opts && opts->swap_off == false) {
-			memswlimit -= memlimit;
-			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
+		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
+			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n",
+				 (memswlimit >= memlimit)
+				     ? (memswlimit - memlimit)
+				     : 0);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
