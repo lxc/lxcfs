@@ -1071,13 +1071,14 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (ret >= 0) {
 		memswlimit = get_min_memlimit(cgroup, true);
 		memswlimit = memswlimit / 1024;
+
 		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
 			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
 		memswusage = memswusage / 1024;
 	}
 
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
-		lxcfs_error("Failed to convert memusage %s", memswusage_str);
+		lxcfs_error("Failed to convert memusage %s", memusage_str);
 	memlimit /= 1024;
 	memusage /= 1024;
 
@@ -1103,10 +1104,16 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + mstat.total_cache / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
-			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n",
-				 (memswlimit >= memlimit)
-				     ? (memswlimit - memlimit)
-				     : 0);
+			uint64_t hostswtotal = 0;
+
+			sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
+			if (hostswtotal < memswlimit)
+				memswlimit = hostswtotal;
+
+			if (memswlimit >= memlimit)
+				memswlimit -= memlimit;
+
+			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
