@@ -1157,61 +1157,61 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				  mstat.total_inactive_file) /
 				     1024);
 			printme = lbuf;
-		} else if (startswith(line, "Active(anon)")) {
+		} else if (startswith(line, "Active(anon):")) {
 			snprintf(lbuf, 100, "Active(anon):   %8" PRIu64 " kB\n",
 				 mstat.total_active_anon / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "Inactive(anon)")) {
+		} else if (startswith(line, "Inactive(anon):")) {
 			snprintf(lbuf, 100, "Inactive(anon): %8" PRIu64 " kB\n",
 				 mstat.total_inactive_anon / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "Active(file)")) {
+		} else if (startswith(line, "Active(file):")) {
 			snprintf(lbuf, 100, "Active(file):   %8" PRIu64 " kB\n",
 				 mstat.total_active_file / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "Inactive(file)")) {
+		} else if (startswith(line, "Inactive(file):")) {
 			snprintf(lbuf, 100, "Inactive(file): %8" PRIu64 " kB\n",
 				 mstat.total_inactive_file / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "Unevictable")) {
+		} else if (startswith(line, "Unevictable:")) {
 			snprintf(lbuf, 100, "Unevictable:    %8" PRIu64 " kB\n",
 				 mstat.total_unevictable / 1024);
 			printme = lbuf;
- 		} else if (startswith(line, "Dirty")) {
+ 		} else if (startswith(line, "Dirty:")) {
 			snprintf(lbuf, 100, "Dirty:          %8" PRIu64 " kB\n",
 				 mstat.total_dirty / 1024);
 			printme = lbuf;
- 		} else if (startswith(line, "Writeback")) {
+ 		} else if (startswith(line, "Writeback:")) {
 			snprintf(lbuf, 100, "Writeback:      %8" PRIu64 " kB\n",
 				 mstat.total_writeback / 1024);
 			printme = lbuf;
- 		} else if (startswith(line, "AnonPages")) {
+ 		} else if (startswith(line, "AnonPages:")) {
 			snprintf(lbuf, 100, "AnonPages:      %8" PRIu64 " kB\n",
 				 (mstat.total_active_anon +
 				  mstat.total_inactive_anon - mstat.total_shmem) /
 				     1024);
 			printme = lbuf;
- 		} else if (startswith(line, "Mapped")) {
+ 		} else if (startswith(line, "Mapped:")) {
 			snprintf(lbuf, 100, "Mapped:         %8" PRIu64 " kB\n",
 				 mstat.total_mapped_file / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "SReclaimable")) {
+		} else if (startswith(line, "SReclaimable:")) {
 			snprintf(lbuf, 100, "SReclaimable:   %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
-		} else if (startswith(line, "SUnreclaim")) {
+		} else if (startswith(line, "SUnreclaim:")) {
 			snprintf(lbuf, 100, "SUnreclaim:     %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Shmem:")) {
 			snprintf(lbuf, 100, "Shmem:          %8" PRIu64 " kB\n",
 				 mstat.total_shmem / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "ShmemHugePages")) {
+		} else if (startswith(line, "ShmemHugePages:")) {
 			snprintf(lbuf, 100, "ShmemHugePages: %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
-		} else if (startswith(line, "ShmemPmdMapped")) {
+		} else if (startswith(line, "ShmemPmdMapped:")) {
 			snprintf(lbuf, 100, "ShmemPmdMapped: %8" PRIu64 " kB\n", (uint64_t)0);
  			printme = lbuf;
- 		} else if (startswith(line, "AnonHugePages")) {
+ 		} else if (startswith(line, "AnonHugePages:")) {
 			snprintf(lbuf, 100, "AnonHugePages:  %8" PRIu64 " kB\n",
 				 mstat.total_rss_huge / 1024);
 			printme = lbuf;
