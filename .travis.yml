@@ -13,8 +13,8 @@ arch:
  - s390x
 
 env:
-  global:
-   - secure: "Nu2cNo2RHjZxl2eiuWVRlznMAZu4YCvsbaxf4djolj+MYIw2KfMqMM9cM9EC3/ikljZcrlleOXZDcyNFdlNIbeadXythleNQJRK3eX8x226f6vqAs4i/ppbl4oMnlQx3yzG9+PBHtelv/db8TxXLX51+qB8N0820v0ieTpwYbkI="
+ global:
+   - secure: "git3Pry4fHtyXFNdy+b5NjIxHOkg1olPKCqKXc0SD9FLBF6oxmvrt8QXDoPWolLK6Y62GEu751tWXJ8YsYAkPMlNX3lrfyxomhmhKCB1pHQvnZ/ln15Na3EGG9HvpKs2VTqc1s5817rfo+USUwGmbeNqe99BI3egNG1o/WiKiOQ="
 
 addons:
   coverity_scan:
@@ -44,3 +44,17 @@ notifications:
     recipients:
       - serge.hallyn@ubuntu.com
       - stgraber@ubuntu.com
+
+addons:
+  coverity_scan:
+
+    project:
+      name: lxc/lxcfs
+      description: "FUSE filesystem for LXC https://linuxcontainers.org/lxcfs"
+
+    # Where email notification of build analysis results will be sent
+    notification_email: christian.brauner@ubuntu.com
+
+    build_command_prepend: "./bootstrap.sh && mkdir build && cd build && ../configure --prefix=/usr"
+    build_command: "make -j4"
+    branch_pattern: master
