@@ -31,12 +31,12 @@
 	}
 
 #define close_prot_errno_replace(fd, new_fd) \
-       if (fd >= 0) {                       \
-               int _e_ = errno;             \
-               close(fd);                   \
-               errno = _e_;                 \
-               fd = new_fd;                 \
-       }
+	if (fd >= 0) {                       \
+		int _e_ = errno;             \
+		close(fd);                   \
+		errno = _e_;                 \
+		fd = new_fd;                 \
+	}
 
 static inline void close_prot_errno_disarm_function(int *fd)
 {
@@ -50,10 +50,10 @@ define_cleanup_function(FILE *, fclose);
 define_cleanup_function(DIR *, closedir);
 #define __do_closedir call_cleaner(closedir)
 
-#define free_disarm(ptr)       \
-	({                     \
-		free(ptr);     \
-		move_ptr(ptr); \
+#define free_disarm(ptr)    \
+	({                  \
+		free(ptr);  \
+		ptr = NULL; \
 	})
 
 static inline void free_disarm_function(void *ptr)
