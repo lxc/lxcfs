@@ -118,14 +118,17 @@ static void unlock_mutex(pthread_mutex_t *l)
 		log_exit("%s - returned %d\n", strerror(ret), ret);
 }
 
-static void store_lock(void)
+static inline void unlock_mutex_function(pthread_mutex_t **mutex)
+{
+	if (*mutex)
+		unlock_mutex(*mutex);
+}
+#define __do_unlock call_cleaner(unlock_mutex)
+
+static pthread_mutex_t* __attribute__((warn_unused_result)) store_lock(void)
 {
 	lock_mutex(&pidns_store_mutex);
-}
-
-static void store_unlock(void)
-{
-	unlock_mutex(&pidns_store_mutex);
+	return &pidns_store_mutex;
 }
 
 /* /proc/       =    6
@@ -252,7 +255,7 @@ static void prune_initpid_store(void)
 }
 
 /* Must be called under store_lock */
-static void save_initpid(struct stat *sb, pid_t pid)
+static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
 	__do_free struct pidns_init_store *entry = NULL;
 	__do_close int pidfd = -EBADF;
@@ -277,7 +280,7 @@ static void save_initpid(struct stat *sb, pid_t pid)
 
 	ino_hash = HASH(entry->ino);
 	*entry = (struct pidns_init_store){
-		.ino		= sb->st_ino,
+		.ino		= pidns_inode,
 		.initpid	= pid,
 		.ctime		= st.st_ctime,
 		.next		= pidns_hash_table[ino_hash],
@@ -296,12 +299,12 @@ static void save_initpid(struct stat *sb, pid_t pid)
  * otherwise.
  * Must be called under store_lock
  */
-static struct pidns_init_store *lookup_verify_initpid(struct stat *sb)
+static struct pidns_init_store *lookup_verify_initpid(ino_t pidns_inode)
 {
-	struct pidns_init_store *entry = pidns_hash_table[HASH(sb->st_ino)];
+	struct pidns_init_store *entry = pidns_hash_table[HASH(pidns_inode)];
 
 	while (entry) {
-		if (entry->ino == sb->st_ino) {
+		if (entry->ino == pidns_inode) {
 			if (initpid_still_valid(entry)) {
 				entry->lastcheck = time(NULL);
 				return entry;
@@ -428,6 +431,7 @@ out:
 
 pid_t lookup_initpid_in_store(pid_t pid)
 {
+	__do_unlock pthread_mutex_t *store_mutex = NULL;
 	pid_t answer = 0;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	struct stat st;
@@ -435,19 +439,24 @@ pid_t lookup_initpid_in_store(pid_t pid)
 
 	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
 
-	store_lock();
 	if (stat(path, &st))
 		goto out;
 
-	entry = lookup_verify_initpid(&st);
+	store_mutex = store_lock();
+
+	entry = lookup_verify_initpid(st.st_ino);
 	if (entry) {
 		answer = entry->initpid;
 		goto out;
 	}
 
+	/* release the mutex as the following call is expensive */
+	unlock_mutex(move_ptr(store_mutex));
 	answer = get_init_pid_for_task(pid);
+	store_mutex = store_lock();
+
 	if (answer > 0)
-		save_initpid(&st, answer);
+		save_initpid(st.st_ino, answer);
 
 out:
 	/*
@@ -455,8 +464,6 @@ out:
 	 * return.
 	 */
 	prune_initpid_store();
-
-	store_unlock();
 
 	return answer;
 }
