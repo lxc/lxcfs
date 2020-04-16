@@ -1158,13 +1158,17 @@ out:
 static int pid_to_ns(int sock, pid_t tpid)
 {
 	char v = '0';
-	struct ucred cred;
+	struct ucred cred = {
+		.pid = -1,
+		.uid = -1,
+		.gid = -1,
+	};
 
 	while (recv_creds(sock, &cred, &v)) {
 		if (v == '1')
 			return 0;
 
-		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
+		if (write_nointr(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
 			return 1;
 	}
 
