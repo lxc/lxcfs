@@ -274,7 +274,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 	if (stat(path, &st))
 		return;
 
-	entry = malloc(sizeof(*entry));
+	entry = zalloc(sizeof(*entry));
 	if (!entry)
 		return;
 
