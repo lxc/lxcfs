@@ -62,7 +62,7 @@ struct pid_ns_clone_args {
 
 static inline int get_cgroup_fd_handle_named(const char *controller)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return get_cgroup_fd("name=systemd");
 
 	return get_cgroup_fd(controller);
@@ -70,7 +70,7 @@ static inline int get_cgroup_fd_handle_named(const char *controller)
 
 static char *get_pid_cgroup_handle_named(pid_t pid, const char *controller)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return get_pid_cgroup(pid, "name=systemd");
 
 	return get_pid_cgroup(pid, controller);
@@ -80,7 +80,7 @@ static bool get_cgroup_handle_named(struct cgroup_ops *ops,
 				    const char *controller, const char *cgroup,
 				    const char *file, char **value)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return cgroup_ops->get(ops, "name=systemd", cgroup, file, value);
 
 	return cgroup_ops->get(cgroup_ops, controller, cgroup, file, value);
@@ -268,9 +268,10 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg, char **nextcg)
 {
 	bool answer = false;
-	char *c2 = get_pid_cgroup_handle_named(pid, contrl);
+	char *c2;
 	char *linecmp;
 
+	c2 = get_pid_cgroup_handle_named(pid, contrl);
 	if (!c2)
 		return false;
 	prune_init_slice(c2);
