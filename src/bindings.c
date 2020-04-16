@@ -337,7 +337,7 @@ static int send_creds_clone_wrapper(void *arg)
  * stack sizes: 8MB.
  */
 #define __LXCFS_STACK_SIZE (8 * 1024 * 1024)
-static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 {
 	pid_t ret;
 	void *stack;

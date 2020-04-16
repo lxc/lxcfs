@@ -1223,10 +1223,8 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 		.tpid = tpid,
 		.wrapped = &pid_to_ns
 	};
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
 
-	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
+	cpid = lxcfs_clone(pid_ns_clone_wrapper, &args, 0);
 	if (cpid < 0)
 		_exit(1);
 
@@ -1562,10 +1560,8 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 		.tpid = tpid,
 		.wrapped = &pid_from_ns
 	};
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
 
-	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
+	cpid = lxcfs_clone(pid_ns_clone_wrapper, &args, 0);
 	if (cpid < 0)
 		_exit(1);
 
