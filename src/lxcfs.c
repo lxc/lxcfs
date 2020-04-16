@@ -1124,8 +1124,8 @@ int main(int argc, char *argv[])
 			} else if (strcmp(token, "nonempty") == 0) {
 				nonempty = true;
 			} else {
-				free(v);
 				lxcfs_error("Warning: unexpected fuse option %s", v);
+				free(v);
 				exit(EXIT_FAILURE);
 			}
 		}
