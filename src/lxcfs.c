@@ -1029,10 +1029,10 @@ static int set_pidfile(char *pidfile)
 	char buf[INTTYPE_TO_STRLEN(long)];
 	int ret;
 	struct flock fl = {
-		fl.l_type	= F_WRLCK,
-		fl.l_whence	= SEEK_SET,
-		fl.l_start	= 0,
-		fl.l_len	= 0,
+		.l_type		= F_WRLCK,
+		.l_whence	= SEEK_SET,
+		.l_start	= 0,
+		.l_len		= 0,
 	};
 
 	fd = open(pidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | O_CLOEXEC);
