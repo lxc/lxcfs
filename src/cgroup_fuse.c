@@ -745,22 +745,22 @@ out:
 
 static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 {
-	struct dirent *direntp;
-	DIR *dir;
+	__do_close int dupfd = -EBADF;
+	__do_closedir DIR *dir = NULL;
 	bool ret = false;
+	struct dirent *direntp;
 	char pathname[MAXPATHLEN];
-	int dupfd;
 
-	dupfd = dup(fd); // fdopendir() does bad things once it uses an fd.
+	dupfd = dup(fd);
 	if (dupfd < 0)
 		return false;
 
 	dir = fdopendir(dupfd);
 	if (!dir) {
 		lxcfs_debug("Failed to open %s: %s.\n", dirname, strerror(errno));
-		close(dupfd);
 		return false;
 	}
+	move_fd(dupfd);
 
 	while ((direntp = readdir(dir))) {
 		struct stat mystat;
@@ -787,17 +787,11 @@ static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 	}
 
 	ret = true;
-	if (closedir(dir) < 0) {
-		lxcfs_error("Failed to close directory %s: %s\n", dirname, strerror(errno));
-		ret = false;
-	}
 
 	if (unlinkat(cfd, dirname, AT_REMOVEDIR) < 0) {
 		lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		ret = false;
 	}
-
-	close(dupfd);
 
 	return ret;
 }
