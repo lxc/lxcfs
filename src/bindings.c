@@ -275,7 +275,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 		return;
 
 	entry = malloc(sizeof(*entry));
-	if (entry)
+	if (!entry)
 		return;
 
 	ino_hash = HASH(entry->ino);
