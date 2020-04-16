@@ -62,7 +62,7 @@ struct pid_ns_clone_args {
 
 static inline int get_cgroup_fd_handle_named(const char *controller)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return get_cgroup_fd("name=systemd");
 
 	return get_cgroup_fd(controller);
@@ -70,7 +70,7 @@ static inline int get_cgroup_fd_handle_named(const char *controller)
 
 static char *get_pid_cgroup_handle_named(pid_t pid, const char *controller)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return get_pid_cgroup(pid, "name=systemd");
 
 	return get_pid_cgroup(pid, controller);
@@ -80,7 +80,7 @@ static bool get_cgroup_handle_named(struct cgroup_ops *ops,
 				    const char *controller, const char *cgroup,
 				    const char *file, char **value)
 {
-	if (strcmp(controller, "systemd") == 0)
+	if (controller && strcmp(controller, "systemd") == 0)
 		return cgroup_ops->get(ops, "name=systemd", cgroup, file, value);
 
 	return cgroup_ops->get(cgroup_ops, controller, cgroup, file, value);
@@ -268,9 +268,10 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 static bool caller_is_in_ancestor(pid_t pid, const char *contrl, const char *cg, char **nextcg)
 {
 	bool answer = false;
-	char *c2 = get_pid_cgroup_handle_named(pid, contrl);
+	char *c2;
 	char *linecmp;
 
+	c2 = get_pid_cgroup_handle_named(pid, contrl);
 	if (!c2)
 		return false;
 	prune_init_slice(c2);
@@ -745,22 +746,22 @@ out:
 
 static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 {
-	struct dirent *direntp;
-	DIR *dir;
+	__do_close int dupfd = -EBADF;
+	__do_closedir DIR *dir = NULL;
 	bool ret = false;
+	struct dirent *direntp;
 	char pathname[MAXPATHLEN];
-	int dupfd;
 
-	dupfd = dup(fd); // fdopendir() does bad things once it uses an fd.
+	dupfd = dup(fd);
 	if (dupfd < 0)
 		return false;
 
 	dir = fdopendir(dupfd);
 	if (!dir) {
 		lxcfs_debug("Failed to open %s: %s.\n", dirname, strerror(errno));
-		close(dupfd);
 		return false;
 	}
+	move_fd(dupfd);
 
 	while ((direntp = readdir(dir))) {
 		struct stat mystat;
@@ -787,17 +788,11 @@ static bool recursive_rmdir(const char *dirname, int fd, const int cfd)
 	}
 
 	ret = true;
-	if (closedir(dir) < 0) {
-		lxcfs_error("Failed to close directory %s: %s\n", dirname, strerror(errno));
-		ret = false;
-	}
 
 	if (unlinkat(cfd, dirname, AT_REMOVEDIR) < 0) {
 		lxcfs_debug("Failed to delete %s: %s.\n", dirname, strerror(errno));
 		ret = false;
 	}
-
-	close(dupfd);
 
 	return ret;
 }
@@ -1163,13 +1158,17 @@ out:
 static int pid_to_ns(int sock, pid_t tpid)
 {
 	char v = '0';
-	struct ucred cred;
+	struct ucred cred = {
+		.pid = -1,
+		.uid = -1,
+		.gid = -1,
+	};
 
 	while (recv_creds(sock, &cred, &v)) {
 		if (v == '1')
 			return 0;
 
-		if (write(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
+		if (write_nointr(sock, &cred.pid, sizeof(pid_t)) != sizeof(pid_t))
 			return 1;
 	}
 
@@ -1229,10 +1228,8 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 		.tpid = tpid,
 		.wrapped = &pid_to_ns
 	};
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
 
-	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
+	cpid = lxcfs_clone(pid_ns_clone_wrapper, &args, 0);
 	if (cpid < 0)
 		_exit(1);
 
@@ -1568,10 +1565,8 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 		.tpid = tpid,
 		.wrapped = &pid_from_ns
 	};
-	size_t stack_size = sysconf(_SC_PAGESIZE);
-	void *stack = alloca(stack_size);
 
-	cpid = clone(pid_ns_clone_wrapper, stack + stack_size, SIGCHLD, &args);
+	cpid = lxcfs_clone(pid_ns_clone_wrapper, &args, 0);
 	if (cpid < 0)
 		_exit(1);
 

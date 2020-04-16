@@ -275,7 +275,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 		return;
 
 	entry = malloc(sizeof(*entry));
-	if (entry)
+	if (!entry)
 		return;
 
 	ino_hash = HASH(entry->ino);
@@ -337,7 +337,7 @@ static int send_creds_clone_wrapper(void *arg)
  * stack sizes: 8MB.
  */
 #define __LXCFS_STACK_SIZE (8 * 1024 * 1024)
-static pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 {
 	pid_t ret;
 	void *stack;
@@ -398,9 +398,13 @@ static pid_t get_init_pid_for_task(pid_t task)
 {
 	char v = '0';
 	pid_t pid_ret = -1;
+	struct ucred cred = {
+		.pid = -1,
+		.uid = -1,
+		.gid = -1,
+	};
 	pid_t pid;
 	int sock[2];
-	struct ucred cred;
 
 	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0)
 		return -1;
