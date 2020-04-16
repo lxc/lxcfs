@@ -16,18 +16,7 @@ env:
  global:
    - secure: "git3Pry4fHtyXFNdy+b5NjIxHOkg1olPKCqKXc0SD9FLBF6oxmvrt8QXDoPWolLK6Y62GEu751tWXJ8YsYAkPMlNX3lrfyxomhmhKCB1pHQvnZ/ln15Na3EGG9HvpKs2VTqc1s5817rfo+USUwGmbeNqe99BI3egNG1o/WiKiOQ="
 
-addons:
-  coverity_scan:
-    project:
-      name: "lxc/lxcfs"
-      description: "FUSE filesystem for LXC https://linuxcontainers.org/lxcfs"
-    build_command_prepend: "./bootstrap.sh && ./configure"
-    build_command: "make -j4"
-    branch_pattern: master
-
 before_install:
- - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
-
  - sudo apt-get update -qq
  - sudo apt-get -y install -qq automake coreutils libfuse-dev libtool uuid-runtime
 
