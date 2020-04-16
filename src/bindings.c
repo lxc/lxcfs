@@ -398,9 +398,13 @@ static pid_t get_init_pid_for_task(pid_t task)
 {
 	char v = '0';
 	pid_t pid_ret = -1;
+	struct ucred cred = {
+		.pid = -1,
+		.uid = -1,
+		.gid = -1,
+	};
 	pid_t pid;
 	int sock[2];
-	struct ucred cred;
 
 	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sock) < 0)
 		return -1;

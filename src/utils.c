@@ -212,36 +212,33 @@ again:
 
 bool recv_creds(int sock, struct ucred *cred, char *v)
 {
-	struct msghdr msg = { 0 };
+	struct msghdr msg = {};
 	struct iovec iov;
 	struct cmsghdr *cmsg;
-	char cmsgbuf[CMSG_SPACE(sizeof(*cred))];
-	char buf[1];
-	int ret;
+	ssize_t ret;
+	char cmsgbuf[CMSG_SPACE(sizeof(*cred))] = {};
+	char buf = '1';
 	int optval = 1;
-
-	*v = '1';
-
-	cred->pid = -1;
-	cred->uid = -1;
-	cred->gid = -1;
-
-	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1)
-		return log_error(false, "Failed to set passcred: %s\n", strerror(errno));
-
-	buf[0] = '1';
-	if (write(sock, buf, 1) != 1)
-		return log_error(false, "Failed to start write on scm fd: %s\n", strerror(errno));
 
 	msg.msg_name = NULL;
 	msg.msg_namelen = 0;
 	msg.msg_control = cmsgbuf;
 	msg.msg_controllen = sizeof(cmsgbuf);
 
-	iov.iov_base = buf;
+	iov.iov_base = &buf;
 	iov.iov_len = sizeof(buf);
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
+
+	*v = buf;
+
+	ret = setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval));
+	if (ret < 0)
+		return log_error(false, "Failed to set passcred: %s\n", strerror(errno));
+
+	ret = write_nointr(sock, &buf, sizeof(buf));
+	if (ret != sizeof(buf))
+		return log_error(false, "Failed to start write on scm fd: %s\n", strerror(errno));
 
 	if (!wait_for_sock(sock, 2))
 		return log_error(false, "Timed out waiting for scm_cred: %s\n", strerror(errno));
@@ -252,12 +249,12 @@ bool recv_creds(int sock, struct ucred *cred, char *v)
 
 	cmsg = CMSG_FIRSTHDR(&msg);
 
-	if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred)) &&
-			cmsg->cmsg_level == SOL_SOCKET &&
-			cmsg->cmsg_type == SCM_CREDENTIALS) {
+	if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(*cred)) &&
+	    cmsg->cmsg_level == SOL_SOCKET &&
+	    cmsg->cmsg_type == SCM_CREDENTIALS) {
 		memcpy(cred, CMSG_DATA(cmsg), sizeof(*cred));
 	}
-	*v = buf[0];
+	*v = buf;
 
 	return true;
 }
