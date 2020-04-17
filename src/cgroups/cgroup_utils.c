@@ -782,7 +782,7 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 	if (cgroup2_root_fd < 0)
 		return -EINVAL;
 	else if (same_file(cgroup2_root_fd, dir_fd))
-		return no_limit ? 1 : -EINVAL;
+		return 1;
 
 	free_disarm(val);
 	/*
