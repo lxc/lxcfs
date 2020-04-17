@@ -724,3 +724,102 @@ bool mkdir_p(const char *dir, mode_t mode)
 
 	return true;
 }
+
+static bool same_file(int fd1, int fd2)
+{
+	struct stat st1, st2;
+
+	if (fstat(fd1, &st1) < 0 || fstat(fd2, &st2) < 0)
+		return false;
+
+	return (st1.st_dev == st2.st_dev) && (st1.st_ino == st2.st_ino);
+}
+
+/**
+ * cgroup_walkup_to_root() - Walk upwards to cgroup root to find valid value
+ *
+ * @cgroup2_root_fd:	File descriptor for the cgroup2 root mount point.
+ * @hierarchy_fd:	File descriptor for the hierarchy.
+ * @cgroup:		A cgroup directory relative to @hierarchy_fd.
+ * @file:		The file in @cgroup from which to read a value.
+ * @value:		Return argument to store value read from @file.
+ *
+ * This function tries to read a valid value from @file in @cgroup in
+ * @hierarchy_fd. If it is a legacy cgroup hierarchy and we fail to find a
+ * valid value we terminate early and report an error.
+ * The cgroup2 hierarchy however, has different semantics. In a few controller
+ * files it will show the value "max" or simply leave it completely empty
+ * thereby indicating that no limit has been set for this particular cgroup.
+ * However, that doesn't mean that there's no limit. A cgroup further up the
+ * hierarchy could have a limit set that also applies to the cgroup we are
+ * interested in. So for the unified cgroup hierarchy we need to keep walking
+ * towards the cgroup2 root cgroup and try to parse a valid value.
+ */
+int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
+			  const char *cgroup, const char *file, char **value)
+{
+	__do_close int dir_fd = -EBADF;
+	__do_free char *val = NULL;
+	bool no_limit = false;
+
+	/* Look in our current cgroup for a valid value. */
+	dir_fd = openat(hierarchy_fd, cgroup, O_DIRECTORY | O_PATH | O_CLOEXEC);
+	if (dir_fd < 0)
+		return -errno;
+
+	val = readat_file(dir_fd, file);
+	if (is_empty_string(val) || strcmp(val, "max") == 0) {
+		no_limit = true;
+	} else {
+		*value = move_ptr(val);
+		return 0;
+	}
+
+	/*
+	 * Legacy cgroup hierarchies should always show a valid value in the
+	 * file of the cgroup. So no need to do this upwards walking crap.
+	 */
+	if (cgroup2_root_fd < 0)
+		return -EINVAL;
+	else if (same_file(cgroup2_root_fd, dir_fd))
+		return no_limit ? 1 : -EINVAL;
+
+	free_disarm(val);
+	/*
+	 * Set an arbitraty hard-coded limit to prevent us from ending
+	 * up in an endless loop. There really shouldn't be any cgroup
+	 * tree that is 1000 levels deep. That would be insane in
+	 * principal and performance-wise.
+	 */
+	for (int i = 0; i < 1000; i++) {
+		__do_close int inner_fd = -EBADF;
+		__do_free char *new_val = NULL;
+
+		inner_fd = move_fd(dir_fd);
+		dir_fd = openat(inner_fd, "..", O_DIRECTORY | O_PATH | O_CLOEXEC);
+		if (dir_fd < 0)
+			return -errno;
+
+		/*
+		 * We're at the root of the cgroup2 tree so stop walking
+		 * upwards.
+		 */
+		if (same_file(cgroup2_root_fd, dir_fd)) {
+			if (no_limit)
+				return 1;
+
+			return -EINVAL;
+		}
+
+		/* We found a valid value. Terminate walk. */
+		new_val = readat_file(dir_fd, file);
+		if (is_empty_string(new_val) || strcmp(new_val, "max") == 0) {
+			no_limit = true;
+		} else {
+			*value = move_ptr(new_val);
+			return 0;
+		}
+	}
+
+	return log_error_errno(-ELOOP, ELOOP, "To many nested cgroups or invalid mount tree. Terminating walk");
+}

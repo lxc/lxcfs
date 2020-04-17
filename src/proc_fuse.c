@@ -1093,6 +1093,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		memset(lbuf, 0, 100);
 		if (startswith(line, "MemTotal:")) {
 			sscanf(line+sizeof("MemTotal:")-1, "%" PRIu64, &hosttotal);
+			if (memlimit == 0)
+				memlimit = hosttotal;
+
 			if (hosttotal < memlimit)
 				memlimit = hosttotal;
 			snprintf(lbuf, 100, "MemTotal:       %8" PRIu64 " kB\n", memlimit);
