@@ -95,6 +95,10 @@ static inline int openat_safe(int fd, const char *path)
 	return openat(fd, path, O_DIRECTORY | O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
+extern int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
+				 const char *cgroup, const char *file,
+				 char **value);
+
 #define must_make_path_relative(__first__, ...)                                \
 	({                                                                     \
 		char *__ptr__;                                                 \
@@ -104,5 +108,10 @@ static inline int openat_safe(int fd, const char *path)
 			__ptr__ = must_make_path(__first__, __VA_ARGS__);      \
 		__ptr__;                                                       \
 	})
+
+static inline bool is_empty_string(const char *s)
+{
+	return !s || strcmp(s, "") == 0;
+}
 
 #endif /* __LXC_CGROUP_UTILS_H */

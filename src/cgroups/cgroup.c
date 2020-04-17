@@ -72,6 +72,9 @@ void cgroup_exit(struct cgroup_ops *ops)
 	if (ops->mntns_fd >= 0)
 		close(ops->mntns_fd);
 
+	if (ops->cgroup2_root_fd >= 0)
+		close(ops->cgroup2_root_fd);
+
 	free(ops->hierarchies);
 
 	free(ops);
