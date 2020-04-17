@@ -754,13 +754,15 @@ static bool same_file(int fd1, int fd2)
  * hierarchy could have a limit set that also applies to the cgroup we are
  * interested in. So for the unified cgroup hierarchy we need to keep walking
  * towards the cgroup2 root cgroup and try to parse a valid value.
+ *
+ * Returns: 0 if a limit was found, 1 if no limit was set or "max" was set,
+ * -errno if an error occurred.
  */
 int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 			  const char *cgroup, const char *file, char **value)
 {
 	__do_close int dir_fd = -EBADF;
 	__do_free char *val = NULL;
-	bool no_limit = false;
 
 	/* Look in our current cgroup for a valid value. */
 	dir_fd = openat(hierarchy_fd, cgroup, O_DIRECTORY | O_PATH | O_CLOEXEC);
@@ -768,9 +770,7 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 		return -errno;
 
 	val = readat_file(dir_fd, file);
-	if (is_empty_string(val) || strcmp(val, "max") == 0) {
-		no_limit = true;
-	} else {
+	if (!is_empty_string(val) && strcmp(val, "max") != 0) {
 		*value = move_ptr(val);
 		return 0;
 	}
@@ -803,19 +803,19 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 		/*
 		 * We're at the root of the cgroup2 tree so stop walking
 		 * upwards.
+		 * Since we walked up the whole tree we haven't found an actual
+		 * limit anywhere apparently.
+		 *
+		 * Note that we're not checking the root cgroup itself simply
+		 * because a lot of the controllers don't expose files with
+		 * limits to the root cgroup.
 		 */
-		if (same_file(cgroup2_root_fd, dir_fd)) {
-			if (no_limit)
-				return 1;
-
-			return -EINVAL;
-		}
+		if (same_file(cgroup2_root_fd, dir_fd))
+			return 1;
 
 		/* We found a valid value. Terminate walk. */
 		new_val = readat_file(dir_fd, file);
-		if (is_empty_string(new_val) || strcmp(new_val, "max") == 0) {
-			no_limit = true;
-		} else {
+		if (!is_empty_string(new_val) && strcmp(new_val, "max") != 0) {
 			*value = move_ptr(new_val);
 			return 0;
 		}
