@@ -1019,7 +1019,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		 hosttotal = 0;
+		 hosttotal = 0, swtotal = 0;
 	struct memory_stat mstat = {};
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
@@ -1075,6 +1075,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
 			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
 		memswusage = memswusage / 1024;
+		swtotal = memswlimit;
 	}
 
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
@@ -1110,27 +1111,25 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			uint64_t hostswtotal = 0;
 
 			sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
-			if (hostswtotal < memswlimit)
-				memswlimit = hostswtotal;
 
-			if (memswlimit >= memlimit)
-				memswlimit -= memlimit;
+			/* Don't advertise more SWAP than the total memory allowed. */
+			if (hostswtotal < swtotal)
+				swtotal = hostswtotal;
 
-			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", memswlimit);
+			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", swtotal);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 &&
-			   memswusage > 0 && opts && opts->swap_off == false) {
-			uint64_t swaptotal = memswlimit,
-				 swapusage = memusage > memswusage
-						 ? 0
-						 : memswusage - memusage,
-				 swapfree = swapusage < swaptotal
-						? swaptotal - swapusage
-						: 0;
-			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swapfree);
+			   opts && opts->swap_off == false) {
+			uint64_t swfree = 0;
+			uint64_t swusage = 0;
+
+			swusage = memswusage - memusage;
+			swfree = swtotal - swusage;
+
+			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", (uint64_t)0);
