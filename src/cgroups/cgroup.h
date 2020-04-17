@@ -91,6 +91,12 @@ struct cgroup_ops {
 	 */
 	int mntns_fd;
 
+	/*
+	 * A file descriptor to the root of the cgroup tree if we're on a
+	 * cgroup2 only system.
+	 */
+	int cgroup2_root_fd;
+
 	/* string constant */
 	const char *driver;
 

@@ -547,7 +547,7 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 {
 	__do_free char *path = NULL;
 	struct hierarchy *h;
-	int ret;
+	int cgroup2_root_fd, layout, ret;
 
 	h = ops->get_hierarchy(ops, "memory");
 	if (!h)
@@ -562,17 +562,24 @@ static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 			file = "memory.memsw.usage_in_bytes";
 		else if (strcmp(file, "memory.current") == 0)
 			file = "memory.usage_in_bytes";
-		ret = CGROUP_SUPER_MAGIC;
+		layout = CGROUP_SUPER_MAGIC;
+		cgroup2_root_fd = -EBADF;
 	} else {
-		ret = CGROUP2_SUPER_MAGIC;
+		layout = CGROUP2_SUPER_MAGIC;
+		cgroup2_root_fd = ops->cgroup2_root_fd;
 	}
 
-	path = must_make_path_relative(cgroup, file, NULL);
-	*value = readat_file(h->fd, path);
-	if (!*value)
-		ret = -1;
+	path = must_make_path_relative(cgroup, NULL);
+	ret = cgroup_walkup_to_root(cgroup2_root_fd, h->fd, path, file, value);
+	if (ret < 0)
+		return ret;
+	if (ret == 1) {
+		*value = strdup("");
+		if (!*value)
+			return -ENOMEM;
+	}
 
-	return ret;
+	return layout;
 }
 
 static int cgfsng_get_memory_stats_fd(struct cgroup_ops *ops, const char *cgroup)
@@ -918,6 +925,11 @@ static int cg_unified_init(struct cgroup_ops *ops)
 
 	ops->cgroup_layout = CGROUP_LAYOUT_UNIFIED;
 	ops->unified = new;
+
+	ops->cgroup2_root_fd = open(DEFAULT_CGROUP_MOUNTPOINT, O_DIRECTORY | O_PATH | O_CLOEXEC);
+	if (ops->cgroup2_root_fd < 0)
+		return -errno;
+
 	return CGROUP2_SUPER_MAGIC;
 }
 
@@ -939,12 +951,13 @@ struct cgroup_ops *cgfsng_ops_init(void)
 {
 	__do_free struct cgroup_ops *cgfsng_ops = NULL;
 
-	cgfsng_ops = malloc(sizeof(struct cgroup_ops));
+	cgfsng_ops = zalloc(sizeof(struct cgroup_ops));
 	if (!cgfsng_ops)
 		return ret_set_errno(NULL, ENOMEM);
 
-	memset(cgfsng_ops, 0, sizeof(struct cgroup_ops));
 	cgfsng_ops->cgroup_layout = CGROUP_LAYOUT_UNKNOWN;
+	cgfsng_ops->mntns_fd = -EBADF;
+	cgfsng_ops->cgroup2_root_fd = -EBADF;
 
 	if (cg_init(cgfsng_ops))
 		return NULL;

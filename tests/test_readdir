@@ -20,10 +20,12 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
-echo "==> Checking for cpuset cgroups"
-[ ! -d /sys/fs/cgroup/cpuset ] && exit 0
-
 TESTCASE="Stress readdir"
-for i in `seq 1 1000`;do ls -al "${LXCFSDIR}/cgroup/cpuset" >/dev/null; done
+echo "==> Checking for cpuset cgroups"
+if [ -d /sys/fs/cgroup/cpuset ]; then
+   for i in `seq 1 1000`;do ls -al "${LXCFSDIR}/cgroup/cpuset" >/dev/null; done
+else
+   echo "==> Skipping $TESTCASE"
+fi
 
 PASS=1
