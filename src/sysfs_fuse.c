@@ -101,10 +101,8 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 			total_len = snprintf(d->buf, d->buflen, "0-%d\n", max_cpus - 1);
 		else
 			total_len = snprintf(d->buf, d->buflen, "0\n");
-	} else if (cpuset) {
-		total_len = snprintf(d->buf, d->buflen, "%s\n", cpuset);
 	} else {
-		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+		total_len = snprintf(d->buf, d->buflen, "%s\n", cpuset);
 	}
 	if (total_len < 0 || total_len >= d->buflen)
 		return log_error(0, "Failed to write to cache");
