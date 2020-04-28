@@ -49,6 +49,9 @@ echo "==> Testing /proc/cpuinfo"
 [ "$(grep "^processor" ${LXCFSDIR}/proc/cpuinfo | wc -l)" = "1" ]
 grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo || grep -q "^processor 0:.*" ${LXCFSDIR}/proc/cpuinfo
 
+echo "==> Testing /sys/devices/system/cpu/online"
+[ "$(cat ${LXCFSDIR}/sys/devices/system/cpu/online)" = "$(cat ${cpupath}/lxcfs_test_proc/cpuset.cpus)" ]
+
 # Test stat
 echo "==> Testing /proc/stat"
 [ "$(grep "^cpu" ${LXCFSDIR}/proc/stat | wc -l)" = "2" ]
