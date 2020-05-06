@@ -1061,6 +1061,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 		}
 
 		usage_str = data;
+		read_pos = 0;
 
 		lxcfs_v("usage_str: %s\n", usage_str);
 	}
