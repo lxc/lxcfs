@@ -36,7 +36,7 @@ notifications:
 
 addons:
   coverity_scan:
-
+    build_script_url: https://dl.stgraber.org/coverity_travis.sh
     project:
       name: lxc/lxcfs
       description: "FUSE filesystem for LXC https://linuxcontainers.org/lxcfs"
