@@ -278,7 +278,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 	if (!entry)
 		return;
 
-	ino_hash = HASH(entry->ino);
+	ino_hash = HASH(pidns_inode);
 	*entry = (struct pidns_init_store){
 		.ino		= pidns_inode,
 		.initpid	= pid,
