@@ -224,7 +224,7 @@ static void prune_initpid_store(void)
 	}
 
 	now = time(NULL);
-	if (now < last_prune + PURGE_SECS)
+	if (now < (last_prune + PURGE_SECS))
 		return;
 
 	lxcfs_debug("Pruning init pid cache");
