@@ -98,7 +98,7 @@ struct pidns_init_store {
 static struct pidns_init_store *pidns_hash_table[PIDNS_HASH_SIZE];
 static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void lock_mutex(pthread_mutex_t *l)
+static void mutex_lock(pthread_mutex_t *l)
 {
 	int ret;
 
@@ -109,7 +109,7 @@ static void lock_mutex(pthread_mutex_t *l)
 
 struct cgroup_ops *cgroup_ops;
 
-static void unlock_mutex(pthread_mutex_t *l)
+static void mutex_unlock(pthread_mutex_t *l)
 {
 	int ret;
 
@@ -118,17 +118,14 @@ static void unlock_mutex(pthread_mutex_t *l)
 		log_exit("%s - returned %d\n", strerror(ret), ret);
 }
 
-static inline void unlock_mutex_function(pthread_mutex_t **mutex)
+static inline void store_lock(void)
 {
-	if (*mutex)
-		unlock_mutex(*mutex);
+	mutex_lock(&pidns_store_mutex);
 }
-#define __do_unlock call_cleaner(unlock_mutex)
 
-static pthread_mutex_t* __attribute__((warn_unused_result)) store_lock(void)
+static inline void store_unlock(void)
 {
-	lock_mutex(&pidns_store_mutex);
-	return &pidns_store_mutex;
+	mutex_unlock(&pidns_store_mutex);
 }
 
 /* /proc/       =    6
@@ -224,7 +221,7 @@ static void prune_initpid_store(void)
 	}
 
 	now = time(NULL);
-	if (now < last_prune + PURGE_SECS)
+	if (now < (last_prune + PURGE_SECS))
 		return;
 
 	lxcfs_debug("Pruning init pid cache");
@@ -259,8 +256,8 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
 	__do_free struct pidns_init_store *entry = NULL;
 	__do_close int pidfd = -EBADF;
+	const struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	char path[LXCFS_PROC_PID_LEN];
-	struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	struct stat st;
 	int ino_hash;
 
@@ -278,7 +275,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 	if (!entry)
 		return;
 
-	ino_hash = HASH(entry->ino);
+	ino_hash = HASH(pidns_inode);
 	*entry = (struct pidns_init_store){
 		.ino		= pidns_inode,
 		.initpid	= pid,
@@ -299,7 +296,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
  * otherwise.
  * Must be called under store_lock
  */
-static struct pidns_init_store *lookup_verify_initpid(ino_t pidns_inode)
+static pid_t lookup_verify_initpid(ino_t pidns_inode)
 {
 	struct pidns_init_store *entry = pidns_hash_table[HASH(pidns_inode)];
 
@@ -307,16 +304,16 @@ static struct pidns_init_store *lookup_verify_initpid(ino_t pidns_inode)
 		if (entry->ino == pidns_inode) {
 			if (initpid_still_valid(entry)) {
 				entry->lastcheck = time(NULL);
-				return entry;
+				return entry->initpid;
 			}
 
 			remove_initpid(entry);
-			return NULL;
+			return ret_errno(ESRCH);
 		}
 		entry = entry->next;
 	}
 
-	return NULL;
+	return ret_errno(ESRCH);
 }
 
 static int send_creds_clone_wrapper(void *arg)
@@ -435,41 +432,37 @@ out:
 
 pid_t lookup_initpid_in_store(pid_t pid)
 {
-	__do_unlock pthread_mutex_t *store_mutex = NULL;
-	pid_t answer = 0;
+	pid_t hashed_pid = 0;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	struct stat st;
-	struct pidns_init_store *entry;
 
 	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
-
 	if (stat(path, &st))
-		goto out;
+		return ret_errno(ESRCH);
 
-	store_mutex = store_lock();
+	store_lock();
 
-	entry = lookup_verify_initpid(st.st_ino);
-	if (entry) {
-		answer = entry->initpid;
-		goto out;
+	hashed_pid = lookup_verify_initpid(st.st_ino);
+	if (hashed_pid < 0) {
+		/* release the mutex as the following call is expensive */
+		store_unlock();
+
+		hashed_pid = get_init_pid_for_task(pid);
+
+		store_lock();
+
+		if (hashed_pid > 0)
+			save_initpid(st.st_ino, hashed_pid);
 	}
 
-	/* release the mutex as the following call is expensive */
-	unlock_mutex(move_ptr(store_mutex));
-	answer = get_init_pid_for_task(pid);
-	store_mutex = store_lock();
-
-	if (answer > 0)
-		save_initpid(st.st_ino, answer);
-
-out:
 	/*
-	 * Prune at the end in case we're returning the value we were about to
-	 * return.
+	 * Prune at the end in case we're pruning the value
+	 * we were about to return.
 	 */
 	prune_initpid_store();
+	store_unlock();
 
-	return answer;
+	return hashed_pid;
 }
 
 /*
