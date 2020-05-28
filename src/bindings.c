@@ -259,8 +259,8 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
 	__do_free struct pidns_init_store *entry = NULL;
 	__do_close int pidfd = -EBADF;
+	const struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	char path[LXCFS_PROC_PID_LEN];
-	struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	struct stat st;
 	int ino_hash;
 
