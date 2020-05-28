@@ -296,7 +296,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
  * otherwise.
  * Must be called under store_lock
  */
-static struct pidns_init_store *lookup_verify_initpid(ino_t pidns_inode)
+static pid_t lookup_verify_initpid(ino_t pidns_inode)
 {
 	struct pidns_init_store *entry = pidns_hash_table[HASH(pidns_inode)];
 
@@ -304,16 +304,16 @@ static struct pidns_init_store *lookup_verify_initpid(ino_t pidns_inode)
 		if (entry->ino == pidns_inode) {
 			if (initpid_still_valid(entry)) {
 				entry->lastcheck = time(NULL);
-				return entry;
+				return entry->initpid;
 			}
 
 			remove_initpid(entry);
-			return NULL;
+			return ret_errno(ESRCH);
 		}
 		entry = entry->next;
 	}
 
-	return NULL;
+	return ret_errno(ESRCH);
 }
 
 static int send_creds_clone_wrapper(void *arg)
@@ -432,10 +432,9 @@ out:
 
 pid_t lookup_initpid_in_store(pid_t pid)
 {
-	pid_t answer = 0;
+	pid_t hashed_pid = 0;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	struct stat st;
-	struct pidns_init_store *entry;
 
 	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
 	if (stat(path, &st))
@@ -443,31 +442,27 @@ pid_t lookup_initpid_in_store(pid_t pid)
 
 	store_lock();
 
-	entry = lookup_verify_initpid(st.st_ino);
-	if (entry) {
-		answer = entry->initpid;
-		goto out;
+	hashed_pid = lookup_verify_initpid(st.st_ino);
+	if (hashed_pid < 0) {
+		/* release the mutex as the following call is expensive */
+		store_unlock();
+
+		hashed_pid = get_init_pid_for_task(pid);
+
+		store_lock();
+
+		if (hashed_pid > 0)
+			save_initpid(st.st_ino, hashed_pid);
 	}
 
-	/* release the mutex as the following call is expensive */
-	store_unlock();
-
-	answer = get_init_pid_for_task(pid);
-
-	store_lock();
-
-	if (answer > 0)
-		save_initpid(st.st_ino, answer);
-
-out:
 	/*
-	 * Prune at the end in case we're returning the value we were about to
-	 * return.
+	 * Prune at the end in case we're pruning the value
+	 * we were about to return.
 	 */
 	prune_initpid_store();
 	store_unlock();
 
-	return answer;
+	return hashed_pid;
 }
 
 /*
