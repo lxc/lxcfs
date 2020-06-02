@@ -780,6 +780,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (!f)
 		return 0;
 
+	/* Skip first system cpu line. */
+	if (getline(&line, &linelen, f) < 0)
+		return log_error(0, "proc_stat_read read first line failed");
+
 	/*
 	 * Read cpuacct.usage_all for all CPUs.
 	 * If the cpuacct cgroup is present, it is used to calculate the container's
@@ -795,10 +799,6 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	} else {
 		lxcfs_v("proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 	}
-
-	//skip first line
-	if (getline(&line, &linelen, f) < 0)
-		return log_error(0, "proc_stat_read read first line failed");
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
