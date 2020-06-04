@@ -391,7 +391,7 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 	}
 }
 
-static pid_t get_init_pid_for_task(pid_t task)
+static pid_t scm_init_pid(pid_t task)
 {
 	char v = '0';
 	pid_t pid_ret = -1;
@@ -447,7 +447,7 @@ pid_t lookup_initpid_in_store(pid_t pid)
 		/* release the mutex as the following call is expensive */
 		store_unlock();
 
-		hashed_pid = get_init_pid_for_task(pid);
+		hashed_pid = scm_init_pid(pid);
 
 		store_lock();
 
