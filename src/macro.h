@@ -85,7 +85,7 @@
 
 #define move_ptr(ptr)                                 \
 	({                                            \
-		typeof(ptr) __internal_ptr__ = (ptr); \
+		__typeof__(ptr) __internal_ptr__ = (ptr); \
 		(ptr) = NULL;                         \
 		__internal_ptr__;                     \
 	})
@@ -138,5 +138,9 @@
 #define __visible __attribute__((visibility("default")))
 
 #define __lxcfs_fuse_ops
+
+#ifndef __returns_twice
+#define __returns_twice __attribute__((returns_twice))
+#endif
 
 #endif /* __LXCFS_MACRO_H */

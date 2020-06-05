@@ -172,7 +172,6 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	pid_t initpid;
 	ssize_t total_len = 0;
-	char *cache = d->buf;
 	struct load_node *n;
 	int hash;
 	int cfd;
@@ -189,7 +188,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 
 		left = d->size - offset;
 		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
+		memcpy(buf, d->buf + offset, total_len);
 
 		return total_len;
 	}
@@ -220,15 +219,8 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 			return read_file_fuse("/proc/loadavg", buf, size, d);
 		}
 
-		do {
-			n = malloc(sizeof(struct load_node));
-		} while (!n);
-
-		do {
-			n->cg = malloc(strlen(cg) + 1);
-		} while (!n->cg);
-
-		strcpy(n->cg, cg);
+		n = must_realloc(NULL, sizeof(struct load_node));
+		n->cg = move_ptr(cg);
 		n->avenrun[0] = 0;
 		n->avenrun[1] = 0;
 		n->avenrun[2] = 0;
@@ -280,26 +272,18 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
  * @sum : return the number of pid.
  * @cfd : the file descriptor of the mounted cgroup. eg: /sys/fs/cgroup/cpu
  */
-static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int cfd)
+static int calc_pid(char ***pid_buf, const char *rel_path, int depth, int sum, int cfd)
 {
-	__do_free char *path = NULL;
+	__do_free char *line = NULL, *path = NULL;
 	__do_free void *fdopen_cache = NULL;
 	__do_close int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_closedir DIR *dir = NULL;
 	struct dirent *file;
 	size_t linelen = 0;
-	char *line = NULL;
 	int pd;
-	char **pid;
 
-	/* path = dpath + "/cgroup.procs" + /0 */
-	path = malloc(strlen(dpath) + 20);
-	if (!path)
-		return sum;
-
-	strcpy(path, dpath);
-	fd = openat(cfd, path, O_RDONLY | O_CLOEXEC);
+	fd = openat(cfd, rel_path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return sum;
 
@@ -317,22 +301,14 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 			continue;
 
 		if (file->d_type == DT_DIR) {
-			__do_free char *path_dir = NULL;
-
-			/* path + '/' + d_name +/0 */
-			path_dir = malloc(strlen(path) + 2 + sizeof(file->d_name));
-			if (!path_dir)
-				return sum;
-
-			strcpy(path_dir, path);
-			strcat(path_dir, "/");
-			strcat(path_dir, file->d_name);
+			__do_free char *path_next = NULL;
+			path_next = must_make_path(rel_path, "/", file->d_name, NULL);
 			pd = depth - 1;
-			sum = calc_pid(pid_buf, path_dir, pd, sum, cfd);
+			sum = calc_pid(pid_buf, path_next, pd, sum, cfd);
 		}
 	}
 
-	strcat(path, "/cgroup.procs");
+	path = must_make_path(rel_path, "/cgroup.procs", NULL);
 	fd = openat(cfd, path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return sum;
@@ -342,16 +318,18 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 		return sum;
 
 	while (getline(&line, &linelen, f) != -1) {
+		__do_free char *task_pid = NULL;
+		char **pid;
+
+		task_pid = strdup(line);
+		if (!task_pid)
+			return sum;
+
 		pid = realloc(*pid_buf, sizeof(char *) * (sum + 1));
 		if (!pid)
 			return sum;
 		*pid_buf = pid;
-
-		*(*pid_buf + sum) = malloc(strlen(line) + 1);
-		if (!*(*pid_buf + sum))
-			return sum;
-
-		strcpy(*(*pid_buf + sum), line);
+		*(*pid_buf + sum) = move_ptr(task_pid);
 		sum++;
 	}
 
@@ -386,8 +364,7 @@ static uint64_t calc_load(uint64_t load, uint64_t exp, uint64_t active)
  */
 static int refresh_load(struct load_node *p, const char *path)
 {
-	__do_free char *line = NULL;
-	char **idbuf;
+	char **idbuf = NULL;
 	char proc_path[STRLITERALLEN("/proc//task//status") +
 		       2 * INTTYPE_TO_STRLEN(pid_t) + 1];
 	int i, ret, run_pid = 0, total_pid = 0, last_pid = 0;
@@ -422,6 +399,7 @@ static int refresh_load(struct load_node *p, const char *path)
 		}
 
 		while ((file = readdir(dp)) != NULL) {
+			__do_free char *line = NULL;
 			__do_fclose FILE *f = NULL;
 
 			if (strcmp(file->d_name, ".") == 0)
