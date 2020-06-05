@@ -220,7 +220,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		}
 
 		n = must_realloc(NULL, sizeof(struct load_node));
-		n->cg = must_copy_string(cg);
+		n->cg = move_ptr(cg);
 		n->avenrun[0] = 0;
 		n->avenrun[1] = 0;
 		n->avenrun[2] = 0;
