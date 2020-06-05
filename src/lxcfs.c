@@ -1198,6 +1198,7 @@ out:
 		dlclose(dlopen_handle);
 	if (pidfile)
 		unlink(pidfile);
+	free(opts);
 	close_prot_errno_disarm(pidfile_fd);
 	exit(ret);
 }
