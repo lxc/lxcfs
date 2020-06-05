@@ -282,14 +282,13 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
  */
 static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int cfd)
 {
-	__do_free char *path = NULL;
+	__do_free char *line = NULL, *path = NULL;
 	__do_free void *fdopen_cache = NULL;
 	__do_close int fd = -EBADF;
 	__do_fclose FILE *f = NULL;
 	__do_closedir DIR *dir = NULL;
 	struct dirent *file;
 	size_t linelen = 0;
-	char *line = NULL;
 	int pd;
 	char **pid;
 
