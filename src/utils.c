@@ -124,10 +124,13 @@ static int in_same_namespace(pid_t pid1, pid_t pid2, const char *ns)
 
 bool is_shared_pidns(pid_t pid)
 {
+	__do_close int fd = -EBADF;
+
 	if (pid != 1)
 		return false;
 
-	if (in_same_namespace(pid, getpid(), "pid") == -EINVAL)
+	fd = in_same_namespace(pid, getpid(), "pid");
+	if (fd == EINVAL)
 		return true;
 
 	return false;
