@@ -161,20 +161,17 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 	if (type == -1)
 		return -ENOENT;
 
-	info = malloc(sizeof(*info));
+	info = zalloc(sizeof(*info));
 	if (!info)
 		return -ENOMEM;
 
-	memset(info, 0, sizeof(*info));
 	info->type = type;
 
 	info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
 
-	info->buf = malloc(info->buflen);
+	info->buf = zalloc(info->buflen);
 	if (!info->buf)
 		return -ENOMEM;
-
-	memset(info->buf, 0, info->buflen);
 	/* set actual size to buffer size */
 	info->size = info->buflen;
 
