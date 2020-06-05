@@ -317,15 +317,15 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 
 		if (file->d_type == DT_DIR) {
 			__do_free char *path_dir = NULL;
+			int ret;
 
 			/* path + '/' + d_name +/0 */
-			path_dir = malloc(strlen(path) + 2 + sizeof(file->d_name));
-			if (!path_dir)
+			ret = asprintf(&path_dir, "%s/%s", path, file->d_name);
+			if (ret < 0) {
+				path_dir = NULL;
 				return sum;
+			}
 
-			strcpy(path_dir, path);
-			strcat(path_dir, "/");
-			strcat(path_dir, file->d_name);
 			pd = depth - 1;
 			sum = calc_pid(pid_buf, path_dir, pd, sum, cfd);
 		}
