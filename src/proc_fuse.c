@@ -662,10 +662,9 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	double busytime = get_reaper_busy(fc->pid);
 	char *cache = d->buf;
 	ssize_t total_len = 0;
-	double idletime, reaperage;
+	double busytime, idletime, reaperage;
 
 #if RELOADTEST
 	iwashere();
@@ -693,6 +692,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	 * get_reaper_busy() function.
 	 */
 	idletime = reaperage;
+	busytime = get_reaper_busy(fc->pid);
 	if (reaperage >= busytime)
 		idletime = reaperage - busytime;
 
