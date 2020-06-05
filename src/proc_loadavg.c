@@ -420,6 +420,7 @@ static int refresh_load(struct load_node *p, const char *path)
 		}
 
 		while ((file = readdir(dp)) != NULL) {
+			__do_free char *line = NULL;
 			__do_fclose FILE *f = NULL;
 
 			if (strcmp(file->d_name, ".") == 0)
