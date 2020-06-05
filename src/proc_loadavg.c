@@ -280,7 +280,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
  * @sum : return the number of pid.
  * @cfd : the file descriptor of the mounted cgroup. eg: /sys/fs/cgroup/cpu
  */
-static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int cfd)
+static int calc_pid(char ***pid_buf, const char *rel_path, int depth, int sum, int cfd)
 {
 	__do_free char *line = NULL, *path = NULL;
 	__do_free void *fdopen_cache = NULL;
@@ -291,13 +291,7 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 	size_t linelen = 0;
 	int pd;
 
-	/* path = dpath + "/cgroup.procs" + /0 */
-	path = malloc(strlen(dpath) + 20);
-	if (!path)
-		return sum;
-
-	strcpy(path, dpath);
-	fd = openat(cfd, path, O_RDONLY | O_CLOEXEC);
+	fd = openat(cfd, rel_path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return sum;
 
@@ -315,22 +309,14 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 			continue;
 
 		if (file->d_type == DT_DIR) {
-			__do_free char *path_dir = NULL;
-			int ret;
-
-			/* path + '/' + d_name +/0 */
-			ret = asprintf(&path_dir, "%s/%s", path, file->d_name);
-			if (ret < 0) {
-				path_dir = NULL;
-				return sum;
-			}
-
+			__do_free char *path_next = NULL;
+			path_next = must_make_path(rel_path, "/", file->d_name, NULL);
 			pd = depth - 1;
-			sum = calc_pid(pid_buf, path_dir, pd, sum, cfd);
+			sum = calc_pid(pid_buf, path_next, pd, sum, cfd);
 		}
 	}
 
-	strcat(path, "/cgroup.procs");
+	path = must_make_path(rel_path, "/cgroup.procs", NULL);
 	fd = openat(cfd, path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return sum;
