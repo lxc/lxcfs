@@ -172,7 +172,6 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	pid_t initpid;
 	ssize_t total_len = 0;
-	char *cache = d->buf;
 	struct load_node *n;
 	int hash;
 	int cfd;
@@ -189,7 +188,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 
 		left = d->size - offset;
 		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
+		memcpy(buf, d->buf + offset, total_len);
 
 		return total_len;
 	}
