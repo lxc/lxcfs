@@ -385,8 +385,7 @@ static uint64_t calc_load(uint64_t load, uint64_t exp, uint64_t active)
  */
 static int refresh_load(struct load_node *p, const char *path)
 {
-	__do_free char *line = NULL;
-	char **idbuf;
+	char **idbuf = NULL;
 	char proc_path[STRLITERALLEN("/proc//task//status") +
 		       2 * INTTYPE_TO_STRLEN(pid_t) + 1];
 	int i, ret, run_pid = 0, total_pid = 0, last_pid = 0;
