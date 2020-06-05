@@ -334,9 +334,8 @@ static pid_t lookup_verify_initpid(ino_t pidns_inode)
 	return ret_errno(ESRCH);
 }
 
-static int send_creds_clone_wrapper(void *arg)
+static bool send_creds_ok(int sock_fd)
 {
-	int sock = PTR_TO_INT(arg);
 	char v = '1'; /* we are the child */
 	struct ucred cred = {
 	    .uid = 0,
@@ -344,29 +343,76 @@ static int send_creds_clone_wrapper(void *arg)
 	    .pid = 1,
 	};
 
-	return send_creds(sock, &cred, v, true) != SEND_CREDS_OK;
+	return send_creds(sock_fd, &cred, v, true) == SEND_CREDS_OK;
 }
 
-/*
- * Let's use the "standard stack limit" (i.e. glibc thread size default) for
- * stack sizes: 8MB.
- */
-#define __LXCFS_STACK_SIZE (8 * 1024 * 1024)
-pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+__returns_twice pid_t lxcfs_raw_clone(unsigned long flags, int *pidfd)
 {
-	pid_t ret;
-	void *stack;
+	/*
+	 * These flags don't interest at all so we don't jump through any hoops
+	 * of retrieving them and passing them to the kernel.
+	 */
+	errno = EINVAL;
+	if ((flags & (CLONE_VM | CLONE_PARENT_SETTID | CLONE_CHILD_SETTID |
+		      CLONE_CHILD_CLEARTID | CLONE_SETTLS)))
+		return -EINVAL;
 
-	stack = malloc(__LXCFS_STACK_SIZE);
-	if (!stack)
-		return ret_errno(ENOMEM);
+#if defined(__s390x__) || defined(__s390__) || defined(__CRIS__)
+	/* On s390/s390x and cris the order of the first and second arguments
+	 * of the system call is reversed.
+	 */
+	return syscall(__NR_clone, NULL, flags | SIGCHLD, pidfd);
+#elif defined(__sparc__) && defined(__arch64__)
+	{
+		/*
+		 * sparc64 always returns the other process id in %o0, and a
+		 * boolean flag whether this is the child or the parent in %o1.
+		 * Inline assembly is needed to get the flag returned in %o1.
+		 */
+		register long g1 asm("g1") = __NR_clone;
+		register long o0 asm("o0") = flags | SIGCHLD;
+		register long o1 asm("o1") = 0; /* is parent/child indicator */
+		register long o2 asm("o2") = (unsigned long)pidfd;
+		long is_error, retval, in_child;
+		pid_t child_pid;
 
-#ifdef __ia64__
-	ret = __clone2(fn, stack, __LXCFS_STACK_SIZE, flags | SIGCHLD, arg, NULL);
+		asm volatile(
+#if defined(__arch64__)
+		    "t 0x6d\n\t" /* 64-bit trap */
 #else
-	ret = clone(fn, stack + __LXCFS_STACK_SIZE, flags | SIGCHLD, arg, NULL);
+		    "t 0x10\n\t" /* 32-bit trap */
 #endif
-	return ret;
+		    /*
+		     * catch errors: On sparc, the carry bit (csr) in the
+		     * processor status register (psr) is used instead of a
+		     * full register.
+		     */
+		    "addx %%g0, 0, %%g1"
+		    : "=r"(g1), "=r"(o0), "=r"(o1), "=r"(o2) /* outputs */
+		    : "r"(g1), "r"(o0), "r"(o1), "r"(o2)     /* inputs */
+		    : "%cc");				     /* clobbers */
+
+		is_error = g1;
+		retval = o0;
+		in_child = o1;
+
+		if (is_error) {
+			errno = retval;
+			return -1;
+		}
+
+		if (in_child)
+			return 0;
+
+		child_pid = retval;
+		return child_pid;
+	}
+#elif defined(__ia64__)
+	/* On ia64 the stack and stack size are passed as separate arguments. */
+	return syscall(__NR_clone, flags | SIGCHLD, NULL, prctl_arg(0), pidfd);
+#else
+	return syscall(__NR_clone, flags | SIGCHLD, NULL, pidfd);
+#endif
 }
 
 #define LXCFS_PROC_PID_NS_LEN                                    \
@@ -397,16 +443,21 @@ static void write_task_init_pid_exit(int sock, pid_t target)
 	if (setns(fd, 0))
 		log_exit("Failed to setns to pid namespace of process %d", target);
 
-	pid = lxcfs_clone(send_creds_clone_wrapper, INT_TO_PTR(sock), 0);
+	pid = lxcfs_raw_clone(0, NULL);
 	if (pid < 0)
 		_exit(EXIT_FAILURE);
 
-	if (pid != 0) {
-		if (!wait_for_pid(pid))
+	if (pid == 0) {
+		if (!send_creds_ok(sock))
 			_exit(EXIT_FAILURE);
 
 		_exit(EXIT_SUCCESS);
 	}
+
+	if (!wait_for_pid(pid))
+		_exit(EXIT_FAILURE);
+
+	_exit(EXIT_SUCCESS);
 }
 
 static pid_t scm_init_pid(pid_t task)
