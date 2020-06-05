@@ -290,7 +290,6 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 	struct dirent *file;
 	size_t linelen = 0;
 	int pd;
-	char **pid;
 
 	/* path = dpath + "/cgroup.procs" + /0 */
 	path = malloc(strlen(dpath) + 20);
@@ -341,16 +340,18 @@ static int calc_pid(char ***pid_buf, const char *dpath, int depth, int sum, int 
 		return sum;
 
 	while (getline(&line, &linelen, f) != -1) {
+		__do_free char *task_pid = NULL;
+		char **pid;
+
+		task_pid = strdup(line);
+		if (!task_pid)
+			return sum;
+
 		pid = realloc(*pid_buf, sizeof(char *) * (sum + 1));
 		if (!pid)
 			return sum;
 		*pid_buf = pid;
-
-		*(*pid_buf + sum) = malloc(strlen(line) + 1);
-		if (!*(*pid_buf + sum))
-			return sum;
-
-		strcpy(*(*pid_buf + sum), line);
+		*(*pid_buf + sum) = move_ptr(task_pid);
 		sum++;
 	}
 
