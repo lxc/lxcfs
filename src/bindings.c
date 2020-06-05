@@ -251,6 +251,24 @@ static void prune_initpid_store(void)
 	}
 }
 
+static void clear_initpid_store(void)
+{
+	store_lock();
+	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
+		for (struct pidns_init_store *entry = pidns_hash_table[i]; entry;) {
+			struct pidns_init_store *cur = entry;
+
+			lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
+
+			pidns_hash_table[i] = entry->next;
+			entry = entry->next;
+			close_prot_errno_disarm(cur->init_pidfd);
+			free_disarm(cur);
+		}
+	}
+	store_unlock();
+}
+
 /* Must be called under store_lock */
 static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
@@ -838,6 +856,7 @@ static void __attribute__((destructor)) lxcfs_exit(void)
 {
 	lxcfs_info("Running destructor %s", __func__);
 
+	clear_initpid_store();
 	free_cpuview();
 	cgroup_exit(cgroup_ops);
 }
