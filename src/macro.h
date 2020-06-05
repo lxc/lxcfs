@@ -85,7 +85,7 @@
 
 #define move_ptr(ptr)                                 \
 	({                                            \
-		typeof(ptr) __internal_ptr__ = (ptr); \
+		__typeof__(ptr) __internal_ptr__ = (ptr); \
 		(ptr) = NULL;                         \
 		__internal_ptr__;                     \
 	})
