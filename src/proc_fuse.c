@@ -663,7 +663,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
-	ssize_t total_len = 0;
+	ssize_t total_len = 0, ret = 0;
 	double busytime, idletime, reaperage;
 
 #if RELOADTEST
@@ -673,11 +673,11 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	if (offset) {
 		int left;
 
-		if (!d->cached)
-			return 0;
-
 		if (offset > d->size)
 			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
 
 		left = d->size - offset;
 		total_len = left > size ? size : left;
@@ -696,16 +696,15 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	if (reaperage >= busytime)
 		idletime = reaperage - busytime;
 
-	total_len = snprintf(d->buf, d->buflen, "%.2lf %.2lf\n", reaperage, idletime);
-	if (total_len < 0 || total_len >= d->buflen)
+	ret = snprintf(d->buf, d->buflen, "%.2lf %.2lf\n", reaperage, idletime);
+	if (ret < 0 || ret >= d->buflen)
 		return read_file_fuse("/proc/uptime", buf, size, d);
+	total_len = ret;
 
-	d->size = (int)total_len;
 	d->cached = 1;
-
+	d->size = total_len;
 	if (total_len > size)
 		total_len = size;
-
 	memcpy(buf, d->buf, total_len);
 
 	return total_len;
