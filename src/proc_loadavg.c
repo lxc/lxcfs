@@ -220,15 +220,8 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 			return read_file_fuse("/proc/loadavg", buf, size, d);
 		}
 
-		do {
-			n = malloc(sizeof(struct load_node));
-		} while (!n);
-
-		do {
-			n->cg = malloc(strlen(cg) + 1);
-		} while (!n->cg);
-
-		strcpy(n->cg, cg);
+		n = must_realloc(NULL, sizeof(struct load_node));
+		n->cg = must_copy_string(cg);
 		n->avenrun[0] = 0;
 		n->avenrun[1] = 0;
 		n->avenrun[2] = 0;
