@@ -247,6 +247,8 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	__do_free char *cg = NULL, *memswlimit_str = NULL, *memusage_str = NULL,
 		       *memswusage_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
+	bool wants_swap = opts && !opts->swap_off;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
 		 swap_total = 0, swap_free = 0;
@@ -289,17 +291,19 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
 		lxcfs_error("Failed to convert memusage %s", memusage_str);
 
-	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cg, &memswlimit_str);
-	if (ret >= 0)
-		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cg, &memswusage_str);
-	if (ret >= 0) {
-		memswlimit = get_min_memlimit(cg, true);
+	if (wants_swap) {
+		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cg, &memswlimit_str);
+		if (ret >= 0)
+			ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cg, &memswusage_str);
+		if (ret >= 0) {
+			memswlimit = get_min_memlimit(cg, true);
 
-		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
-			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
+			if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
+				lxcfs_error("Failed to convert memswusage %s", memswusage_str);
 
-		swap_total = (memswlimit - memlimit) / 1024;
-		swap_free = (memswusage - memusage) / 1024;
+			swap_total = (memswlimit - memlimit) / 1024;
+			swap_free = (memswusage - memusage) / 1024;
+		}
 	}
 
 	total_len = snprintf(d->buf, d->size, "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n");
@@ -1013,6 +1017,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
+	bool wants_swap = opts && !opts->swap_off;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		 hosttotal = 0, swtotal = 0;
@@ -1061,17 +1066,19 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	 * Following values are allowed to fail, because swapaccount might be
 	 * turned off for current kernel.
 	 */
-	ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memswlimit_str);
-	if (ret >= 0)
-		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
-	if (ret >= 0) {
-		memswlimit = get_min_memlimit(cgroup, true);
-		memswlimit = memswlimit / 1024;
+	if (wants_swap) {
+		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memswlimit_str);
+		if (ret >= 0)
+			ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
+		if (ret >= 0) {
+			memswlimit = get_min_memlimit(cgroup, true);
+			memswlimit = memswlimit / 1024;
 
-		if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
-			lxcfs_error("Failed to convert memswusage %s", memswusage_str);
-		memswusage = memswusage / 1024;
-		swtotal = memswlimit;
+			if (safe_uint64(memswusage_str, &memswusage, 10) < 0)
+				lxcfs_error("Failed to convert memswusage %s", memswusage_str);
+			memswusage = memswusage / 1024;
+			swtotal = memswlimit;
+		}
 	}
 
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
@@ -1103,7 +1110,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "MemAvailable:")) {
 			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + mstat.total_cache / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
+		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && wants_swap) {
 			uint64_t hostswtotal = 0;
 
 			sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
@@ -1114,11 +1121,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", swtotal);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
+		} else if (startswith(line, "SwapTotal:") && !wants_swap) {
 			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && memswlimit > 0 &&
-			   opts && opts->swap_off == false) {
+		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && wants_swap) {
 			uint64_t swfree = 0;
 			uint64_t swusage = 0;
 
@@ -1127,7 +1133,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
 			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && opts && opts->swap_off == true) {
+		} else if (startswith(line, "SwapFree:") && !wants_swap) {
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
