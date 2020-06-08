@@ -1110,31 +1110,33 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		} else if (startswith(line, "MemAvailable:")) {
 			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + mstat.total_cache / 1024);
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && wants_swap) {
-			uint64_t hostswtotal = 0;
+		} else if (startswith(line, "SwapTotal:")) {
+			if (memswlimit > 0 && wants_swap) {
+				uint64_t hostswtotal = 0;
 
-			sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
+				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-			/* Don't advertise more SWAP than the total memory allowed. */
-			if (hostswtotal < swtotal)
-				swtotal = hostswtotal;
+				/* Don't advertise more SWAP than the total memory allowed. */
+				if (hostswtotal < swtotal)
+					swtotal = hostswtotal;
 
-			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", swtotal);
+				snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", swtotal);
+			} else {
+				snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
+			}
 			printme = lbuf;
-		} else if (startswith(line, "SwapTotal:") && !wants_swap) {
-			snprintf(lbuf, 100, "SwapTotal:      %8" PRIu64 " kB\n", (uint64_t)0);
-			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && wants_swap) {
-			uint64_t swfree = 0;
-			uint64_t swusage = 0;
+		} else if (startswith(line, "SwapFree:")) {
+			if (memswlimit > 0 && wants_swap) {
+				uint64_t swfree = 0;
+				uint64_t swusage = 0;
 
-			swusage = memswusage - memusage;
-			swfree = swtotal - swusage;
+				swusage = memswusage - memusage;
+				swfree = swtotal - swusage;
 
-			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
-			printme = lbuf;
-		} else if (startswith(line, "SwapFree:") && !wants_swap) {
-			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", (uint64_t)0);
+				snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
+			} else {
+				snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", (uint64_t)0);
+			}
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
 			snprintf(lbuf, 100, "Slab:        %8" PRIu64 " kB\n", (uint64_t)0);
