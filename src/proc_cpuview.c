@@ -1016,8 +1016,8 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 {
 	__do_free char *usage_str = NULL;
 	__do_free struct cpuacct_usage *cpu_usage = NULL;
-	int cpucount;
 	int i = 0, j = 0, read_pos = 0, read_cnt = 0;
+	int cpucount;
 	int ret;
 	int cg_cpu;
 	uint64_t cg_user, cg_system;
@@ -1025,10 +1025,7 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 
 	ticks_per_sec = sysconf(_SC_CLK_TCK);
 	if (ticks_per_sec < 0 && errno == EINVAL) {
-		lxcfs_v(
-			"%s\n",
-			"read_cpuacct_usage_all failed to determine number of clock ticks "
-			"in a second");
+		lxcfs_debug("%m - Failed to determine number of ticks per second");
 		return -1;
 	}
 
@@ -1039,55 +1036,56 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 
 	memset(cpu_usage, 0, sizeof(struct cpuacct_usage) * cpucount);
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_all", &usage_str)) {
-		char *data = NULL;
-		size_t sz = 0, asz = 0;
+		char *sep = " \t\n";
+		char *tok;
 
-		/* read cpuacct.usage_percpu instead. */
-		lxcfs_v("failed to read cpuacct.usage_all. reading cpuacct.usage_percpu instead\n%s", "");
+		/* Read cpuacct.usage_percpu instead. */
+		lxcfs_debug("Falling back to cpuacct.usage_percpu");
 		if (!cgroup_ops->get(cgroup_ops, "cpuacct", cg, "cpuacct.usage_percpu", &usage_str))
 			return -1;
-		lxcfs_v("usage_str: %s\n", usage_str);
 
-		/* convert cpuacct.usage_percpu into cpuacct.usage_all. */
-		lxcfs_v("converting cpuacct.usage_percpu into cpuacct.usage_all\n%s", "");
+		lxc_iterate_parts(tok, usage_str, sep) {
+			uint64_t percpu_user;
 
-		must_strcat(&data, &sz, &asz, "cpu user system\n");
+			if (i >= cpucount)
+				break;
 
-		while (sscanf(usage_str + read_pos, "%" PRIu64 " %n", &cg_user, &read_cnt) > 0) {
-			lxcfs_debug("i: %d, cg_user: %" PRIu64 ", read_pos: %d, read_cnt: %d\n", i, cg_user, read_pos, read_cnt);
-			must_strcat(&data, &sz, &asz, "%d %lu 0\n", i, cg_user);
+			tok = trim_whitespace_in_place(tok);
+			ret = safe_uint64(tok, &percpu_user, 10);
+			if (ret)
+				return -1;
+
+			/* Convert the time from nanoseconds to USER_HZ */
+			cpu_usage[i].user = percpu_user / 1000.0 / 1000 / 1000 * ticks_per_sec;
+			cpu_usage[i].system = cpu_usage[i].user;
 			i++;
-			read_pos += read_cnt;
+			lxcfs_debug("cpu%d with time %s", i, tok);
 		}
-
-		usage_str = data;
-		read_pos = 0;
-
-		lxcfs_v("usage_str: %s\n", usage_str);
-	}
-
-	if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0)
-		return log_error(-1, "read_cpuacct_usage_all reading first line from %s/cpuacct.usage_all failed", cg);
-
-	read_pos += read_cnt;
-
-	for (i = 0, j = 0; i < cpucount; i++) {
-		ret = sscanf(usage_str + read_pos,
-			     "%d %" PRIu64 " %" PRIu64 "\n%n", &cg_cpu,
-			     &cg_user, &cg_system, &read_cnt);
-
-		if (ret == EOF)
-			break;
-
-		if (ret != 3)
-			return log_error(-1, "read_cpuacct_usage_all reading from %s/cpuacct.usage_all failed", cg);
+	} else {
+		if (sscanf(usage_str, "cpu user system\n%n", &read_cnt) != 0)
+			return log_error(-1, "read_cpuacct_usage_all reading first line from %s/cpuacct.usage_all failed", cg);
 
 		read_pos += read_cnt;
 
-		/* Convert the time from nanoseconds to USER_HZ */
-		cpu_usage[j].user = cg_user / 1000.0 / 1000 / 1000 * ticks_per_sec;
-		cpu_usage[j].system = cg_system / 1000.0 / 1000 / 1000 * ticks_per_sec;
-		j++;
+		for (i = 0, j = 0; i < cpucount; i++) {
+			ret = sscanf(usage_str + read_pos,
+					"%d %" PRIu64 " %" PRIu64 "\n%n", &cg_cpu,
+					&cg_user, &cg_system, &read_cnt);
+
+			if (ret == EOF)
+				break;
+
+			if (ret != 3)
+				return log_error(-EINVAL, "Failed to parse cpuacct.usage_all line %s from cgroup %s",
+						usage_str + read_pos, cg);
+
+			read_pos += read_cnt;
+
+			/* Convert the time from nanoseconds to USER_HZ */
+			cpu_usage[j].user = cg_user / 1000.0 / 1000 / 1000 * ticks_per_sec;
+			cpu_usage[j].system = cg_system / 1000.0 / 1000 / 1000 * ticks_per_sec;
+			j++;
+		}
 	}
 
 	*return_usage = move_ptr(cpu_usage);
