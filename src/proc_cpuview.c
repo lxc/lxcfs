@@ -133,12 +133,21 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 
 static void free_proc_stat_node(struct cg_proc_stat *node)
 {
-	pthread_mutex_destroy(&node->lock);
-	free_disarm(node->cg);
-	free_disarm(node->usage);
-	free_disarm(node->view);
-	free_disarm(node);
+	if (node) {
+		/*
+		 * We're abusing the usage pointer to indicate that
+		 * pthread_mutex_init() was successful. Don't judge me.
+		 */
+		if (node->usage)
+			pthread_mutex_destroy(&node->lock);
+		free_disarm(node->cg);
+		free_disarm(node->usage);
+		free_disarm(node->view);
+		free_disarm(node);
+	}
 }
+
+define_cleanup_function(struct cg_proc_stat *, free_proc_stat_node);
 
 static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 {
@@ -177,60 +186,39 @@ out:
 	return rv;
 }
 
-static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage,
+					       int cpu_count, const char *cg)
 {
-	struct cg_proc_stat *node;
-	int i;
+	call_cleaner(free_proc_stat_node) struct cg_proc_stat *node = NULL;
+	__do_free struct cpuacct_usage *new_usage = NULL;
 
-	node = malloc(sizeof(struct cg_proc_stat));
+	node = zalloc(sizeof(struct cg_proc_stat));
 	if (!node)
-		goto err;
+		return NULL;
 
-	node->cg = NULL;
-	node->usage = NULL;
-	node->view = NULL;
-
-	node->cg = malloc(strlen(cg) + 1);
+	node->cg = strdup(cg);
 	if (!node->cg)
-		goto err;
+		return NULL;
 
-	strcpy(node->cg, cg);
+	new_usage = memdup(usage, sizeof(struct cpuacct_usage) * cpu_count);
+	if (!new_usage)
+		return NULL;
 
-	node->usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
-	if (!node->usage)
-		goto err;
-
-	memcpy(node->usage, usage, sizeof(struct cpuacct_usage) * cpu_count);
-
-	node->view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	node->view = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!node->view)
-		goto err;
+		return NULL;
 
 	node->cpu_count = cpu_count;
-	node->next = NULL;
 
-	if (pthread_mutex_init(&node->lock, NULL) != 0)
-		log_error(goto err, "Failed to initialize node lock");
+	if (pthread_mutex_init(&node->lock, NULL))
+		return NULL;
+	/*
+	 * We're abusing the usage pointer to indicate that
+	 * pthread_mutex_init() was successful. Don't judge me.
+	 */
+	node->usage = move_ptr(new_usage);
 
-	for (i = 0; i < cpu_count; i++) {
-		node->view[i].user = 0;
-		node->view[i].system = 0;
-		node->view[i].idle = 0;
-	}
-
-	return node;
-
-err:
-	if (node && node->cg)
-		free(node->cg);
-	if (node && node->usage)
-		free(node->usage);
-	if (node && node->view)
-		free(node->view);
-	if (node)
-		free(node);
-
-	return NULL;
+	return move_ptr(node);
 }
 
 static bool cgfs_param_exist(const char *controller, const char *cgroup,
