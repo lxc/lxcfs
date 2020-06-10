@@ -52,10 +52,10 @@
 /* Data for CPU view */
 struct cg_proc_stat {
 	char *cg;
-	struct cpuacct_usage *usage; // Real usage as read from the host's /proc/stat
-	struct cpuacct_usage *view; // Usage stats reported to the container
+	struct cpuacct_usage *usage; 	/* Real usage as read from the host's /proc/stat. */
+	struct cpuacct_usage *view; 	/* Usage stats reported to the container. */
 	int cpu_count;
-	pthread_mutex_t lock; // For node manipulation
+	pthread_mutex_t lock; 		/* For node manipulation. */
 	struct cg_proc_stat *next;
 };
 
