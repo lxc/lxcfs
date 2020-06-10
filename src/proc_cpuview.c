@@ -159,7 +159,7 @@ static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 
 	if (!head->next) {
 		head->next = new_node;
-		goto out;
+		goto out_rwlock_unlock;
 	}
 
 	node = head->next;
@@ -169,7 +169,7 @@ static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 			/* The node is already present, return it */
 			free_proc_stat_node(new_node);
 			rv = node;
-			goto out;
+			goto out_rwlock_unlock;
 		}
 
 		if (node->next) {
@@ -178,10 +178,10 @@ static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 		}
 
 		node->next = new_node;
-		goto out;
+		goto out_rwlock_unlock;
 	}
 
-out:
+out_rwlock_unlock:
 	pthread_rwlock_unlock(&head->lock);
 	return rv;
 }
