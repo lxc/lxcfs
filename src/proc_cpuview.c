@@ -468,14 +468,17 @@ int max_cpu_count(const char *cg)
 	int64_t cfs_quota, cfs_period;
 	int nr_cpus_in_cpuset = 0;
 
-	read_cpu_cfs_param(cg, "quota", &cfs_quota);
-	read_cpu_cfs_param(cg, "period", &cfs_period);
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
 
 	cpuset = get_cpuset(cg);
 	if (cpuset)
 		nr_cpus_in_cpuset = cpu_number_in_cpuset(cpuset);
 
-	if (cfs_quota <= 0 || cfs_period <= 0){
+	if (cfs_quota <= 0 || cfs_period <= 0) {
 		if (nr_cpus_in_cpuset > 0)
 			return nr_cpus_in_cpuset;
 
@@ -484,7 +487,8 @@ int max_cpu_count(const char *cg)
 
 	rv = cfs_quota / cfs_period;
 
-	/* In case quota/period does not yield a whole number, add one CPU for
+	/*
+	 * In case quota/period does not yield a whole number, add one CPU for
 	 * the remainder.
 	 */
 	if ((cfs_quota % cfs_period) > 0)
@@ -494,7 +498,7 @@ int max_cpu_count(const char *cg)
 	if (rv > nprocs)
 		rv = nprocs;
 
-	/* use min value in cpu quota and cpuset */
+	/* Use min value in cpu quota and cpuset. */
 	if (nr_cpus_in_cpuset > 0 && nr_cpus_in_cpuset < rv)
 		rv = nr_cpus_in_cpuset;
 
