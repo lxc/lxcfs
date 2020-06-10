@@ -1097,18 +1097,18 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 
 static bool cpuview_init_head(struct cg_proc_stat_head **head)
 {
-	*head = malloc(sizeof(struct cg_proc_stat_head));
-	if (!(*head))
-		return log_error(false, "%s", strerror(errno));
+	__do_free struct cg_proc_stat_head *h;
 
-	(*head)->lastcheck = time(NULL);
-	(*head)->next = NULL;
+	h = zalloc(sizeof(struct cg_proc_stat_head));
+	if (!h)
+		return false;
 
-	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
-		free_disarm(*head);
-		return log_error(false, "Failed to initialize list lock");
-	}
+	if (pthread_rwlock_init(&h->lock, NULL))
+		return false;
 
+	h->lastcheck = time(NULL);
+
+	*head = move_ptr(h);
 	return true;
 }
 
