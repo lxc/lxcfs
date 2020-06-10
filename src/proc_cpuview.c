@@ -409,23 +409,23 @@ static uint64_t diff_cpu_usage(struct cpuacct_usage *older,
 static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
 {
 	__do_free char *str = NULL;
-	char file[11 + 6 + 1]; /* cpu.cfs__us + quota/period + \0 */
+	char file[STRLITERALLEN("cpu.cfs_period_us") + 1];
 	bool first = true;
+	int ret;
 
-	if (!pure_unified_layout(cgroup_ops)) {
-		snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
-        } else {
-		strcpy(file, "cpu.max");
+	if (pure_unified_layout(cgroup_ops)) {
 		first = !strcmp(param, "quota");
+		ret = snprintf(file, sizeof(file), "cpu.max");
+	} else {
+		ret = snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
 	}
+	if (ret < 0 || (size_t)ret >= sizeof(file))
+		return false;
 
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
-	if (sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) != 1)
-		return false;
-
-	return true;
+	return sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) == 1;
 }
 
 /*
