@@ -219,8 +219,8 @@ static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage,
 	return move_ptr(node);
 }
 
-static bool cgfs_param_exist(const char *controller, const char *cgroup,
-			     const char *file)
+static bool cgroup_supports(const char *controller, const char *cgroup,
+			    const char *file)
 {
 	__do_free char *path = NULL;
 	int cfd;
@@ -230,7 +230,7 @@ static bool cgfs_param_exist(const char *controller, const char *cgroup,
 		return false;
 
 	path = must_make_path_relative(cgroup, file, NULL);
-	return (faccessat(cfd, path, F_OK, 0) == 0);
+	return faccessat(cfd, path, F_OK, 0) == 0;
 }
 
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
@@ -238,10 +238,8 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 	struct cg_proc_stat *first = NULL;
 
 	for (struct cg_proc_stat *prev = NULL; node; ) {
-		if (!cgfs_param_exist("cpu", node->cg, "cpu.shares")) {
-			struct cg_proc_stat *tmp = node;
-
-			lxcfs_debug("Removing stat node for %s\n", node->cg);
+		if (!cgroup_supports("cpu", node->cg, "cpu.shares")) {
+			call_cleaner(free_proc_stat_node) struct cg_proc_stat *cur = node;
 
 			if (prev)
 				prev->next = node->next;
@@ -249,7 +247,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 				first = node->next;
 
 			node = node->next;
-			free_proc_stat_node(tmp);
+			lxcfs_debug("Removing stat node for %s\n", cur->cg);
 		} else {
 			if (!first)
 				first = node;
