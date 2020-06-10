@@ -52,10 +52,10 @@
 /* Data for CPU view */
 struct cg_proc_stat {
 	char *cg;
-	struct cpuacct_usage *usage; // Real usage as read from the host's /proc/stat
-	struct cpuacct_usage *view; // Usage stats reported to the container
+	struct cpuacct_usage *usage; 	/* Real usage as read from the host's /proc/stat. */
+	struct cpuacct_usage *view; 	/* Usage stats reported to the container. */
 	int cpu_count;
-	pthread_mutex_t lock; // For node manipulation
+	pthread_mutex_t lock; 		/* For node manipulation. */
 	struct cg_proc_stat *next;
 };
 
@@ -92,32 +92,24 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 	__do_free struct cpuacct_usage *new_usage = NULL, *new_view = NULL;
 
 	/* Allocate new memory */
-	new_usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	new_usage = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!new_usage)
 		return false;
 
-	new_view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	new_view = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!new_view)
 		return false;
 
 	/* Copy existing data & initialize new elements */
 	for (int i = 0; i < cpu_count; i++) {
 		if (i < node->cpu_count) {
-			new_usage[i].user = node->usage[i].user;
-			new_usage[i].system = node->usage[i].system;
-			new_usage[i].idle = node->usage[i].idle;
+			new_usage[i].user 	= node->usage[i].user;
+			new_usage[i].system 	= node->usage[i].system;
+			new_usage[i].idle 	= node->usage[i].idle;
 
-			new_view[i].user = node->view[i].user;
-			new_view[i].system = node->view[i].system;
-			new_view[i].idle = node->view[i].idle;
-		} else {
-			new_usage[i].user = 0;
-			new_usage[i].system = 0;
-			new_usage[i].idle = 0;
-
-			new_view[i].user = 0;
-			new_view[i].system = 0;
-			new_view[i].idle = 0;
+			new_view[i].user 	= node->view[i].user;
+			new_view[i].system 	= node->view[i].system;
+			new_view[i].idle 	= node->view[i].idle;
 		}
 	}
 
@@ -133,108 +125,102 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 
 static void free_proc_stat_node(struct cg_proc_stat *node)
 {
-	pthread_mutex_destroy(&node->lock);
-	free_disarm(node->cg);
-	free_disarm(node->usage);
-	free_disarm(node->view);
-	free_disarm(node);
+	if (node) {
+		/*
+		 * We're abusing the usage pointer to indicate that
+		 * pthread_mutex_init() was successful. Don't judge me.
+		 */
+		if (node->usage)
+			pthread_mutex_destroy(&node->lock);
+		free_disarm(node->cg);
+		free_disarm(node->usage);
+		free_disarm(node->view);
+		free_disarm(node);
+	}
 }
+
+define_cleanup_function(struct cg_proc_stat *, free_proc_stat_node);
 
 static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 {
-	int hash = calc_hash(new_node->cg) % CPUVIEW_HASH_SIZE;
+	call_cleaner(free_proc_stat_node) struct cg_proc_stat *new = new_node;
+	struct cg_proc_stat *rv = new_node;
+	int hash = calc_hash(new->cg) % CPUVIEW_HASH_SIZE;
 	struct cg_proc_stat_head *head = proc_stat_history[hash];
-	struct cg_proc_stat *node, *rv = new_node;
+	struct cg_proc_stat *cur;
 
 	pthread_rwlock_wrlock(&head->lock);
 
 	if (!head->next) {
-		head->next = new_node;
-		goto out;
+		head->next = move_ptr(new);
+		goto out_rwlock_unlock;
 	}
 
-	node = head->next;
+	cur = head->next;
 
 	for (;;) {
-		if (strcmp(node->cg, new_node->cg) == 0) {
-			/* The node is already present, return it */
-			free_proc_stat_node(new_node);
-			rv = node;
-			goto out;
+		/*
+		 * The node to be added is already present in the list, so
+		 * free the newly allocated one and return the one we found.
+		 */
+		if (strcmp(cur->cg, new->cg) == 0) {
+			rv = cur;
+			goto out_rwlock_unlock;
 		}
 
-		if (node->next) {
-			node = node->next;
+		/* Keep walking. */
+		if (cur->next) {
+			cur = cur->next;
 			continue;
 		}
 
-		node->next = new_node;
-		goto out;
+		/* Add new node to end of list. */
+		cur->next = move_ptr(new);
+		goto out_rwlock_unlock;
 	}
 
-out:
+out_rwlock_unlock:
 	pthread_rwlock_unlock(&head->lock);
-	return rv;
+	return move_ptr(rv);
 }
 
-static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage,
+					       int cpu_count, const char *cg)
 {
-	struct cg_proc_stat *node;
-	int i;
+	call_cleaner(free_proc_stat_node) struct cg_proc_stat *node = NULL;
+	__do_free struct cpuacct_usage *new_usage = NULL;
 
-	node = malloc(sizeof(struct cg_proc_stat));
+	node = zalloc(sizeof(struct cg_proc_stat));
 	if (!node)
-		goto err;
+		return NULL;
 
-	node->cg = NULL;
-	node->usage = NULL;
-	node->view = NULL;
-
-	node->cg = malloc(strlen(cg) + 1);
+	node->cg = strdup(cg);
 	if (!node->cg)
-		goto err;
+		return NULL;
 
-	strcpy(node->cg, cg);
+	new_usage = memdup(usage, sizeof(struct cpuacct_usage) * cpu_count);
+	if (!new_usage)
+		return NULL;
 
-	node->usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
-	if (!node->usage)
-		goto err;
-
-	memcpy(node->usage, usage, sizeof(struct cpuacct_usage) * cpu_count);
-
-	node->view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	node->view = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!node->view)
-		goto err;
+		return NULL;
 
 	node->cpu_count = cpu_count;
-	node->next = NULL;
 
-	if (pthread_mutex_init(&node->lock, NULL) != 0)
-		log_error(goto err, "Failed to initialize node lock");
+	if (pthread_mutex_init(&node->lock, NULL))
+		return NULL;
+	/*
+	 * We're abusing the usage pointer to indicate that
+	 * pthread_mutex_init() was successful. Don't judge me.
+	 */
+	node->usage = move_ptr(new_usage);
 
-	for (i = 0; i < cpu_count; i++) {
-		node->view[i].user = 0;
-		node->view[i].system = 0;
-		node->view[i].idle = 0;
-	}
-
-	return node;
-
-err:
-	if (node && node->cg)
-		free(node->cg);
-	if (node && node->usage)
-		free(node->usage);
-	if (node && node->view)
-		free(node->view);
-	if (node)
-		free(node);
-
-	return NULL;
+	return move_ptr(node);
 }
 
-static bool cgfs_param_exist(const char *controller, const char *cgroup,
-			     const char *file)
+static bool cgroup_supports(const char *controller, const char *cgroup,
+			    const char *file)
 {
 	__do_free char *path = NULL;
 	int cfd;
@@ -244,7 +230,7 @@ static bool cgfs_param_exist(const char *controller, const char *cgroup,
 		return false;
 
 	path = must_make_path_relative(cgroup, file, NULL);
-	return (faccessat(cfd, path, F_OK, 0) == 0);
+	return faccessat(cfd, path, F_OK, 0) == 0;
 }
 
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
@@ -252,10 +238,8 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 	struct cg_proc_stat *first = NULL;
 
 	for (struct cg_proc_stat *prev = NULL; node; ) {
-		if (!cgfs_param_exist("cpu", node->cg, "cpu.shares")) {
-			struct cg_proc_stat *tmp = node;
-
-			lxcfs_debug("Removing stat node for %s\n", node->cg);
+		if (!cgroup_supports("cpu", node->cg, "cpu.shares")) {
+			call_cleaner(free_proc_stat_node) struct cg_proc_stat *cur = node;
 
 			if (prev)
 				prev->next = node->next;
@@ -263,7 +247,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 				first = node->next;
 
 			node = node->next;
-			free_proc_stat_node(tmp);
+			lxcfs_debug("Removing stat node for %s\n", cur->cg);
 		} else {
 			if (!first)
 				first = node;
@@ -342,11 +326,13 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 
 	pthread_mutex_lock(&node->lock);
 
-	/* If additional CPUs on the host have been enabled, CPU usage counter
-	 * arrays have to be expanded */
+	/*
+	 * If additional CPUs on the host have been enabled, CPU usage counter
+	 * arrays have to be expanded.
+	 */
 	if (node->cpu_count < cpu_count) {
 		lxcfs_debug("Expanding stat node %d->%d for %s\n",
-				node->cpu_count, cpu_count, cg);
+			    node->cpu_count, cpu_count, cg);
 
 		if (!expand_proc_stat_node(node, cpu_count)) {
 			pthread_mutex_unlock(&node->lock);
@@ -367,7 +353,10 @@ static void add_cpu_usage(uint64_t *surplus, struct cpuacct_usage *usage,
 	if (free_space > usage->idle)
 		free_space = usage->idle;
 
-	to_add = free_space > *surplus ? *surplus : free_space;
+	if (free_space > *surplus)
+		to_add = *surplus;
+	else
+		to_add = free_space;
 
 	*counter += to_add;
 	usage->idle -= to_add;
@@ -420,23 +409,23 @@ static uint64_t diff_cpu_usage(struct cpuacct_usage *older,
 static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
 {
 	__do_free char *str = NULL;
-	char file[11 + 6 + 1]; /* cpu.cfs__us + quota/period + \0 */
+	char file[STRLITERALLEN("cpu.cfs_period_us") + 1];
 	bool first = true;
+	int ret;
 
-	if (!pure_unified_layout(cgroup_ops)) {
-		snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
-        } else {
-		strcpy(file, "cpu.max");
+	if (pure_unified_layout(cgroup_ops)) {
 		first = !strcmp(param, "quota");
+		ret = snprintf(file, sizeof(file), "cpu.max");
+	} else {
+		ret = snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
 	}
+	if (ret < 0 || (size_t)ret >= sizeof(file))
+		return false;
 
 	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
-	if (sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) != 1)
-		return false;
-
-	return true;
+	return sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) == 1;
 }
 
 /*
@@ -449,8 +438,11 @@ static double exact_cpu_count(const char *cg)
 	int nprocs;
 	int64_t cfs_quota, cfs_period;
 
-	read_cpu_cfs_param(cg, "quota", &cfs_quota);
-	read_cpu_cfs_param(cg, "period", &cfs_period);
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
 
 	if (cfs_quota <= 0 || cfs_period <= 0)
 		return 0;
@@ -476,14 +468,17 @@ int max_cpu_count(const char *cg)
 	int64_t cfs_quota, cfs_period;
 	int nr_cpus_in_cpuset = 0;
 
-	read_cpu_cfs_param(cg, "quota", &cfs_quota);
-	read_cpu_cfs_param(cg, "period", &cfs_period);
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
 
 	cpuset = get_cpuset(cg);
 	if (cpuset)
 		nr_cpus_in_cpuset = cpu_number_in_cpuset(cpuset);
 
-	if (cfs_quota <= 0 || cfs_period <= 0){
+	if (cfs_quota <= 0 || cfs_period <= 0) {
 		if (nr_cpus_in_cpuset > 0)
 			return nr_cpus_in_cpuset;
 
@@ -492,7 +487,8 @@ int max_cpu_count(const char *cg)
 
 	rv = cfs_quota / cfs_period;
 
-	/* In case quota/period does not yield a whole number, add one CPU for
+	/*
+	 * In case quota/period does not yield a whole number, add one CPU for
 	 * the remainder.
 	 */
 	if ((cfs_quota % cfs_period) > 0)
@@ -502,7 +498,7 @@ int max_cpu_count(const char *cg)
 	if (rv > nprocs)
 		rv = nprocs;
 
-	/* use min value in cpu quota and cpuset */
+	/* Use min value in cpu quota and cpuset. */
 	if (nr_cpus_in_cpuset > 0 && nr_cpus_in_cpuset < rv)
 		rv = nr_cpus_in_cpuset;
 
@@ -606,7 +602,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	if (!stat_node)
 		return log_error(0, "Failed to find/create stat node for %s", cg);
 
-	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
+	diff = zalloc(sizeof(struct cpuacct_usage) * nprocs);
 	if (!diff)
 		return 0;
 
@@ -634,13 +630,13 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 		i++;
 
-		stat_node->usage[curcpu].user += diff[curcpu].user;
+		stat_node->usage[curcpu].user 	+= diff[curcpu].user;
 		stat_node->usage[curcpu].system += diff[curcpu].system;
-		stat_node->usage[curcpu].idle += diff[curcpu].idle;
+		stat_node->usage[curcpu].idle 	+= diff[curcpu].idle;
 
 		if (max_cpus > 0 && i >= max_cpus) {
-			user_surplus += diff[curcpu].user;
-			system_surplus += diff[curcpu].system;
+			user_surplus 	+= diff[curcpu].user;
+			system_surplus 	+= diff[curcpu].system;
 		}
 	}
 
@@ -694,20 +690,20 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			if (i == max_cpus)
 				break;
 
-			stat_node->view[curcpu].user += diff[curcpu].user;
-			stat_node->view[curcpu].system += diff[curcpu].system;
-			stat_node->view[curcpu].idle += diff[curcpu].idle;
+			stat_node->view[curcpu].user 	+= diff[curcpu].user;
+			stat_node->view[curcpu].system 	+= diff[curcpu].system;
+			stat_node->view[curcpu].idle 	+= diff[curcpu].idle;
 
-			user_sum += stat_node->view[curcpu].user;
-			system_sum += stat_node->view[curcpu].system;
-			idle_sum += stat_node->view[curcpu].idle;
+			user_sum 	+= stat_node->view[curcpu].user;
+			system_sum 	+= stat_node->view[curcpu].system;
+			idle_sum 	+= stat_node->view[curcpu].idle;
 
-			diff_user += diff[curcpu].user;
-			diff_system += diff[curcpu].system;
-			diff_idle += diff[curcpu].idle;
+			diff_user 	+= diff[curcpu].user;
+			diff_system 	+= diff[curcpu].system;
+			diff_idle 	+= diff[curcpu].idle;
 			if (diff[curcpu].idle > max_diff_idle) {
-				max_diff_idle = diff[curcpu].idle;
-				max_diff_idle_index = curcpu;
+				max_diff_idle 		= diff[curcpu].idle;
+				max_diff_idle_index 	= curcpu;
 			}
 
 			lxcfs_v("curcpu: %d, diff_user: %lu, diff_system: %lu, diff_idle: %lu\n", curcpu, diff[curcpu].user, diff[curcpu].system, diff[curcpu].idle);
@@ -722,12 +718,18 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
 			lxcfs_v("delta: %lu\n", delta);
 			lxcfs_v("idle_sum before: %lu\n", idle_sum);
-			idle_sum = idle_sum > delta ? idle_sum - delta : 0;
+			if (idle_sum > delta)
+				idle_sum = idle_sum - delta;
+			else
+				idle_sum = 0;
 			lxcfs_v("idle_sum after: %lu\n", idle_sum);
 
 			curcpu = max_diff_idle_index;
 			lxcfs_v("curcpu: %d, idle before: %lu\n", curcpu, stat_node->view[curcpu].idle);
-			stat_node->view[curcpu].idle = stat_node->view[curcpu].idle > delta ? stat_node->view[curcpu].idle - delta : 0;
+			if (stat_node->view[curcpu].idle > delta)
+				stat_node->view[curcpu].idle = stat_node->view[curcpu].idle - delta;
+			else
+				stat_node->view[curcpu].idle = 0;
 			lxcfs_v("curcpu: %d, idle after: %lu\n", curcpu, stat_node->view[curcpu].idle);
 		}
 	} else {
@@ -735,13 +737,13 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			if (!stat_node->usage[curcpu].online)
 				continue;
 
-			stat_node->view[curcpu].user = stat_node->usage[curcpu].user;
-			stat_node->view[curcpu].system = stat_node->usage[curcpu].system;
-			stat_node->view[curcpu].idle = stat_node->usage[curcpu].idle;
+			stat_node->view[curcpu].user 	= stat_node->usage[curcpu].user;
+			stat_node->view[curcpu].system 	= stat_node->usage[curcpu].system;
+			stat_node->view[curcpu].idle 	= stat_node->usage[curcpu].idle;
 
-			user_sum += stat_node->view[curcpu].user;
-			system_sum += stat_node->view[curcpu].system;
-			idle_sum += stat_node->view[curcpu].idle;
+			user_sum 	+= stat_node->view[curcpu].user;
+			system_sum 	+= stat_node->view[curcpu].system;
+			idle_sum 	+= stat_node->view[curcpu].idle;
 		}
 	}
 
@@ -1095,18 +1097,18 @@ int read_cpuacct_usage_all(char *cg, char *cpuset,
 
 static bool cpuview_init_head(struct cg_proc_stat_head **head)
 {
-	*head = malloc(sizeof(struct cg_proc_stat_head));
-	if (!(*head))
-		return log_error(false, "%s", strerror(errno));
+	__do_free struct cg_proc_stat_head *h;
 
-	(*head)->lastcheck = time(NULL);
-	(*head)->next = NULL;
+	h = zalloc(sizeof(struct cg_proc_stat_head));
+	if (!h)
+		return false;
 
-	if (pthread_rwlock_init(&(*head)->lock, NULL) != 0) {
-		free_disarm(*head);
-		return log_error(false, "Failed to initialize list lock");
-	}
+	if (pthread_rwlock_init(&h->lock, NULL))
+		return false;
 
+	h->lastcheck = time(NULL);
+
+	*head = move_ptr(h);
 	return true;
 }
 
@@ -1135,16 +1137,15 @@ err:
 
 static void cpuview_free_head(struct cg_proc_stat_head *head)
 {
-	struct cg_proc_stat *node, *tmp;
+	struct cg_proc_stat *node;
 
 	if (head->next) {
 		node = head->next;
 
 		for (;;) {
-			tmp = node;
+			struct cg_proc_stat *cur = node;
 			node = node->next;
-			free_proc_stat_node(tmp);
-
+			free_proc_stat_node(cur);
 			if (!node)
 				break;
 		}
