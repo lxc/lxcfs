@@ -1123,16 +1123,15 @@ err:
 
 static void cpuview_free_head(struct cg_proc_stat_head *head)
 {
-	struct cg_proc_stat *node, *tmp;
+	struct cg_proc_stat *node;
 
 	if (head->next) {
 		node = head->next;
 
 		for (;;) {
-			tmp = node;
+			struct cg_proc_stat *cur = node;
 			node = node->next;
-			free_proc_stat_node(tmp);
-
+			free_proc_stat_node(cur);
 			if (!node)
 				break;
 		}
