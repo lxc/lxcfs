@@ -602,7 +602,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	if (!stat_node)
 		return log_error(0, "Failed to find/create stat node for %s", cg);
 
-	diff = malloc(sizeof(struct cpuacct_usage) * nprocs);
+	diff = zalloc(sizeof(struct cpuacct_usage) * nprocs);
 	if (!diff)
 		return 0;
 
@@ -630,13 +630,13 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 		i++;
 
-		stat_node->usage[curcpu].user += diff[curcpu].user;
+		stat_node->usage[curcpu].user 	+= diff[curcpu].user;
 		stat_node->usage[curcpu].system += diff[curcpu].system;
-		stat_node->usage[curcpu].idle += diff[curcpu].idle;
+		stat_node->usage[curcpu].idle 	+= diff[curcpu].idle;
 
 		if (max_cpus > 0 && i >= max_cpus) {
-			user_surplus += diff[curcpu].user;
-			system_surplus += diff[curcpu].system;
+			user_surplus 	+= diff[curcpu].user;
+			system_surplus 	+= diff[curcpu].system;
 		}
 	}
 
@@ -690,20 +690,20 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			if (i == max_cpus)
 				break;
 
-			stat_node->view[curcpu].user += diff[curcpu].user;
-			stat_node->view[curcpu].system += diff[curcpu].system;
-			stat_node->view[curcpu].idle += diff[curcpu].idle;
+			stat_node->view[curcpu].user 	+= diff[curcpu].user;
+			stat_node->view[curcpu].system 	+= diff[curcpu].system;
+			stat_node->view[curcpu].idle 	+= diff[curcpu].idle;
 
-			user_sum += stat_node->view[curcpu].user;
-			system_sum += stat_node->view[curcpu].system;
-			idle_sum += stat_node->view[curcpu].idle;
+			user_sum 	+= stat_node->view[curcpu].user;
+			system_sum 	+= stat_node->view[curcpu].system;
+			idle_sum 	+= stat_node->view[curcpu].idle;
 
-			diff_user += diff[curcpu].user;
-			diff_system += diff[curcpu].system;
-			diff_idle += diff[curcpu].idle;
+			diff_user 	+= diff[curcpu].user;
+			diff_system 	+= diff[curcpu].system;
+			diff_idle 	+= diff[curcpu].idle;
 			if (diff[curcpu].idle > max_diff_idle) {
-				max_diff_idle = diff[curcpu].idle;
-				max_diff_idle_index = curcpu;
+				max_diff_idle 		= diff[curcpu].idle;
+				max_diff_idle_index 	= curcpu;
 			}
 
 			lxcfs_v("curcpu: %d, diff_user: %lu, diff_system: %lu, diff_idle: %lu\n", curcpu, diff[curcpu].user, diff[curcpu].system, diff[curcpu].idle);
@@ -718,12 +718,18 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
 			lxcfs_v("delta: %lu\n", delta);
 			lxcfs_v("idle_sum before: %lu\n", idle_sum);
-			idle_sum = idle_sum > delta ? idle_sum - delta : 0;
+			if (idle_sum > delta)
+				idle_sum = idle_sum - delta;
+			else
+				idle_sum = 0;
 			lxcfs_v("idle_sum after: %lu\n", idle_sum);
 
 			curcpu = max_diff_idle_index;
 			lxcfs_v("curcpu: %d, idle before: %lu\n", curcpu, stat_node->view[curcpu].idle);
-			stat_node->view[curcpu].idle = stat_node->view[curcpu].idle > delta ? stat_node->view[curcpu].idle - delta : 0;
+			if (stat_node->view[curcpu].idle > delta)
+				stat_node->view[curcpu].idle = stat_node->view[curcpu].idle - delta;
+			else
+				stat_node->view[curcpu].idle = 0;
 			lxcfs_v("curcpu: %d, idle after: %lu\n", curcpu, stat_node->view[curcpu].idle);
 		}
 	} else {
@@ -731,13 +737,13 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			if (!stat_node->usage[curcpu].online)
 				continue;
 
-			stat_node->view[curcpu].user = stat_node->usage[curcpu].user;
-			stat_node->view[curcpu].system = stat_node->usage[curcpu].system;
-			stat_node->view[curcpu].idle = stat_node->usage[curcpu].idle;
+			stat_node->view[curcpu].user 	= stat_node->usage[curcpu].user;
+			stat_node->view[curcpu].system 	= stat_node->usage[curcpu].system;
+			stat_node->view[curcpu].idle 	= stat_node->usage[curcpu].idle;
 
-			user_sum += stat_node->view[curcpu].user;
-			system_sum += stat_node->view[curcpu].system;
-			idle_sum += stat_node->view[curcpu].idle;
+			user_sum 	+= stat_node->view[curcpu].user;
+			system_sum 	+= stat_node->view[curcpu].system;
+			idle_sum 	+= stat_node->view[curcpu].idle;
 		}
 	}
 
