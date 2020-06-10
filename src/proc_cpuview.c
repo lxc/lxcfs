@@ -438,8 +438,11 @@ static double exact_cpu_count(const char *cg)
 	int nprocs;
 	int64_t cfs_quota, cfs_period;
 
-	read_cpu_cfs_param(cg, "quota", &cfs_quota);
-	read_cpu_cfs_param(cg, "period", &cfs_period);
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return 0;
+
+	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+		return 0;
 
 	if (cfs_quota <= 0 || cfs_period <= 0)
 		return 0;
