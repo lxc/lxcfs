@@ -353,7 +353,10 @@ static void add_cpu_usage(uint64_t *surplus, struct cpuacct_usage *usage,
 	if (free_space > usage->idle)
 		free_space = usage->idle;
 
-	to_add = free_space > *surplus ? *surplus : free_space;
+	if (free_space > *surplus)
+		to_add = *surplus;
+	else
+		to_add = free_space;
 
 	*counter += to_add;
 	usage->idle -= to_add;
