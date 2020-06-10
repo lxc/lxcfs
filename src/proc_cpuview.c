@@ -326,11 +326,13 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 
 	pthread_mutex_lock(&node->lock);
 
-	/* If additional CPUs on the host have been enabled, CPU usage counter
-	 * arrays have to be expanded */
+	/*
+	 * If additional CPUs on the host have been enabled, CPU usage counter
+	 * arrays have to be expanded.
+	 */
 	if (node->cpu_count < cpu_count) {
 		lxcfs_debug("Expanding stat node %d->%d for %s\n",
-				node->cpu_count, cpu_count, cg);
+			    node->cpu_count, cpu_count, cg);
 
 		if (!expand_proc_stat_node(node, cpu_count)) {
 			pthread_mutex_unlock(&node->lock);
