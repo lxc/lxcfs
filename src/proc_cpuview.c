@@ -151,39 +151,45 @@ define_cleanup_function(struct cg_proc_stat *, free_proc_stat_node);
 
 static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 {
-	int hash = calc_hash(new_node->cg) % CPUVIEW_HASH_SIZE;
+	call_cleaner(free_proc_stat_node) struct cg_proc_stat *new = new_node;
+	struct cg_proc_stat *rv = new_node;
+	int hash = calc_hash(new->cg) % CPUVIEW_HASH_SIZE;
 	struct cg_proc_stat_head *head = proc_stat_history[hash];
-	struct cg_proc_stat *node, *rv = new_node;
+	struct cg_proc_stat *cur;
 
 	pthread_rwlock_wrlock(&head->lock);
 
 	if (!head->next) {
-		head->next = new_node;
+		head->next = move_ptr(new);
 		goto out_rwlock_unlock;
 	}
 
-	node = head->next;
+	cur = head->next;
 
 	for (;;) {
-		if (strcmp(node->cg, new_node->cg) == 0) {
-			/* The node is already present, return it */
-			free_proc_stat_node(new_node);
-			rv = node;
+		/*
+		 * The node to be added is already present in the list, so
+		 * free the newly allocated one and return the one we found.
+		 */
+		if (strcmp(cur->cg, new->cg) == 0) {
+			rv = cur;
 			goto out_rwlock_unlock;
 		}
 
-		if (node->next) {
-			node = node->next;
+		/* Keep walking. */
+		if (cur->next) {
+			cur = cur->next;
 			continue;
 		}
 
-		node->next = new_node;
+		/* Add new node to end of list. */
+		cur->next = move_ptr(new);
 		goto out_rwlock_unlock;
 	}
 
 out_rwlock_unlock:
 	pthread_rwlock_unlock(&head->lock);
-	return rv;
+	return move_ptr(rv);
 }
 
 static struct cg_proc_stat *new_proc_stat_node(struct cpuacct_usage *usage,
