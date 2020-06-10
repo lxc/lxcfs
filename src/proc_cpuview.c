@@ -92,32 +92,24 @@ static bool expand_proc_stat_node(struct cg_proc_stat *node, int cpu_count)
 	__do_free struct cpuacct_usage *new_usage = NULL, *new_view = NULL;
 
 	/* Allocate new memory */
-	new_usage = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	new_usage = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!new_usage)
 		return false;
 
-	new_view = malloc(sizeof(struct cpuacct_usage) * cpu_count);
+	new_view = zalloc(sizeof(struct cpuacct_usage) * cpu_count);
 	if (!new_view)
 		return false;
 
 	/* Copy existing data & initialize new elements */
 	for (int i = 0; i < cpu_count; i++) {
 		if (i < node->cpu_count) {
-			new_usage[i].user = node->usage[i].user;
-			new_usage[i].system = node->usage[i].system;
-			new_usage[i].idle = node->usage[i].idle;
+			new_usage[i].user 	= node->usage[i].user;
+			new_usage[i].system 	= node->usage[i].system;
+			new_usage[i].idle 	= node->usage[i].idle;
 
-			new_view[i].user = node->view[i].user;
-			new_view[i].system = node->view[i].system;
-			new_view[i].idle = node->view[i].idle;
-		} else {
-			new_usage[i].user = 0;
-			new_usage[i].system = 0;
-			new_usage[i].idle = 0;
-
-			new_view[i].user = 0;
-			new_view[i].system = 0;
-			new_view[i].idle = 0;
+			new_view[i].user 	= node->view[i].user;
+			new_view[i].system 	= node->view[i].system;
+			new_view[i].idle 	= node->view[i].idle;
 		}
 	}
 
