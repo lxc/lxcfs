@@ -91,6 +91,7 @@ extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
+extern bool liblxcfs_can_use_swap(void);
 
 static inline int install_signal_handler(int signo,
 					 void (*handler)(int, siginfo_t *, void *))
