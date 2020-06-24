@@ -619,6 +619,36 @@ static int cgfsng_get_memory_swap_max(struct cgroup_ops *ops,
 	return cgfsng_get_memory(ops, cgroup, "memory.swap.max", value);
 }
 
+static bool cgfsng_can_use_swap(struct cgroup_ops *ops)
+{
+	bool has_swap = false;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return false;
+
+	if (is_unified_hierarchy(h)) {
+		if (faccessat(h->fd, "memory.swap.max", F_OK, 0))
+			return false;
+
+		if (faccessat(h->fd, "memory.swap.current", F_OK, 0))
+			return false;
+
+		has_swap = true;
+	} else {
+		if (faccessat(h->fd, "memory.memsw.limit_in_bytes", F_OK, 0))
+			return false;
+
+		if (faccessat(h->fd, "memory.memsw.usage_in_bytes", F_OK, 0))
+			return false;
+
+		has_swap = true;
+	}
+
+	return has_swap;
+}
+
 static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
 				   char **value)
 {
@@ -977,6 +1007,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;
 	cgfsng_ops->get_memory_current = cgfsng_get_memory_current;
 	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
+	cgfsng_ops->can_use_swap = cgfsng_can_use_swap;
 
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;

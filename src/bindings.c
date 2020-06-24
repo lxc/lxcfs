@@ -50,12 +50,18 @@
 #include "utils.h"
 
 static bool can_use_pidfd;
+static bool can_use_swap;
 
 static volatile sig_atomic_t reload_successful;
 
 bool liblxcfs_functional(void)
 {
 	return reload_successful != 0;
+}
+
+bool liblxcfs_can_use_swap(void)
+{
+	return can_use_swap;
 }
 
 /* Define pivot_root() if missing from the C library */
@@ -879,6 +885,12 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		can_use_pidfd = true;
 		lxcfs_info("Kernel supports pidfds");
 	}
+
+	can_use_swap = cgroup_ops->can_use_swap(cgroup_ops);
+	if (can_use_swap)
+		lxcfs_info("Kernel supports swap accounting");
+	else
+		lxcfs_info("Kernel does not support swap accounting");
 
 	lxcfs_info("api_extensions:");
 	for (i = 0; i < nr_api_extensions; i++)
