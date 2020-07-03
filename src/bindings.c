@@ -822,9 +822,8 @@ static void sigusr2_toggle_virtualization(int signo, siginfo_t *info, void *extr
 please_compiler:
 	/*
 	 * The write() syscall is a function whose return value needs to be
-	 * checked. Otherwise the compiler will warn. This is how we
-	 * please our master. Another one could be to use
-	 * syscall(__NR_write, ...) directly but whatever.
+	 * checked. Otherwise the compiler will warn.Another one could be to
+	 * use syscall(__NR_write, ...) directly but whatever.
 	 */
 	return;
 }
