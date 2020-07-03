@@ -36,6 +36,12 @@
 
 union bpf_attr;
 
+enum {
+	LXC_BPF_DEVICE_CGROUP_LOCAL_RULE = -1,
+	LXC_BPF_DEVICE_CGROUP_ALLOWLIST  =  0,
+	LXC_BPF_DEVICE_CGROUP_DENYLIST  =  1,
+};
+
 static inline int missing_bpf(int cmd, union bpf_attr *attr, size_t size)
 {
 	return (int)syscall(__NR_bpf, cmd, attr, size);

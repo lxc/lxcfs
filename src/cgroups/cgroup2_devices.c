@@ -180,7 +180,7 @@ struct bpf_program *bpf_program_new(uint32_t prog_type)
 	/*
 	 * By default a whitelist is used unless the user tells us otherwise.
 	 */
-	prog->device_list_type = LXC_BPF_DEVICE_CGROUP_WHITELIST;
+	prog->device_list_type = LXC_BPF_DEVICE_CGROUP_ALLOWLIST;
 
 	return move_ptr(prog);
 }
@@ -308,9 +308,9 @@ int bpf_program_finalize(struct bpf_program *prog)
 		return ret_set_errno(-1, EINVAL);
 
 	TRACE("Implementing %s bpf device cgroup program",
-	      prog->device_list_type == LXC_BPF_DEVICE_CGROUP_BLACKLIST
-		  ? "blacklist"
-		  : "whitelist");
+	      prog->device_list_type == LXC_BPF_DEVICE_CGROUP_DENYLIST
+		  ? "denylist"
+		  : "allowlist");
 	return bpf_program_add_instructions(prog, ins, ARRAY_SIZE(ins));
 }
 
