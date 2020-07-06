@@ -104,6 +104,20 @@ static inline int install_signal_handler(int signo,
 	return sigaction(signo, &action, NULL);
 }
 
-extern pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags);
+extern pid_t lxcfs_raw_clone(unsigned long flags, int *pidfd);
+
+static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
+{
+	pid_t pid;
+
+	pid = lxcfs_raw_clone(flags, NULL);
+	if (pid < 0)
+		return -1;
+
+	if (pid == 0)
+		_exit(fn(arg));
+
+	return pid;
+}
 
 #endif /* __LXCFS_BINDINGS_H */
