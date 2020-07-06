@@ -22,7 +22,7 @@ before_install:
 
 script:
  - ./bootstrap.sh
- - ./configure --prefix=/usr
+ - CFLAGS='-g -O0 -std=c11 -DDEBUG -DVERBOSE -DRESOLVE_NOW -Wall -Werror' ./configure --prefix=/usr
  - make -j4
  - (cd tests && make tests)
  - echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
