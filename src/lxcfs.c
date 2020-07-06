@@ -127,7 +127,11 @@ static void do_reload(void)
 	}
 
 	/* First try loading using ld.so */
+#ifdef RESOLVE_NOW
+	dlopen_handle = dlopen("liblxcfs.so", RTLD_NOW);
+#else
 	dlopen_handle = dlopen("liblxcfs.so", RTLD_LAZY);
+#endif
 	if (dlopen_handle) {
 		lxcfs_debug("Opened liblxcfs.so");
 		goto good;
