@@ -244,8 +244,7 @@ static inline bool startswith(const char *line, const char *pref)
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
 			   struct fuse_file_info *fi)
 {
-	__do_free char *cgroup = NULL, *memswlimit_str = NULL, *memusage_str = NULL,
-		       *memswusage_str = NULL;
+	__do_free char *cgroup = NULL, *memusage_str = NULL, *memswusage_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
