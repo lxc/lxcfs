@@ -108,7 +108,7 @@ char *get_pid_cgroup(pid_t pid, const char *contrl)
 
 	cfd = get_cgroup_fd(contrl);
 	if (cfd < 0)
-		return false;
+		return NULL;
 
 	if (pure_unified_layout(cgroup_ops))
 		return cg_unified_get_current_cgroup(pid);
