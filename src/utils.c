@@ -188,7 +188,7 @@ bool wait_for_sock(int sock, int timeout)
 
 	epfd = epoll_create(1);
 	if (epfd < 0)
-		return log_error(false, "%s\n", "Failed to create epoll socket: %m");
+		return log_error(false, "%m - Failed to create epoll socket");
 
 	ev.events = POLLIN_SET;
 	ev.data.fd = sock;
