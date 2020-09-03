@@ -52,7 +52,7 @@
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
 #include "cpuset_parse.h"
-#include "fuse_compat.h"
+#include "lxcfs_fuse_compat.h"
 #include "memory_utils.h"
 #include "proc_loadavg.h"
 #include "proc_cpuview.h"

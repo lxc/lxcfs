@@ -41,7 +41,7 @@
 #include <linux/limits.h>
 
 #include "bindings.h"
-#include "fuse_compat.h"
+#include "lxcfs_fuse_compat.h"
 #include "macro.h"
 #include "memory_utils.h"
 
