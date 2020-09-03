@@ -49,7 +49,7 @@
 #include "bindings.h"
 #include "memory_utils.h"
 #include "cgroups/cgroup.h"
-#include "fuse_compat.h"
+#include "lxcfs_fuse_compat.h"
 #include "sysfs_fuse.h"
 #include "utils.h"
 

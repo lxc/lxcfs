@@ -50,7 +50,7 @@
 #include "bindings.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
-#include "fuse_compat.h"
+#include "lxcfs_fuse_compat.h"
 #include "memory_utils.h"
 #include "utils.h"
 
