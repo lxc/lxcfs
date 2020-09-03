@@ -1103,7 +1103,10 @@ int main(int argc, char *argv[])
 	int ret = EXIT_FAILURE;
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
-	bool debug = false, foreground = false, nonempty = false;
+	bool debug = false, foreground = false;
+#ifndef HAVE_FUSE3
+	bool nonempty = false;
+#endif
 	bool load_use = false;
 	/*
 	 * what we pass to fuse_main is:
@@ -1161,7 +1164,11 @@ int main(int argc, char *argv[])
 			if (strcmp(token, "allow_other") == 0) {
 				/* Noop. this is the default. Always enabled. */
 			} else if (strcmp(token, "nonempty") == 0) {
+#ifdef HAVE_FUSE3
+				/* FUSE3: Noop. this is the default. */
+#else
 				nonempty = true;
+#endif
 			} else {
 				lxcfs_error("Warning: unexpected fuse option %s", v);
 				free(v);
@@ -1208,10 +1215,14 @@ int main(int argc, char *argv[])
 	 * shouldn't guarantee that we don't need more complicated access
 	 * helpers for proc and sys virtualization in the future.
 	 */
+#ifdef HAVE_FUSE3
+	newargv[cnt++] = "allow_other,entry_timeout=0.5,attr_timeout=0.5";
+#else
 	if (nonempty)
 		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
 	else
 		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+#endif
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
@@ -1229,6 +1240,7 @@ int main(int argc, char *argv[])
 
 	if (!fuse_main(nargs, newargv, &lxcfs_ops, opts))
 		ret = EXIT_SUCCESS;
+
 	if (load_use)
 		stop_loadavg();
 
