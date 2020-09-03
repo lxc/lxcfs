@@ -60,7 +60,9 @@ AC_CONFIG_FILES([
 
 AC_CHECK_LIB(pthread, main)
 
-PKG_CHECK_MODULES(FUSE, fuse)
+PKG_CHECK_MODULES(FUSE, fuse, [], [
+	PKG_CHECK_MODULES(FUSE, fuse3, [AC_DEFINE([HAVE_FUSE3], [1], [Use fuse3])])
+])
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
 AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //" ])

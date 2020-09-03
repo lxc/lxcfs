@@ -4,8 +4,16 @@
 #define _GNU_SOURCE
 #endif
 
+#include "config.h"
+
+#ifdef HAVE_FUSE3
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 30
+#endif
+#else
 #ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -33,7 +41,7 @@
 #include <linux/limits.h>
 
 #include "bindings.h"
-#include "config.h"
+#include "fuse_compat.h"
 #include "macro.h"
 #include "memory_utils.h"
 
@@ -562,7 +570,11 @@ static int do_sys_releasedir(const char *path, struct fuse_file_info *fi)
 	return __sys_releasedir(path, fi);
 }
 
+#ifdef HAVE_FUSE3
+static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_info *fi)
+#else
 static int lxcfs_getattr(const char *path, struct stat *sb)
+#endif
 {
 	int ret;
 	struct timespec now;
@@ -625,17 +637,22 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	return -ENOENT;
 }
 
+#ifdef HAVE_FUSE3
+static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+			 off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
+#else
 static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi)
+#endif
 {
 	int ret;
 
 	if (strcmp(path, "/") == 0) {
-		if (filler(buf, ".", NULL, 0) != 0 ||
-		    filler(buf, "..", NULL, 0) != 0 ||
-		    filler(buf, "proc", NULL, 0) != 0 ||
-		    filler(buf, "sys", NULL, 0) != 0 ||
-		    filler(buf, "cgroup", NULL, 0) != 0)
+		if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..", NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "proc", NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "sys", NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "cgroup", NULL, 0) != 0)
 			return -ENOMEM;
 
 		return 0;
@@ -847,7 +864,11 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 	return -EPERM;
 }
 
+#ifdef HAVE_FUSE3
+int lxcfs_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
+#else
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
+#endif
 {
 	int ret;
 
@@ -872,7 +893,11 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
  * really make sense for cgroups.  So just return 0 always but do
  * nothing.
  */
+#ifdef HAVE_FUSE3
+int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
+#else
 int lxcfs_truncate(const char *path, off_t newsize)
+#endif
 {
 	if (strncmp(path, "/cgroup", 7) == 0)
 		return 0;
@@ -894,7 +919,11 @@ int lxcfs_rmdir(const char *path)
 	return -EPERM;
 }
 
+#ifdef HAVE_FUSE3
+int lxcfs_chmod(const char *path, mode_t mode, struct fuse_file_info *fi)
+#else
 int lxcfs_chmod(const char *path, mode_t mode)
+#endif
 {
 	int ret;
 
@@ -934,10 +963,14 @@ const struct fuse_operations lxcfs_ops = {
 
 	.create		= NULL,
 	.destroy	= NULL,
+#ifndef HAVE_FUSE3
 	.fgetattr	= NULL,
+#endif
 	.fsyncdir	= NULL,
+#ifndef HAVE_FUSE3
 	.ftruncate	= NULL,
 	.getdir		= NULL,
+#endif
 	.getxattr	= NULL,
 	.init		= NULL,
 	.link		= NULL,
@@ -950,7 +983,9 @@ const struct fuse_operations lxcfs_ops = {
 	.statfs		= NULL,
 	.symlink	= NULL,
 	.unlink		= NULL,
+#ifndef HAVE_FUSE3
 	.utime		= NULL,
+#endif
 };
 
 static void usage()
