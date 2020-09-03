@@ -4,8 +4,16 @@
 #define _GNU_SOURCE
 #endif
 
+#include "config.h"
+
+#ifdef HAVE_FUSE3
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 30
+#endif
+#else
 #ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -20,7 +28,6 @@
 #include "bindings.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
-#include "config.h"
 #include "memory_utils.h"
 #include "proc_loadavg.h"
 #include "utils.h"
