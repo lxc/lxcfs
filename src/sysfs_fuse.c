@@ -178,7 +178,7 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	}
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		sb->st_size = 0;
+		sb->st_size = 4096;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;

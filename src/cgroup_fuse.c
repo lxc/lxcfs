@@ -615,7 +615,7 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
-		sb->st_size = 0;
+		sb->st_size = 4096;
 		free_key(k);
 		if (!caller_is_in_ancestor(initpid, controller, path1, NULL)) {
 			ret = -ENOENT;
