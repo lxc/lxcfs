@@ -4,8 +4,16 @@
 #define _GNU_SOURCE
 #endif
 
+#include "config.h"
+
+#ifdef HAVE_FUSE3
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 30
+#endif
+#else
 #ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -40,9 +48,9 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
-#include "config.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
+#include "lxcfs_fuse_compat.h"
 #include "memory_utils.h"
 #include "utils.h"
 
@@ -607,7 +615,7 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		sb->st_uid = k->uid;
 		sb->st_gid = k->gid;
-		sb->st_size = 0;
+		sb->st_size = 4096;
 		free_key(k);
 		if (!caller_is_in_ancestor(initpid, controller, path1, NULL)) {
 			ret = -ENOENT;
@@ -1953,7 +1961,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
 		return -EIO;
 
-	if (filler(buf, ".", NULL, 0) != 0 || filler(buf, "..", NULL, 0) != 0)
+	if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 || DIR_FILLER(filler, buf, "..", NULL, 0) != 0)
 		return -EIO;
 
 	if (d->type != LXC_TYPE_CGDIR) {
@@ -1969,7 +1977,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 			if (is_unified_hierarchy(*h))
 				continue;
 
-			if ((*h)->__controllers && filler(buf, (*h)->__controllers, NULL, 0))
+			if ((*h)->__controllers && DIR_FILLER(filler, buf, (*h)->__controllers, NULL, 0))
 				return -EIO;
 		}
 
@@ -1987,7 +1995,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
-			ret = filler(buf, nextcg,  NULL, 0);
+			ret = DIR_FILLER(filler, buf, nextcg,  NULL, 0);
 			free(nextcg);
 			if (ret != 0) {
 				ret = -EIO;
@@ -1999,7 +2007,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	}
 
 	for (i = 0; list && list[i]; i++) {
-		if (filler(buf, list[i]->name, NULL, 0) != 0) {
+		if (DIR_FILLER(filler, buf, list[i]->name, NULL, 0) != 0) {
 			ret = -EIO;
 			goto out;
 		}
@@ -2013,7 +2021,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	}
 	if (clist) {
 		for (i = 0; clist[i]; i++) {
-			if (filler(buf, clist[i], NULL, 0) != 0) {
+			if (DIR_FILLER(filler, buf, clist[i], NULL, 0) != 0) {
 				ret = -EIO;
 				goto out;
 			}

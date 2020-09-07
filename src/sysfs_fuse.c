@@ -4,8 +4,16 @@
 #define _GNU_SOURCE
 #endif
 
+#include "config.h"
+
+#ifdef HAVE_FUSE3
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 30
+#endif
+#else
 #ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -41,7 +49,7 @@
 #include "bindings.h"
 #include "memory_utils.h"
 #include "cgroups/cgroup.h"
-#include "config.h"
+#include "lxcfs_fuse_compat.h"
 #include "sysfs_fuse.h"
 #include "utils.h"
 
@@ -170,7 +178,7 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	}
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		sb->st_size = 0;
+		sb->st_size = 4096;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -184,33 +192,33 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				 struct fuse_file_info *fi)
 {
 	if (strcmp(path, "/sys") == 0) {
-		if (filler(buf, ".",		NULL, 0) != 0 ||
-		    filler(buf, "..",		NULL, 0) != 0 ||
-		    filler(buf, "devices",	NULL, 0) != 0)
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "devices",	NULL, 0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices") == 0) {
-		if (filler(buf, ".",		NULL, 0) != 0 ||
-		    filler(buf, "..",		NULL, 0) != 0 ||
-		    filler(buf, "system",	NULL, 0) != 0)
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "system",	NULL, 0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system") == 0) {
-		if (filler(buf, ".",	NULL, 0) != 0 ||
-		    filler(buf, "..",	NULL, 0) != 0 ||
-		    filler(buf, "cpu",	NULL, 0) != 0)
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "cpu",	NULL, 0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
-		if (filler(buf, ".",		NULL, 0) != 0 ||
-		    filler(buf, "..",		NULL, 0) != 0 ||
-		    filler(buf, "online",	NULL, 0) != 0)
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "online",	NULL, 0) != 0)
 			return -ENOENT;
 
 		return 0;

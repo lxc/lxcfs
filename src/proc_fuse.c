@@ -4,8 +4,16 @@
 #define _GNU_SOURCE
 #endif
 
+#include "config.h"
+
+#ifdef HAVE_FUSE3
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 30
+#endif
+#else
 #ifndef FUSE_USE_VERSION
 #define FUSE_USE_VERSION 26
+#endif
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -40,11 +48,11 @@
 #include <sys/vfs.h>
 
 #include "bindings.h"
-#include "config.h"
 #include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
 #include "cpuset_parse.h"
+#include "lxcfs_fuse_compat.h"
 #include "memory_utils.h"
 #include "proc_loadavg.h"
 #include "proc_cpuview.h"
@@ -95,7 +103,7 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 	    strcmp(path, "/proc/diskstats")	== 0 ||
 	    strcmp(path, "/proc/swaps")		== 0 ||
 	    strcmp(path, "/proc/loadavg")	== 0) {
-		sb->st_size = 0;
+		sb->st_size = 4096;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -108,15 +116,15 @@ __lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
 				  fuse_fill_dir_t filler, off_t offset,
 				  struct fuse_file_info *fi)
 {
-	if (filler(buf, ".",		NULL, 0) != 0 ||
-	    filler(buf, "..",		NULL, 0) != 0 ||
-	    filler(buf, "cpuinfo",	NULL, 0) != 0 ||
-	    filler(buf, "meminfo",	NULL, 0) != 0 ||
-	    filler(buf, "stat",		NULL, 0) != 0 ||
-	    filler(buf, "uptime",	NULL, 0) != 0 ||
-	    filler(buf, "diskstats",	NULL, 0) != 0 ||
-	    filler(buf, "swaps",	NULL, 0) != 0 ||
-	    filler(buf, "loadavg",	NULL, 0) != 0)
+	if (DIR_FILLER(filler, buf, ".",		NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "..",		NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "cpuinfo",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "meminfo",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "stat",		NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "uptime",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "diskstats",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "swaps",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "loadavg",	NULL, 0) != 0)
 		return -EINVAL;
 
 	return 0;

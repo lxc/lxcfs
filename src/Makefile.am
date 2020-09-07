@@ -15,6 +15,7 @@ liblxcfs_la_SOURCES = api_extensions.h \
 		      cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 		      cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 		      cpuset_parse.c cpuset_parse.h \
+		      lxcfs_fuse_compat.h \
 		      macro.h \
 		      memory_utils.h \
 		      proc_cpuview.c proc_cpuview.h \
@@ -44,6 +45,7 @@ liblxcfstest_la_SOURCES = api_extensions.h \
 			  cgroups/cgroup2_devices.c cgroups/cgroup2_devices.h \
 			  cgroups/cgroup_utils.c cgroups/cgroup_utils.h \
 			  cpuset_parse.c cpuset_parse.h \
+			  lxcfs_fuse_compat.h \
 			  macro.h \
 			  memory_utils.h \
 			  proc_cpuview.c proc_cpuview.h \
@@ -72,6 +74,7 @@ noinst_HEADERS = api_extensions.h \
 		 cgroups/cgroup2_devices.h \
 		 cgroups/cgroup_utils.h \
 		 cpuset_parse.h \
+		 lxcfs_fuse_compat.h \
 		 macro.h \
 		 memory_utils.h \
 		 proc_cpuview.h \
