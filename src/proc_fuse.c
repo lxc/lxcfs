@@ -1243,7 +1243,17 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-				if (hostswtotal < swtotal) {
+				/*
+				 * If swtotal is 0 it should mean that
+				 * memory.memsw.limit_in_bytes and
+				 * memory.limit_in_bytes are both unlimited or
+				 * both set to the same value. In both cases we
+				 * have no idea what the technical swap limit
+				 * is supposed to be (It's a shared limit
+				 * anyway.) so fallback to the host's values in
+				 * that case too.
+				 */
+				if ((hostswtotal < swtotal) || swtotal == 0) {
 					swtotal = hostswtotal;
 					host_swap = true;
 				}
