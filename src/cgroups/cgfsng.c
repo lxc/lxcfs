@@ -602,6 +602,12 @@ static int cgfsng_get_memory_stats_fd(struct cgroup_ops *ops, const char *cgroup
 	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
+static int cgfsng_get_memory_swappiness(struct cgroup_ops *ops,
+					const char *cgroup, char **value)
+{
+	return cgfsng_get_memory(ops, cgroup, "memory.swappiness", value);
+}
+
 static int cgfsng_get_memory_current(struct cgroup_ops *ops, const char *cgroup,
 				     char **value)
 {
@@ -1014,6 +1020,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_memory_swap_max		= cgfsng_get_memory_swap_max;
 	cgfsng_ops->get_memory_current		= cgfsng_get_memory_current;
 	cgfsng_ops->get_memory_swap_current	= cgfsng_get_memory_swap_current;
+	cgfsng_ops->get_memory_swappiness	= cgfsng_get_memory_swappiness;
 	cgfsng_ops->can_use_swap		= cgfsng_can_use_swap;
 
 	/* cpuset */

@@ -153,6 +153,8 @@ struct cgroup_ops {
 			      char **value);
 	int (*get_memory_swap_max)(struct cgroup_ops *ops, const char *cgroup,
 				   char **value);
+	int (*get_memory_swappiness)(struct cgroup_ops *ops, const char *cgroup,
+				     char **value);
 	bool (*can_use_swap)(struct cgroup_ops *ops);
 
 	/* cpuset */

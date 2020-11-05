@@ -310,6 +310,15 @@ static uint64_t get_min_memlimit(const char *cgroup, bool swap)
 	return retlimit;
 }
 
+static bool swappiness_is_off(const char *cgroup)
+{
+	__do_free char *swappiness_str = NULL;
+	int ret;
+
+	ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &swappiness_str);
+	return (ret > 0) && swappiness_str && (*swappiness_str == '0');
+}
+
 static inline bool startswith(const char *line, const char *pref)
 {
 	return strncmp(line, pref, strlen(pref)) == 0;
@@ -1141,7 +1150,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
-	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap(), host_swap = false;
+	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap(), host_swap = false,
+	     swappiness_off = false;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0;
@@ -1195,6 +1205,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	 * turned off for current kernel.
 	 */
 	if (wants_swap) {
+		swappiness_off = swappiness_is_off(cgroup);
 		memswlimit = get_min_memlimit(cgroup, true);
 		if (memswlimit > 0) {
 			ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
@@ -1208,6 +1219,36 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				else
 					swusage = (memswusage - memusage) / 1024;
 			}
+		}
+
+		/*
+		 * If the swappiness is set to 0 and there is no SWAP usage, no
+		 * SWAP is reported. However if there is SWAP usage, then a
+		 * SWAP device of the size of the usage (100% full) is
+		 * reported. This provides adequate reporting of the memory
+		 * consumption while preventing applications from assuming more
+		 * SWAP is available.
+		 */
+		if (swappiness_off) {
+			if (swusage == 0) {
+				wants_swap = false;
+			} else {
+				swtotal = swusage;
+				swfree = 0;
+			}
+		}
+
+		/*
+		 * Because SWAP usage for a given container can exceed the
+		 * delta between RAM and RAM+SWAP, the SWAP size is always
+		 * reported to be the smaller of the RAM+SWAP limit or the host
+		 * SWAP device itself. This ensures that at no point SWAP usage
+		 * will be allowed to exceed the SWAP size.
+		 */
+		if (wants_swap && (swtotal > memlimit)) {
+			swtotal = memlimit;
+			swusage = memlimit;
+			swfree = 0;
 		}
 	}
 
@@ -1253,7 +1294,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				 * anyway.) so fallback to the host's values in
 				 * that case too.
 				 */
-				if ((hostswtotal < swtotal) || swtotal == 0) {
+				if ((hostswtotal < swtotal)) {
 					swtotal = hostswtotal;
 					host_swap = true;
 				}
