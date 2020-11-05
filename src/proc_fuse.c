@@ -407,7 +407,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	if (swtotal > 0) {
 		l = snprintf(d->buf + total_len, d->size - total_len,
 			     "none%*svirtual\t\t%" PRIu64 "\t%" PRIu64 "\t0\n",
-			     36, " ", swtotal, swfree);
+			     36, " ", swtotal, swusage);
 		total_len += l;
 	}
 
