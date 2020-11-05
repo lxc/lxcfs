@@ -325,7 +325,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
-		 swtotal = 0, swfree = 0, swusage = 0, memswpriority = 1
+		 swtotal = 0, swusage = 0, memswpriority = 1,
 		 hostswtotal = 0, hostswfree = 0;
 	ssize_t total_len = 0;
 	ssize_t l = 0;
@@ -383,8 +383,6 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 					swusage = 0;
 				else
 					swusage = (memswusage - memusage) / 1024;
-				if (swtotal >= swusage)
-					swfree = swtotal - swusage;
 			}
 
 			ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
