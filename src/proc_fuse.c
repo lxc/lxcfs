@@ -325,11 +325,16 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
-		 swtotal = 0, swfree = 0, swusage = 0, memswpriority = 1;
+		 swtotal = 0, swfree = 0, swusage = 0, memswpriority = 1
+		 hostswtotal = 0, hostswfree = 0;
 	ssize_t total_len = 0;
 	ssize_t l = 0;
 	char *cache = d->buf;
 	int ret;
+	__do_free char *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	size_t linelen = 0;
 
 	if (offset) {
 		int left;
@@ -390,28 +395,32 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 
 	total_len = snprintf(d->buf, d->size, "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n");
 
-	/* When no mem + swap limit is specified or swapaccount=0*/
-	if (!memswlimit) {
-		__do_free char *line = NULL;
-		__do_free void *fopen_cache = NULL;
-		__do_fclose FILE *f = NULL;
-		size_t linelen = 0;
+	/* Read host total and free values */
+	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
+	if (!f)
+		return 0;
 
-		f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
-		if (!f)
-			return 0;
-
-		while (getline(&line, &linelen, f) != -1) {
-			if (startswith(line, "SwapTotal:"))
-				sscanf(line, "SwapTotal:      %8" PRIu64 " kB", &swtotal);
-			else if (startswith(line, "SwapFree:"))
-				sscanf(line, "SwapFree:      %8" PRIu64 " kB", &swfree);
-		}
+	while (getline(&line, &linelen, f) != -1) {
+		if (startswith(line, "SwapTotal:"))
+			sscanf(line, "SwapTotal:      %8" PRIu64 " kB", &hostswtotal);
+		else if (startswith(line, "SwapFree:"))
+			sscanf(line, "SwapFree:      %8" PRIu64 " kB", &hostswfree);
 	}
 
-	// When swappiness is 0, pretend we can't swap.
-	if (memswpriority == 0) {
-		swtotal = swusage;
+	if (wants_swap) {
+		/* The total amount of swap is always reported to be the
+		   lesser of the RAM+SWAP limit or the SWAP device size.
+		   This is because the kernel can swap as much as it
+		   wants and not only up to swtotal. */
+		swtotal = memlimit / 1024 + swtotal;
+		if (hostswtotal < swtotal) {
+			swtotal = hostswtotal;
+		}
+
+		/* When swappiness is 0, pretend we can't swap. */
+		if (memswpriority == 0) {
+			swtotal = swusage;
+		}
 	}
 
 	if (swtotal > 0) {
