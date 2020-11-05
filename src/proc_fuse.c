@@ -318,13 +318,14 @@ static inline bool startswith(const char *line, const char *pref)
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
 			   struct fuse_file_info *fi)
 {
-	__do_free char *cgroup = NULL, *memusage_str = NULL, *memswusage_str = NULL;
+	__do_free char *cgroup = NULL, *memusage_str = NULL,
+		 *memswusage_str = NULL, *memswpriority_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
-		 swtotal = 0, swfree = 0, swusage = 0;
+		 swtotal = 0, swfree = 0, swusage = 0, memswpriority = 1;
 	ssize_t total_len = 0;
 	ssize_t l = 0;
 	char *cache = d->buf;
@@ -380,6 +381,10 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 				if (swtotal >= swusage)
 					swfree = swtotal - swusage;
 			}
+
+			ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+			if (ret >= 0)
+				safe_uint64(memswpriority_str, &memswpriority, 10);
 		}
 	}
 
@@ -402,6 +407,11 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 			else if (startswith(line, "SwapFree:"))
 				sscanf(line, "SwapFree:      %8" PRIu64 " kB", &swfree);
 		}
+	}
+
+	// When swappiness is 0, pretend we can't swap.
+	if (memswpriority == 0) {
+		swtotal = swusage;
 	}
 
 	if (swtotal > 0) {
@@ -1136,7 +1146,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi)
 {
 	__do_free char *cgroup = NULL, *line = NULL, *memusage_str = NULL,
-		       *memswusage_str = NULL;
+		       *memswusage_str = NULL, *memswpriority_str = NULL;
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
@@ -1144,7 +1154,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap(), host_swap = false;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0;
+		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
+		 memswpriority = 1;
 	struct memory_stat mstat = {};
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
@@ -1209,6 +1220,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 					swusage = (memswusage - memusage) / 1024;
 			}
 		}
+
+		ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+		if (ret >= 0)
+			safe_uint64(memswpriority_str, &memswpriority, 10);
 	}
 
 	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
@@ -1256,6 +1271,11 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				if ((hostswtotal < swtotal) || swtotal == 0) {
 					swtotal = hostswtotal;
 					host_swap = true;
+				}
+
+				/* When swappiness is 0, pretend we can't swap. */
+				if (memswpriority == 0) {
+					swtotal = swusage;
 				}
 			}
 
