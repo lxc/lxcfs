@@ -318,17 +318,23 @@ static inline bool startswith(const char *line, const char *pref)
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
 			   struct fuse_file_info *fi)
 {
-	__do_free char *cgroup = NULL, *memusage_str = NULL, *memswusage_str = NULL;
+	__do_free char *cgroup = NULL, *memusage_str = NULL,
+		 *memswusage_str = NULL, *memswpriority_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
 	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
-		 swtotal = 0, swfree = 0, swusage = 0;
+		 swtotal = 0, swusage = 0, memswpriority = 1,
+		 hostswtotal = 0, hostswfree = 0;
 	ssize_t total_len = 0;
 	ssize_t l = 0;
 	char *cache = d->buf;
 	int ret;
+	__do_free char *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	size_t linelen = 0;
 
 	if (offset) {
 		int left;
@@ -377,37 +383,48 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 					swusage = 0;
 				else
 					swusage = (memswusage - memusage) / 1024;
-				if (swtotal >= swusage)
-					swfree = swtotal - swusage;
 			}
+
+			ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+			if (ret >= 0)
+				safe_uint64(memswpriority_str, &memswpriority, 10);
 		}
 	}
 
 	total_len = snprintf(d->buf, d->size, "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n");
 
-	/* When no mem + swap limit is specified or swapaccount=0*/
-	if (!memswlimit) {
-		__do_free char *line = NULL;
-		__do_free void *fopen_cache = NULL;
-		__do_fclose FILE *f = NULL;
-		size_t linelen = 0;
+	/* Read host total and free values */
+	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
+	if (!f)
+		return 0;
 
-		f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
-		if (!f)
-			return 0;
+	while (getline(&line, &linelen, f) != -1) {
+		if (startswith(line, "SwapTotal:"))
+			sscanf(line, "SwapTotal:      %8" PRIu64 " kB", &hostswtotal);
+		else if (startswith(line, "SwapFree:"))
+			sscanf(line, "SwapFree:      %8" PRIu64 " kB", &hostswfree);
+	}
 
-		while (getline(&line, &linelen, f) != -1) {
-			if (startswith(line, "SwapTotal:"))
-				sscanf(line, "SwapTotal:      %8" PRIu64 " kB", &swtotal);
-			else if (startswith(line, "SwapFree:"))
-				sscanf(line, "SwapFree:      %8" PRIu64 " kB", &swfree);
+	if (wants_swap) {
+		/* The total amount of swap is always reported to be the
+		   lesser of the RAM+SWAP limit or the SWAP device size.
+		   This is because the kernel can swap as much as it
+		   wants and not only up to swtotal. */
+		swtotal = memlimit / 1024 + swtotal;
+		if (hostswtotal < swtotal) {
+			swtotal = hostswtotal;
+		}
+
+		/* When swappiness is 0, pretend we can't swap. */
+		if (memswpriority == 0) {
+			swtotal = swusage;
 		}
 	}
 
 	if (swtotal > 0) {
 		l = snprintf(d->buf + total_len, d->size - total_len,
 			     "none%*svirtual\t\t%" PRIu64 "\t%" PRIu64 "\t0\n",
-			     36, " ", swtotal, swfree);
+			     36, " ", swtotal, swusage);
 		total_len += l;
 	}
 
@@ -1136,15 +1153,16 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi)
 {
 	__do_free char *cgroup = NULL, *line = NULL, *memusage_str = NULL,
-		       *memswusage_str = NULL;
+		       *memswusage_str = NULL, *memswpriority_str = NULL;
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
-	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap(), host_swap = false;
+	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
-		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0;
+		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
+		 memswpriority = 1;
 	struct memory_stat mstat = {};
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
@@ -1209,6 +1227,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 					swusage = (memswusage - memusage) / 1024;
 			}
 		}
+
+		ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+		if (ret >= 0)
+			safe_uint64(memswpriority_str, &memswpriority, 10);
 	}
 
 	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
@@ -1243,19 +1265,19 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-				/*
-				 * If swtotal is 0 it should mean that
-				 * memory.memsw.limit_in_bytes and
-				 * memory.limit_in_bytes are both unlimited or
-				 * both set to the same value. In both cases we
-				 * have no idea what the technical swap limit
-				 * is supposed to be (It's a shared limit
-				 * anyway.) so fallback to the host's values in
-				 * that case too.
-				 */
-				if ((hostswtotal < swtotal) || swtotal == 0) {
+				/* The total amount of swap is always reported to be the
+				   lesser of the RAM+SWAP limit or the SWAP device size.
+				   This is because the kernel can swap as much as it
+				   wants and not only up to swtotal. */
+
+				swtotal = memlimit + swtotal;
+				if (hostswtotal < swtotal) {
 					swtotal = hostswtotal;
-					host_swap = true;
+				}
+
+				/* When swappiness is 0, pretend we can't swap. */
+				if (memswpriority == 0) {
+					swtotal = swusage;
 				}
 			}
 
@@ -1263,14 +1285,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:")) {
 			if (wants_swap) {
-				uint64_t hostswfree = 0;
-
-				if (host_swap) {
-					sscanf(line + STRLITERALLEN("SwapFree:"), "%" PRIu64, &hostswfree);
-					swfree = hostswfree;
-				} else if (swtotal >= swusage) {
-					swfree = swtotal - swusage;
-				}
+				swfree = swtotal - swusage;
 			}
 
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
