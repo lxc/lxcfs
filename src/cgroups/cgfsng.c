@@ -992,33 +992,33 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	if (!cgfsng_ops)
 		return ret_set_errno(NULL, ENOMEM);
 
-	cgfsng_ops->cgroup_layout = CGROUP_LAYOUT_UNKNOWN;
-	cgfsng_ops->mntns_fd = -EBADF;
-	cgfsng_ops->cgroup2_root_fd = -EBADF;
+	cgfsng_ops->cgroup_layout		= CGROUP_LAYOUT_UNKNOWN;
+	cgfsng_ops->mntns_fd			= -EBADF;
+	cgfsng_ops->cgroup2_root_fd		= -EBADF;
 
 	if (cg_init(cgfsng_ops))
 		return NULL;
 
-	cgfsng_ops->num_hierarchies = cgfsng_num_hierarchies;
-	cgfsng_ops->get = cgfsng_get;
-	cgfsng_ops->get_hierarchies = cgfsng_get_hierarchies;
-	cgfsng_ops->get_hierarchy = cgfsng_get_hierarchy;
-	cgfsng_ops->driver = "cgfsng";
-	cgfsng_ops->version = "1.0.0";
-	cgfsng_ops->mount = cgfsng_mount;
+	cgfsng_ops->num_hierarchies		= cgfsng_num_hierarchies;
+	cgfsng_ops->get				= cgfsng_get;
+	cgfsng_ops->get_hierarchies		= cgfsng_get_hierarchies;
+	cgfsng_ops->get_hierarchy		= cgfsng_get_hierarchy;
+	cgfsng_ops->driver			= "cgfsng";
+	cgfsng_ops->version			= "1.0.0";
+	cgfsng_ops->mount			= cgfsng_mount;
 
 	/* memory */
-	cgfsng_ops->get_memory_stats_fd = cgfsng_get_memory_stats_fd;
-	cgfsng_ops->get_memory_stats = cgfsng_get_memory_stats;
-	cgfsng_ops->get_memory_max = cgfsng_get_memory_max;
-	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;
-	cgfsng_ops->get_memory_current = cgfsng_get_memory_current;
-	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
-	cgfsng_ops->can_use_swap = cgfsng_can_use_swap;
+	cgfsng_ops->get_memory_stats_fd		= cgfsng_get_memory_stats_fd;
+	cgfsng_ops->get_memory_stats		= cgfsng_get_memory_stats;
+	cgfsng_ops->get_memory_max		= cgfsng_get_memory_max;
+	cgfsng_ops->get_memory_swap_max		= cgfsng_get_memory_swap_max;
+	cgfsng_ops->get_memory_current		= cgfsng_get_memory_current;
+	cgfsng_ops->get_memory_swap_current	= cgfsng_get_memory_swap_current;
+	cgfsng_ops->can_use_swap		= cgfsng_can_use_swap;
 
 	/* cpuset */
-	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
-	cgfsng_ops->can_use_cpuview = cgfsng_can_use_cpuview;
+	cgfsng_ops->get_cpuset_cpus		= cgfsng_get_cpuset_cpus;
+	cgfsng_ops->can_use_cpuview		= cgfsng_can_use_cpuview;
 
 	/* blkio */
 	cgfsng_ops->get_io_service_bytes	= cgfsng_get_io_service_bytes;
