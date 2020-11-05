@@ -1151,7 +1151,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
-	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap(), host_swap = false;
+	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
@@ -1258,19 +1258,14 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-				/*
-				 * If swtotal is 0 it should mean that
-				 * memory.memsw.limit_in_bytes and
-				 * memory.limit_in_bytes are both unlimited or
-				 * both set to the same value. In both cases we
-				 * have no idea what the technical swap limit
-				 * is supposed to be (It's a shared limit
-				 * anyway.) so fallback to the host's values in
-				 * that case too.
-				 */
-				if ((hostswtotal < swtotal) || swtotal == 0) {
+				/* The total amount of swap is always reported to be the
+				   lesser of the RAM+SWAP limit or the SWAP device size.
+				   This is because the kernel can swap as much as it
+				   wants and not only up to swtotal. */
+
+				swtotal = memlimit + swtotal;
+				if (hostswtotal < swtotal) {
 					swtotal = hostswtotal;
-					host_swap = true;
 				}
 
 				/* When swappiness is 0, pretend we can't swap. */
@@ -1283,14 +1278,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:")) {
 			if (wants_swap) {
-				uint64_t hostswfree = 0;
-
-				if (host_swap) {
-					sscanf(line + STRLITERALLEN("SwapFree:"), "%" PRIu64, &hostswfree);
-					swfree = hostswfree;
-				} else if (swtotal >= swusage) {
-					swfree = swtotal - swusage;
-				}
+				swfree = swtotal - swusage;
 			}
 
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
