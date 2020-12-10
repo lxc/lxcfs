@@ -632,6 +632,22 @@ static int cgfsng_get_memory_swap_max(struct cgroup_ops *ops,
 	return cgfsng_get_memory(ops, cgroup, "memory.swap.max", value);
 }
 
+static int cgfsng_get_memory_slabinfo_fd(struct cgroup_ops *ops, const char *cgroup)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return -1;
+
+	if (faccessat(h->fd, "memory.kmem.slabinfo", F_OK, 0))
+		return -1;
+
+	path = must_make_path_relative(cgroup, "memory.kmem.slabinfo", NULL);
+	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+}
+
 static bool cgfsng_can_use_swap(struct cgroup_ops *ops)
 {
 	bool has_swap = false;
@@ -1021,6 +1037,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_memory_swap_max = cgfsng_get_memory_swap_max;
 	cgfsng_ops->get_memory_current = cgfsng_get_memory_current;
 	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
+	cgfsng_ops->get_memory_slabinfo_fd = cgfsng_get_memory_slabinfo_fd;
 	cgfsng_ops->can_use_swap = cgfsng_can_use_swap;
 
 	/* cpuset */

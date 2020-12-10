@@ -22,6 +22,7 @@ static char *api_extensions[] = {
 	"proc_stat",
 	"proc_swaps",
 	"proc_uptime",
+	"proc_slabinfo",
 	"shared_pidns",
 	"cpuview_daemon",
 	"loadavg_daemon",
