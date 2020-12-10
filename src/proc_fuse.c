@@ -102,7 +102,8 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 	    strcmp(path, "/proc/stat")		== 0 ||
 	    strcmp(path, "/proc/diskstats")	== 0 ||
 	    strcmp(path, "/proc/swaps")		== 0 ||
-	    strcmp(path, "/proc/loadavg")	== 0) {
+	    strcmp(path, "/proc/loadavg")	== 0 ||
+	    strcmp(path, "/proc/slabinfo")	== 0) {
 		sb->st_size = 4096;
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -124,7 +125,8 @@ __lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
 	    DIR_FILLER(filler, buf, "uptime",	NULL, 0) != 0 ||
 	    DIR_FILLER(filler, buf, "diskstats",	NULL, 0) != 0 ||
 	    DIR_FILLER(filler, buf, "swaps",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "loadavg",	NULL, 0) != 0)
+	    DIR_FILLER(filler, buf, "loadavg",	NULL, 0) != 0 ||
+	    DIR_FILLER(filler, buf, "slabinfo",	NULL, 0) != 0)
 		return -EINVAL;
 
 	return 0;
@@ -166,6 +168,8 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_PROC_SWAPS;
 	else if (strcmp(path, "/proc/loadavg") == 0)
 		type = LXC_TYPE_PROC_LOADAVG;
+	else if (strcmp(path, "/proc/slabinfo") == 0)
+		type = LXC_TYPE_PROC_SLABINFO;
 	if (type == -1)
 		return -ENOENT;
 
@@ -1397,6 +1401,75 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
+static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
+			      struct fuse_file_info *fi)
+{
+	__do_free char *cgroup = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_close int fd = -EBADF;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	size_t linelen = 0, total_len = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
+	pid_t initpid;
+
+	if (offset) {
+		int left;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cgroup = get_pid_cgroup(initpid, "memory");
+	if (!cgroup)
+		return read_file_fuse("/proc/slabinfo", buf, size, d);
+
+	prune_init_slice(cgroup);
+
+	fd = cgroup_ops->get_memory_slabinfo_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return read_file_fuse("/proc/slabinfo", buf, size, d);
+
+	f = fdopen_cached(fd, "re", &fopen_cache);
+	if (!f)
+		return read_file_fuse("/proc/slabinfo", buf, size, d);
+
+	while (getline(&line, &linelen, f) != -1) {
+		ssize_t l = snprintf(cache, cache_size, "%s", line);
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if (l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
+		cache += l;
+		cache_size -= l;
+		total_len += l;
+	}
+
+	d->cached = 1;
+	d->size = total_len;
+	if (total_len > size)
+		total_len = size;
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
 __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 			       off_t offset, struct fuse_file_info *fi)
 {
@@ -1444,6 +1517,12 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 			return proc_loadavg_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_LOADAVG_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_PROC_SLABINFO:
+		if (liblxcfs_functional())
+			return proc_slabinfo_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_SLABINFO_PATH,
 						  buf, size, offset, f);
 	}
 
