@@ -411,7 +411,7 @@ static uint64_t diff_cpu_usage(struct cpuacct_usage *older,
 /*
  * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or
  * `cpu.cfs_period_us`, depending on `param`. Parameter value is returned
- * throuh `value`.
+ * through `value`.
  */
 static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
 {
