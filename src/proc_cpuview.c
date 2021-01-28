@@ -315,7 +315,8 @@ out:
 	return node;
 }
 
-static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *usage, int cpu_count, const char *cg)
+static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *usage,
+							  int cpu_count, const char *cg)
 {
 	int hash = calc_hash(cg) % CPUVIEW_HASH_SIZE;
 	struct cg_proc_stat_head *head = proc_stat_history[hash];
@@ -605,6 +606,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	if (max_cpus > cpu_cnt || !max_cpus)
 		max_cpus = cpu_cnt;
 
+	/* takes lock pthread_mutex_lock(&node->lock) */
 	stat_node = find_or_create_proc_stat_node(cg_cpu_usage, nprocs, cg);
 	if (!stat_node)
 		return log_error(0, "Failed to find/create stat node for %s", cg);
@@ -760,8 +762,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		     "cpu  %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
 		     user_sum, system_sum, idle_sum);
 	lxcfs_v("cpu-all: %s\n", buf);
-	if (l < 0)
-		return log_error(0, "Failed to write cache");
+	if (l < 0) {
+		lxcfs_error("Failed to write cache");
+		total_len = 0;
+		goto out_pthread_mutex_unlock;
+	}
 	if (l >= buf_size)
 		return log_error(0, "Write to cache was truncated");
 
@@ -785,10 +790,16 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			     stat_node->view[curcpu].system,
 			     stat_node->view[curcpu].idle);
 		lxcfs_v("cpu: %s\n", buf);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if (l >= buf_size)
-			return log_error(0, "Write to cache was truncated");
+		if (l < 0) {
+			lxcfs_error("Failed to write cache");
+			total_len = 0;
+			goto out_pthread_mutex_unlock;
+		}
+		if (l >= buf_size) {
+			lxcfs_error("Write to cache was truncated");
+			total_len = 0;
+			goto out_pthread_mutex_unlock;
+		}
 
 		buf += l;
 		buf_size -= l;
@@ -797,10 +808,16 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	/* Pass the rest of /proc/stat, start with the last line read */
 	l = snprintf(buf, buf_size, "%s", line);
-	if (l < 0)
-		return log_error(0, "Failed to write cache");
-	if (l >= buf_size)
-		return log_error(0, "Write to cache was truncated");
+	if (l < 0) {
+		lxcfs_error("Failed to write cache");
+		total_len = 0;
+		goto out_pthread_mutex_unlock;
+	}
+	if (l >= buf_size) {
+		lxcfs_error("Write to cache was truncated");
+		total_len = 0;
+		goto out_pthread_mutex_unlock;
+	}
 
 	buf += l;
 	buf_size -= l;
@@ -809,16 +826,23 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	/* Pass the rest of the host's /proc/stat */
 	while (getline(&line, &linelen, f) != -1) {
 		l = snprintf(buf, buf_size, "%s", line);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if (l >= buf_size)
-			return log_error(0, "Write to cache was truncated");
+		if (l < 0) {
+			lxcfs_error("Failed to write cache");
+			total_len = 0;
+			goto out_pthread_mutex_unlock;
+		}
+		if (l >= buf_size) {
+			lxcfs_error("Write to cache was truncated");
+			total_len = 0;
+			goto out_pthread_mutex_unlock;
+		}
 
 		buf += l;
 		buf_size -= l;
 		total_len += l;
 	}
 
+out_pthread_mutex_unlock:
 	if (stat_node)
 		pthread_mutex_unlock(&stat_node->lock);
 
