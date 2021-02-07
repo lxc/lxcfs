@@ -19,6 +19,8 @@
 #define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
+#define TASK_COMM_LEN 16
+#define TASK_COMM_LEN_STR "17"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -755,6 +757,36 @@ static uint64_t get_reaper_start_time(pid_t pid)
 	return ret_set_errno(starttime, 0);
 }
 
+static int get_calling_comm(pid_t pid, char *comm)
+{
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	int ret;
+	char path[STRLITERALLEN("/proc/") + LXCFS_NUMSTRLEN64 +
+		  STRLITERALLEN("/stat") + 1];
+
+	ret = snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+	if (ret < 0 || (size_t)ret >= sizeof(path))
+		return EINVAL;
+
+	f = fopen_cached(path, "re", &fopen_cache);
+	if (!f)
+		return EINVAL;
+
+	/* Note that the *scanf() argument supression requires that length
+	 * modifiers such as "l" are omitted. Otherwise some compilers will yell
+	 * at us. It's like telling someone you're not married and then asking
+	 * if you can bring your wife to the party.
+	 */
+	ret = fscanf(f, "%*d "      /* (1)  pid         %d   */
+			"%" TASK_COMM_LEN_STR "s",      /* (2)  comm        %s   */
+		    comm);
+	if (ret != 1)
+		return EINVAL;
+
+	return 0;
+}
+
 static double get_reaper_start_time_in_sec(pid_t pid)
 {
 	uint64_t clockticks, ticks_per_sec;
@@ -818,6 +850,13 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 #if RELOADTEST
 	iwashere();
 #endif
+    
+	/*just return the host uptime for ps command*/
+	char calling_comm[TASK_COMM_LEN + 2];
+	ret = get_calling_comm(fc->pid, calling_comm);
+	if(strcmp(calling_comm, "(ps)") == 0) {
+		return read_file_fuse("/proc/uptime", buf, size, d);
+	}
 
 	if (offset) {
 		int left;
