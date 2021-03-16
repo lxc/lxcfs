@@ -80,6 +80,23 @@ struct memory_stat {
 	uint64_t total_unevictable;
 };
 
+static off_t get_procfile_size(const char *path)
+{
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
+	size_t len = 0;
+	ssize_t sz, answer = 0;
+
+	f = fopen(path, "re");
+	if (!f)
+		return 0;
+
+	while ((sz = getline(&line, &len, f)) != -1)
+		answer += sz;
+
+	return answer;
+}
+
 __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
@@ -103,7 +120,7 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 	    strcmp(path, "/proc/diskstats")	== 0 ||
 	    strcmp(path, "/proc/swaps")		== 0 ||
 	    strcmp(path, "/proc/loadavg")	== 0) {
-		sb->st_size = 4096;
+		sb->st_size = get_procfile_size(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -128,23 +145,6 @@ __lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
 		return -EINVAL;
 
 	return 0;
-}
-
-static off_t get_procfile_size(const char *path)
-{
-	__do_fclose FILE *f = NULL;
-	__do_free char *line = NULL;
-	size_t len = 0;
-	ssize_t sz, answer = 0;
-
-	f = fopen(path, "re");
-	if (!f)
-		return 0;
-
-	while ((sz = getline(&line, &len, f)) != -1)
-		answer += sz;
-
-	return answer;
 }
 
 __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
