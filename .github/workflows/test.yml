@@ -1,0 +1,55 @@
+name: Build and test
+on:
+  - push
+  - pull_request
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+        os:
+          - ubuntu-16.04
+          - ubuntu-18.04
+          - ubuntu-20.04
+        exclude:
+          - os: ubuntu-16.04
+            compiler: gcc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq gcc clang
+          sudo apt-get install -qq libfuse-dev uuid-runtime
+
+      - name: Compiler version
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          ${CC} --version
+
+      - name: Build
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          # Configure
+          ./bootstrap.sh
+          CFLAGS='-g -O0 -std=c11 -DDEBUG -DVERBOSE -DRESOLVE_NOW -Wall -Werror' ./configure --prefix=/usr
+
+          # Build
+          make -j4
+          (cd tests && make tests)
+
+      - name: Test
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" tests/main.sh
