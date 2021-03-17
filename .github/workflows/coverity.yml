@@ -1,0 +1,52 @@
+name: Coverity
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download Coverity Build Tool
+        run: |
+          wget -q https://scan.coverity.com/download/cxx/linux64 --post-data "token=$TOKEN&project=lxc/lxcfs" -O cov-analysis-linux64.tar.gz
+          mkdir cov-analysis-linux64
+          tar xzf cov-analysis-linux64.tar.gz --strip 1 -C cov-analysis-linux64
+        env:
+          TOKEN: ${{ secrets.COVERITY_SCAN_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq gcc clang
+          sudo apt-get install -qq libfuse-dev uuid-runtime
+
+      - name: Run coverity
+        run: |
+          export PATH="$(pwd)/cov-analysis-linux64/bin:${PATH}"
+
+          # Configure
+          ./bootstrap.sh
+          mkdir build
+          cd build
+          ../configure --prefix=/usr
+
+          # Build
+          cov-build --dir cov-int make -j4
+          tar czvf lxcfs.tgz cov-int
+
+          # Submit the results
+          curl \
+            --form project=lxc/lxcfs \
+            --form token=${TOKEN} \
+            --form email=lxc-devel@lists.linuxcontainers.org \
+            --form file=@lxcfs.tgz \
+            --form version=master \
+            --form description="${GITHUB_SHA}" \
+            https://scan.coverity.com/builds?project=lxc/lxcfs
+        env:
+          TOKEN: ${{ secrets.COVERITY_SCAN_TOKEN }}
