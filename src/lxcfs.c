@@ -1158,6 +1158,9 @@ int main(int argc, char *argv[])
 	if (swallow_arg(&argc, argv, "--enable-cfs"))
 		opts->use_cfs = true;
 
+	// extra options not include nonempty
+	char extra_options[1000] = {0};
+	int start_index = 0;
 	if (swallow_option(&argc, argv, "-o", &v)) {
 		/* Parse multiple values */
 		for (; (token = strtok_r(v, ",", &saveptr)); v = NULL) {
@@ -1170,9 +1173,16 @@ int main(int argc, char *argv[])
 				nonempty = true;
 #endif
 			} else {
-				lxcfs_error("Warning: unexpected fuse option %s", v);
-				free(v);
-				exit(EXIT_FAILURE);
+				if (start_index != 0) {
+					extra_options[start_index++] = ',';
+				}
+				int token_length = strlen(token);
+				if (start_index + token_length > 1000) {
+					lxcfs_info("Warning: -o options mustn't be longer than 1000, maybe ignore some options...\n");
+					break;
+				}
+				mempcpy(extra_options + start_index, token, strlen(token));
+				start_index += strlen(token);
 			}
 		}
 		free(v);
@@ -1215,14 +1225,37 @@ int main(int argc, char *argv[])
 	 * shouldn't guarantee that we don't need more complicated access
 	 * helpers for proc and sys virtualization in the future.
 	 */
+
+	char final_options[1100] = {0};
+	int extra_opt_len = strlen(extra_options);
 #ifdef HAVE_FUSE3
-	newargv[cnt++] = "allow_other,entry_timeout=0.5,attr_timeout=0.5";
+	if (extra_opt_len == 0) {
+		newargv[cnt++] = "allow_other,entry_timeout=0.5,attr_timeout=0.5";
+	} else {
+		snprintf(final_options, sizeof(final_options), "%s,%s", "allow_other,entry_timeout=0.5,attr_timeout=0.5", extraOptions);
+		newargv[cnt++] = final_options;
+	}
+
 #else
-	if (nonempty)
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
-	else
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+	if (nonempty) {
+		if (extra_opt_len == 0) {
+			newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
+		} else {
+			snprintf(final_options, sizeof(final_options), "%s,%s", "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty", extra_options);
+			newargv[cnt++] = final_options;
+		}
+
+	} else {
+		if (extra_opt_len == 0) {
+			newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
+		} else {
+			snprintf(final_options, sizeof(final_options), "%s,%s", "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5", extra_options);
+			newargv[cnt++] = final_options;
+		}
+	}
+
 #endif
+
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
 
