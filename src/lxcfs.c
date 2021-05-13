@@ -1232,7 +1232,7 @@ int main(int argc, char *argv[])
 	if (extra_opt_len == 0) {
 		newargv[cnt++] = "allow_other,entry_timeout=0.5,attr_timeout=0.5";
 	} else {
-		snprintf(final_options, sizeof(final_options), "%s,%s", "allow_other,entry_timeout=0.5,attr_timeout=0.5", extraOptions);
+		snprintf(final_options, sizeof(final_options), "%s,%s", "allow_other,entry_timeout=0.5,attr_timeout=0.5", extra_options);
 		newargv[cnt++] = final_options;
 	}
 
