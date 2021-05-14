@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
+#include <getopt.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <sched.h>
@@ -1007,61 +1008,6 @@ static void usage()
 	exit(EXIT_FAILURE);
 }
 
-static inline bool is_help(char *w)
-{
-	return strcmp(w, "-h") == 0 ||
-	       strcmp(w, "--help") == 0 ||
-	       strcmp(w, "-help") == 0 ||
-	       strcmp(w, "help") == 0;
-}
-
-static inline bool is_version(char *w)
-{
-	return strcmp(w, "-v") == 0 ||
-	       strcmp(w, "--version") == 0 ||
-	       strcmp(w, "-version") == 0 ||
-	       strcmp(w, "version") == 0;
-}
-
-static bool swallow_arg(int *argcp, char *argv[], char *which)
-{
-	for (int i = 1; argv[i]; i++) {
-		if (strcmp(argv[i], which) != 0)
-			continue;
-
-		for (; argv[i]; i++)
-			argv[i] = argv[i + 1];
-
-		(*argcp)--;
-		return true;
-	}
-
-	return false;
-}
-
-static bool swallow_option(int *argcp, char *argv[], char *opt, char **v)
-{
-	for (int i = 1; argv[i]; i++) {
-		if (!argv[i + 1])
-			continue;
-
-		if (strcmp(argv[i], opt) != 0)
-			continue;
-
-		do {
-			*v = strdup(argv[i + 1]);
-		} while (!*v);
-
-		for (; argv[i + 1]; i++)
-			argv[i] = argv[i + 2];
-
-		(*argcp) -= 2;
-		return true;
-	}
-
-	return false;
-}
-
 static int set_pidfile(char *pidfile)
 {
 	__do_close int fd = -EBADF;
@@ -1097,11 +1043,60 @@ static int set_pidfile(char *pidfile)
 	return move_fd(fd);
 }
 
+static const struct option long_options[] = {
+	{"debug",		no_argument,		0,	'd'	},
+	{"disable-swap",	no_argument,		0,	'u'	},
+	{"enable-loadavg",	no_argument,		0,	'l'	},
+	{"foreground",		no_argument,		0,	'f'	},
+	{"help",		no_argument,		0,	'h'	},
+	{"version",		no_argument,		0,	'v'	},
+
+	{"enable-cfs",		no_argument,		0,	  0	},
+	{"enable-pidfd",	no_argument,		0,	  0	},
+
+	{"pidfile",		required_argument,	0,	'p'	},
+	{								},
+};
+
+static int append_comma_separate(char **s, const char *append)
+{
+	int ret;
+	char *news;
+	size_t append_len, len;
+
+	if (!append)
+		return 0;
+
+	append_len = strlen(append);
+	if (!append_len)
+		return 0;
+
+	if (*s) {
+		len = strlen(*s);
+		news = realloc(*s, len + append_len + 2);
+	} else {
+		len = 0;
+		news = realloc(NULL, append_len + 1);
+	}
+	if (!news)
+		return -ENOMEM;
+
+	if (*s)
+		ret = snprintf(news + len, append_len + 2, ",%s", append);
+	else
+		ret = snprintf(news, append_len + 1, "%s", append);
+	if (ret < 0)
+		return -EIO;
+
+	*s = news;
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int pidfile_fd = -EBADF;
 	int ret = EXIT_FAILURE;
-	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
+	char *pidfile = NULL, *token = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
 	bool debug = false, foreground = false;
 #ifndef HAVE_FUSE3
@@ -1112,8 +1107,12 @@ int main(int argc, char *argv[])
 	 * what we pass to fuse_main is:
 	 * argv[0] -s [-f|-d] -o allow_other,directio argv[1] NULL
 	 */
-	int nargs = 5, cnt = 0;
-	char *newargv[6];
+	int fuse_argc = 0;
+	int c, idx, new_argc;
+	char *fuse_argv[7];
+	const char *fuse_opts = NULL;
+	char *new_fuse_opts = NULL;
+	char *const *new_argv;
 	struct lxcfs_opts *opts;
 
 	opts = malloc(sizeof(struct lxcfs_opts));
@@ -1121,90 +1120,135 @@ int main(int argc, char *argv[])
 		lxcfs_error("Error allocating memory for options");
 		goto out;
 	}
+
 	opts->swap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
 
-	/* accomodate older init scripts */
-	swallow_arg(&argc, argv, "-s");
+	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
+		switch (c) {
+		case 0:
+			if (strcmp(long_options[idx].name, "enable-pidfd") == 0)
+				opts->use_pidfd = true;
+			else if (strcmp(long_options[idx].name, "enable-cfs") == 0)
+				opts->use_cfs = true;
+			else
+				usage();
+			break;
+		case 'd':
+			debug = true;
+			break;
+		case 'f':
+			foreground = true;
+			break;
+		case 'l':
+			load_use = true;
+			break;
+		case 'o':
+			if (fuse_opts) {
+				lxcfs_error("Specifying -o multiple times is unsupported");
+				usage();
+			}
 
-	/* -f / --foreground */
-	foreground = swallow_arg(&argc, argv, "-f");
-	if (swallow_arg(&argc, argv, "--foreground"))
-		foreground = true;
-
-	/* -d / --debug */
-	debug = swallow_arg(&argc, argv, "-d");
-	if (swallow_arg(&argc, argv, "--debug"))
-		debug = true;
+			fuse_opts = optarg;
+			break;
+		case 'p':
+			pidfile = optarg;
+			break;
+		case 's':
+			/* legacy argument: ignore */
+			break;
+		case 'u':
+			opts->swap_off = true;
+			break;
+		default:
+			usage();
+		}
+	}
 
 	if (foreground && debug)
 		log_exit("Both --debug and --forgreound specified");
 
-	/* -l / --enable-loadavg */
-	load_use = swallow_arg(&argc, argv, "-l");
-	if (swallow_arg(&argc, argv, "--enable-loadavg"))
-		load_use = true;
-
-	/* -u / --disable-swap */
-	opts->swap_off = swallow_arg(&argc, argv, "-u");
-	if (swallow_arg(&argc, argv, "--disable-swap"))
-		opts->swap_off = true;
-
-	/* --enable-pidfd */
-	opts->use_pidfd = swallow_arg(&argc, argv, "--enable-pidfd");
-
-	/* --enable-cfs */
-	if (swallow_arg(&argc, argv, "--enable-cfs"))
-		opts->use_cfs = true;
-
-	if (swallow_option(&argc, argv, "-o", &v)) {
-		/* Parse multiple values */
-		for (; (token = strtok_r(v, ",", &saveptr)); v = NULL) {
-			if (strcmp(token, "allow_other") == 0) {
-				/* Noop. this is the default. Always enabled. */
-			} else if (strcmp(token, "nonempty") == 0) {
-#ifdef HAVE_FUSE3
-				/* FUSE3: Noop. this is the default. */
-#else
-				nonempty = true;
-#endif
-			} else {
-				lxcfs_error("Warning: unexpected fuse option %s", v);
-				free(v);
-				exit(EXIT_FAILURE);
-			}
-		}
-		free(v);
-		v = NULL;
-	}
-
-	/* -p / --pidfile */
-	if (swallow_option(&argc, argv, "-p", &v))
-		pidfile = v;
-	if (!pidfile && swallow_option(&argc, argv, "--pidfile", &v))
-		pidfile = v;
-
-	if (argc == 2  && is_version(argv[1])) {
-		lxcfs_info("%s", VERSION);
-		exit(EXIT_SUCCESS);
-	}
-
-	if (argc != 2 || is_help(argv[1]))
-		usage();
-
-	do_reload();
-	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
-		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
+	new_argv = &argv[optind];
+	new_argc = argc - optind;
+	if (new_argc != 1) {
+		lxcfs_error("Missing mountpoint");
 		goto out;
 	}
 
-	newargv[cnt++] = argv[0];
+	fuse_argv[fuse_argc++] = argv[0];
 	if (debug)
-		newargv[cnt++] = "-d";
+		fuse_argv[fuse_argc++] = "-d";
 	else
-		newargv[cnt++] = "-f";
-	newargv[cnt++] = "-o";
+		fuse_argv[fuse_argc++] = "-f";
+	fuse_argv[fuse_argc++] = "-o";
+
+	/* Parse additional fuse options. */
+	if (fuse_opts) {
+		char *dup;
+
+		dup = strdup(fuse_opts);
+		if (!dup) {
+			lxcfs_error("Failed to copy fuse options");
+			goto out;
+		}
+
+		lxc_iterate_parts(token, dup, ",") {
+			/* default */
+			if (strcmp(token, "allow_other") == 0)
+				continue;
+
+			/* default for LXCFS */
+			if (strcmp(token, "direct_io") == 0)
+				continue;
+
+			/* default for LXCFS */
+			if (strncmp(token, "entry_timeout", STRLITERALLEN("entry_timeout")) == 0)
+				continue;
+
+			/* default for LXCFS */
+			if (strncmp(token, "attr_timeout", STRLITERALLEN("entry_timeout")) == 0)
+				continue;
+
+			/* default for LXCFS */
+			if (strncmp(token, "allow_other", STRLITERALLEN("allow_other")) == 0)
+				continue;
+
+			/* default with fuse3 */
+			if (strcmp(token, "nonempty") == 0) {
+				#ifndef HAVE_FUSE3
+				nonempty = true;
+				#endif
+				continue;
+			}
+
+			if (append_comma_separate(&new_fuse_opts, token)) {
+				lxcfs_error("Failed to copy fuse argument \"%s\"", token);
+				free(dup);
+				goto out;
+			}
+		}
+		free(dup);
+	}
+
+	if (append_comma_separate(&new_fuse_opts, "allow_other,entry_timeout=0.5,attr_timeout=0.5")) {
+		lxcfs_error("Failed to copy fuse argument \"allow_other,entry_timeout=0.5,attr_timeout=0.5\"");
+		goto out;
+	}
+
+#ifndef HAVE_FUSE3
+	if (nonempty) {
+		if (append_comma_separate(&new_fuse_opts, "nonempty")) {
+			lxcfs_error("Failed to copy fuse argument \"nonempty\"");
+			goto out;
+		}
+	}
+
+	if (append_comma_separate(&new_fuse_opts, "direct_io")) {
+		lxcfs_error("Failed to copy fuse argument \"nonempty\"");
+		goto out;
+	}
+#endif
 
 	/*
 	 * We can't use default_permissions since we still support systems that
@@ -1215,16 +1259,19 @@ int main(int argc, char *argv[])
 	 * shouldn't guarantee that we don't need more complicated access
 	 * helpers for proc and sys virtualization in the future.
 	 */
-#ifdef HAVE_FUSE3
-	newargv[cnt++] = "allow_other,entry_timeout=0.5,attr_timeout=0.5";
-#else
-	if (nonempty)
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5,nonempty";
-	else
-		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
-#endif
-	newargv[cnt++] = argv[1];
-	newargv[cnt++] = NULL;
+
+	fuse_argv[fuse_argc++] = new_fuse_opts;
+	fuse_argv[fuse_argc++] = new_argv[0];
+	fuse_argv[fuse_argc] = NULL;
+
+	for (int i = 0; i < fuse_argc; i++)
+		printf("AAAA: %s\n", fuse_argv[i]);
+
+	do_reload();
+	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
+		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
+		goto out;
+	}
 
 	if (!pidfile) {
 		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", RUNTIME_PATH);
@@ -1238,7 +1285,7 @@ int main(int argc, char *argv[])
 	if (load_use && start_loadavg() != 0)
 		goto out;
 
-	if (!fuse_main(nargs, newargv, &lxcfs_ops, opts))
+	if (!fuse_main(fuse_argc, fuse_argv, &lxcfs_ops, opts))
 		ret = EXIT_SUCCESS;
 
 	if (load_use)
@@ -1249,6 +1296,7 @@ out:
 		dlclose(dlopen_handle);
 	if (pidfile)
 		unlink(pidfile);
+	free(new_fuse_opts);
 	free(opts);
 	close_prot_errno_disarm(pidfile_fd);
 	exit(ret);
