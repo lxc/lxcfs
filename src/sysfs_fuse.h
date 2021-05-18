@@ -28,6 +28,7 @@ __visible extern int sys_readdir(const char *path, void *buf, fuse_fill_dir_t fi
 __visible extern int sys_release(const char *path, struct fuse_file_info *fi);
 __visible extern int sys_releasedir(const char *path, struct fuse_file_info *fi);
 __visible extern int sys_open(const char *path, struct fuse_file_info *fi);
+__visible extern int sys_opendir(const char *path, struct fuse_file_info *fi);
 __visible extern int sys_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
 __visible extern int sys_access(const char *path, int mask);
 

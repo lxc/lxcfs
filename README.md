@@ -16,6 +16,7 @@ such as:
 /proc/swaps
 /proc/uptime
 /proc/slabinfo
+/sys/devices/system/cpu
 /sys/devices/system/cpu/online
 ```
 
