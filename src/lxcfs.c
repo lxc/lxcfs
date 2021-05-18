@@ -298,6 +298,22 @@ static int do_cg_write(const char *path, const char *buf, size_t size,
 	return __cg_write(path, buf, size, offset, fi);
 }
 
+static int do_sys_write(const char *path, const char *buf, size_t size,
+		       off_t offset, struct fuse_file_info *fi)
+{
+	char *error;
+	int (*__sys_write)(const char *path, const char *buf, size_t size,
+			  off_t offset, struct fuse_file_info *fi);
+
+	dlerror();
+	__sys_write = (int (*)(const char *, const char *, size_t, off_t, struct fuse_file_info *))dlsym(dlopen_handle, "sys_write");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find sys_write()", error);
+
+	return __sys_write(path, buf, size, offset, fi);
+}
+
 static int do_cg_mkdir(const char *path, mode_t mode)
 {
 	char *error;
@@ -402,6 +418,19 @@ static int do_sys_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return __sys_readdir(path, buf, filler, offset, fi);
 }
 
+static int do_sys_readlink(const char *path, char *buf, size_t size)
+{
+	char *error;
+	int (*__sys_readlink)(const char *path, char *buf, size_t size);
+
+	dlerror();
+	__sys_readlink = (int (*)(const char *, char *, size_t))dlsym(dlopen_handle, "sys_readlink");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find sys_readlink()", error);
+
+	return __sys_readlink(path, buf, size);
+}
 
 static int do_cg_open(const char *path, struct fuse_file_info *fi)
 {
@@ -471,6 +500,20 @@ static int do_sys_open(const char *path, struct fuse_file_info *fi)
 		return log_error(-1, "%s - Failed to find sys_open()", error);
 
 	return __sys_open(path, fi);
+}
+
+static int do_sys_opendir(const char *path, struct fuse_file_info *fi)
+{
+	char *error;
+	int (*__sys_opendir)(const char *path, struct fuse_file_info *fi);
+
+	dlerror();
+	__sys_opendir = (int (*)(const char *path, struct fuse_file_info *fi))dlsym(dlopen_handle, "sys_opendir");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find sys_opendir()", error);
+
+	return __sys_opendir(path, fi);
 }
 
 static int do_sys_access(const char *path, int mode)
@@ -632,8 +675,12 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	if (strcmp(path, "/proc") == 0)
 		return 0;
 
-	if (strncmp(path, "/sys", 4) == 0)
-		return 0;
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_opendir(path, fi);
+		down_users();
+		return ret;
+	}
 
 	return -ENOENT;
 }
@@ -810,6 +857,27 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 		return ret;
 	}
 
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_write(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
+	return -EINVAL;
+}
+
+int lxcfs_readlink(const char *path, char *buf, size_t size)
+{
+	int ret;
+
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_readlink(path, buf, size);
+		down_users();
+		return ret;
+	}
+
 	return -EINVAL;
 }
 
@@ -903,6 +971,9 @@ int lxcfs_truncate(const char *path, off_t newsize)
 	if (strncmp(path, "/cgroup", 7) == 0)
 		return 0;
 
+	if (strncmp(path, "/sys", 4) == 0)
+		return 0;
+
 	return -EPERM;
 }
 
@@ -961,6 +1032,7 @@ const struct fuse_operations lxcfs_ops = {
 	.rmdir		= lxcfs_rmdir,
 	.truncate	= lxcfs_truncate,
 	.write		= lxcfs_write,
+	.readlink	= lxcfs_readlink,
 
 	.create		= NULL,
 	.destroy	= NULL,
@@ -977,7 +1049,6 @@ const struct fuse_operations lxcfs_ops = {
 	.link		= NULL,
 	.listxattr	= NULL,
 	.mknod		= NULL,
-	.readlink	= NULL,
 	.rename		= NULL,
 	.removexattr	= NULL,
 	.setxattr	= NULL,
