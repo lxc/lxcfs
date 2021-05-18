@@ -473,6 +473,20 @@ static int do_sys_open(const char *path, struct fuse_file_info *fi)
 	return __sys_open(path, fi);
 }
 
+static int do_sys_opendir(const char *path, struct fuse_file_info *fi)
+{
+	char *error;
+	int (*__sys_opendir)(const char *path, struct fuse_file_info *fi);
+
+	dlerror();
+	__sys_opendir = (int (*)(const char *path, struct fuse_file_info *fi))dlsym(dlopen_handle, "sys_opendir");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find sys_opendir()", error);
+
+	return __sys_opendir(path, fi);
+}
+
 static int do_sys_access(const char *path, int mode)
 {
 	char *error;
@@ -632,8 +646,12 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	if (strcmp(path, "/proc") == 0)
 		return 0;
 
-	if (strncmp(path, "/sys", 4) == 0)
-		return 0;
+	if (strncmp(path, "/sys", 4) == 0) {
+		up_users();
+		ret = do_sys_opendir(path, fi);
+		down_users();
+		return ret;
+    }
 
 	return -ENOENT;
 }

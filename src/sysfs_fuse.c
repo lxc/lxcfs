@@ -101,6 +101,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		use_view = true;
 	else
 		use_view = false;
+
 	if (use_view)
 		max_cpus = max_cpu_count(cg);
 
@@ -125,6 +126,93 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 
 	return total_len;
 }
+
+static int filler_sys_devices_system_cpu(const char *path, void *buf,
+		fuse_fill_dir_t filler)
+{
+	__do_free char *cg = NULL, *cpuset = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	pid_t initpid;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return 0; 
+
+	prune_init_slice(cg);
+
+	cpuset = get_cpuset(cg);
+	if (!cpuset)
+		return 0; 
+
+	char *tok;
+	lxc_iterate_parts(tok, cpuset, ",") {
+		if (strstr(tok, "-")) {
+			char *cpu[2];
+			int i = 0;
+
+			char *t;
+			lxc_iterate_parts(t, tok, "-") {
+				if(i > 1)
+					return 0;
+				cpu[i++] = t;
+			}
+
+			for(i=atoi(cpu[0]); i<=atoi(cpu[1]); i++) {
+				char cpu_str[10];
+				sprintf(cpu_str, "cpu%d", i);
+				if (DIR_FILLER(filler, buf, cpu_str, NULL, 0) != 0) {
+					return -ENOENT;
+				}
+			}
+		}
+		else {
+			char cpu_str[10];
+			sprintf(cpu_str, "cpu%d", atoi(tok));
+
+			if (DIR_FILLER(filler, buf, cpu_str, NULL, 0) != 0)
+				return -ENOENT;
+		}
+	}
+
+	__do_closedir DIR *dir = NULL;
+	struct dirent *dirent;
+	dir = opendir(path);
+	if (!dir)
+		return -ENOENT;
+
+	while ((dirent = readdir(dir))) {
+		if (strstr(dirent->d_name, "cpu") && 
+                dirent->d_name[strlen(dirent->d_name)-1] >= '0' &&
+                dirent->d_name[strlen(dirent->d_name)-1] <= '9')
+			continue;
+
+		if (DIR_FILLER(filler, buf, dirent->d_name, NULL, 0) != 0)
+			return -ENOENT;
+	}
+
+	return 0;
+}
+
+static mode_t get_st_mode(const char *path)
+{
+	struct stat sb;
+	__do_close int fd = -EBADF;
+	fd = open(path, O_RDONLY);
+	if(fd < 0)
+		return -ENOENT;
+
+	int ret;
+	ret = fstat(fd, &sb);
+	if (ret < 0)
+		return -ENOENT;
+
+	return sb.st_mode;
+}
+
 
 static off_t get_sysfile_size(const char *which)
 {
@@ -153,31 +241,18 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 
 	sb->st_uid = sb->st_gid = 0;
 	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
-	if (strcmp(path, "/sys") == 0) {
+
+	mode_t st_mode = get_st_mode(path);
+	if (st_mode < 0)
+		return -ENOENT;
+
+	if (S_ISDIR(st_mode)) {
 		sb->st_mode = S_IFDIR | 00555;
 		sb->st_nlink = 2;
 		return 0;
 	}
 
-	if (strcmp(path, "/sys/devices") == 0) {
-		sb->st_mode = S_IFDIR | 00555;
-		sb->st_nlink = 2;
-		return 0;
-	}
-
-	if (strcmp(path, "/sys/devices/system") == 0) {
-		sb->st_mode = S_IFDIR | 00555;
-		sb->st_nlink = 2;
-		return 0;
-	}
-
-	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
-		sb->st_mode = S_IFDIR | 00555;
-		sb->st_nlink = 2;
-		return 0;
-	}
-
-	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
+	if (S_ISREG(st_mode)) {
 		sb->st_size = get_sysfile_size (path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
@@ -191,40 +266,52 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				 fuse_fill_dir_t filler, off_t offset,
 				 struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/sys") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "devices",	NULL, 0) != 0)
-			return -ENOENT;
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
-		return 0;
+	switch (f->type) {
+	case LXC_TYPE_SYS: {
+			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "devices",  NULL, 0) != 0)
+					return -ENOENT;
+
+			return 0;
+		}
+	case LXC_TYPE_SYS_DEVICES: {
+			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "system",  NULL, 0) != 0)
+					return -ENOENT;
+
+			return 0;
+		}
+	case LXC_TYPE_SYS_DEVICES_SYSTEM: {
+			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
+				DIR_FILLER(filler, buf, "cpu",  NULL, 0) != 0)
+					return -ENOENT;
+
+			return 0;
+		}
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
+			return filler_sys_devices_system_cpu(path, buf, filler);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR: {
+			__do_closedir DIR *dir = NULL;
+			struct dirent *dirent;
+			dir = opendir(path);
+			if (!dir)
+				return -ENOENT;
+
+			while ((dirent = readdir(dir))) {
+				if (DIR_FILLER(filler, buf, dirent->d_name, NULL, 0) != 0)
+				return -ENOENT;
+			}
+
+			return 0; 
+		}
 	}
-	if (strcmp(path, "/sys/devices") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "system",	NULL, 0) != 0)
-			return -ENOENT;
 
-		return 0;
-	}
-	if (strcmp(path, "/sys/devices/system") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "cpu",	NULL, 0) != 0)
-			return -ENOENT;
-
-		return 0;
-	}
-	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "online",	NULL, 0) != 0)
-			return -ENOENT;
-
-		return 0;
-	}
-
-	return 0;
+	return -EINVAL;
 }
 
 __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
@@ -232,15 +319,12 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 	__do_free struct file_info *info = NULL;
 	int type = -1;
 
-	if (strcmp(path, "/sys/devices") == 0)
-		type = LXC_TYPE_SYS_DEVICES;
-	if (strcmp(path, "/sys/devices/system") == 0)
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM;
-	if (strcmp(path, "/sys/devices/system/cpu") == 0)
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
-	if (type == -1)
+	else if (strstr(path, "/sys/devices/system/cpu/") && S_ISREG(get_st_mode(path)))
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE;
+
+	if (type == -1) 
 		return -ENOENT;
 
 	info = malloc(sizeof(*info));
@@ -264,26 +348,41 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+__lxcfs_fuse_ops int sys_opendir(const char *path, struct fuse_file_info *fi)
+{
+	__do_free struct file_info *dir_info = NULL;
+	int type = -1;
+
+	if (strcmp(path, "/sys") == 0)
+		type = LXC_TYPE_SYS;
+	if (strcmp(path, "/sys/devices") == 0)
+		type = LXC_TYPE_SYS_DEVICES;
+	if (strcmp(path, "/sys/devices/system") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM;
+	if (strcmp(path, "/sys/devices/system/cpu") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
+	if (strstr(path, "/sys/devices/system/cpu/") && S_ISDIR(get_st_mode(path))) 
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR;
+	if (type == -1)
+		return -ENOENT;
+
+	dir_info = malloc(sizeof(*dir_info));
+	if (!dir_info) 
+		return -ENOMEM;
+
+	memset(dir_info, 0, sizeof(*dir_info));
+	dir_info->type = type;
+	dir_info->buf = NULL;
+	dir_info->file = NULL;
+	dir_info->buflen = 0;
+
+	fi->fh = PTR_TO_UINT64(move_ptr(dir_info));
+	return 0;
+}
+
 __lxcfs_fuse_ops int sys_access(const char *path, int mask)
 {
-	if (strcmp(path, "/sys") == 0 && access(path, R_OK) == 0)
-		return 0;
-
-	if (strcmp(path, "/sys/devices") == 0 && access(path, R_OK) == 0)
-		return 0;
-
-	if (strcmp(path, "/sys/devices/system") == 0 && access(path, R_OK) == 0)
-		return 0;
-
-	if (strcmp(path, "/sys/devices/system/cpu") == 0 &&
-	    access(path, R_OK) == 0)
-		return 0;
-
-	/* these are all read-only */
-	if ((mask & ~R_OK) != 0)
-		return -EACCES;
-
-	return 0;
+	return access(path, mask);
 }
 
 __lxcfs_fuse_ops int sys_release(const char *path, struct fuse_file_info *fi)
@@ -299,7 +398,7 @@ __lxcfs_fuse_ops int sys_releasedir(const char *path, struct fuse_file_info *fi)
 }
 
 __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
-			      off_t offset, struct fuse_file_info *fi)
+			off_t offset, struct fuse_file_info *fi)
 {
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
@@ -310,12 +409,8 @@ __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
 
 		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
 						  buf, size, offset, f);
-	case LXC_TYPE_SYS_DEVICES:
-		break;
-	case LXC_TYPE_SYS_DEVICES_SYSTEM:
-		break;
-	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-		break;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE:
+		return read_file_fuse_with_offset(path, buf, size, offset, f);
 	}
 
 	return -EINVAL;
