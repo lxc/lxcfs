@@ -24,6 +24,7 @@
 #define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -226,8 +227,6 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	struct fuse_context *fc = fuse_get_context();
 	pid_t initpid;
 	ssize_t max_cpus;
-	size_t len;
-	char cpu[100];
 
 	initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
@@ -253,6 +252,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 
 	for (size_t i = 0; i < max_cpus; i++) {
 		int ret;
+		char cpu[100];
 
 		if (!is_set(i, cpumask))
 			continue;
@@ -270,10 +270,14 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		return -ENOENT;
 
 	while ((dirent = readdir(dir))) {
-		len = strlen(dirent->d_name);
-		if (strncmp(dirent->d_name, "cpu", 3) == 0 &&
-		    dirent->d_name[len - 1] >= '0' &&
-		    dirent->d_name[len - 1] <= '9')
+		char *entry = dirent->d_name;
+
+		if (strlen(entry) <= 3)
+			continue;
+		entry += 3;
+
+		/* Don't emit entries we already filtered above. */
+		if (isdigit(*entry))
 			continue;
 
 		if (DIR_FILLER(filler, buf, dirent->d_name, NULL, 0) != 0)
@@ -283,7 +287,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	return 0;
 }
 
-static mode_t get_st_mode(const char *path)
+static int get_st_mode(const char *path, mode_t *mode)
 {
 	struct stat sb;
 	int ret;
@@ -292,7 +296,8 @@ static mode_t get_st_mode(const char *path)
 	if (ret < 0)
 		return -ENOENT;
 
-	return sb.st_mode;
+	*mode = sb.st_mode;
+	return 0;
 }
 
 static off_t get_sysfile_size(const char *which)
@@ -314,6 +319,7 @@ static off_t get_sysfile_size(const char *which)
 
 __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 {
+	int ret;
 	struct timespec now;
 	mode_t st_mode;
 
@@ -327,8 +333,8 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	sb->st_uid = sb->st_gid = 0;
 	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
 
-	st_mode = get_st_mode(path);
-	if (st_mode < 0)
+	ret = get_st_mode(path, &st_mode);
+	if (ret)
 		return -ENOENT;
 
 	if (S_ISDIR(st_mode)) {
@@ -446,12 +452,20 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
+	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
-	else if (strncmp(path, "/sys/devices/system/cpu/",
-			 STRLITERALLEN("/sys/devices/system/cpu/")) == 0 &&
-		 S_ISREG(get_st_mode(path)))
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE;
+	} else if (strncmp(path, "/sys/devices/system/cpu/",
+			   STRLITERALLEN("/sys/devices/system/cpu/")) == 0) {
+		int ret;
+		mode_t st_mode;
+
+		ret = get_st_mode(path, &st_mode);
+		if (ret)
+			return ret;
+
+		if (S_ISREG(st_mode))
+			type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE;
+	}
 	if (type == -1)
 		return -ENOENT;
 
@@ -484,18 +498,26 @@ __lxcfs_fuse_ops int sys_opendir(const char *path, struct fuse_file_info *fi)
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (strcmp(path, "/sys") == 0)
+	if (strcmp(path, "/sys") == 0) {
 		type = LXC_TYPE_SYS;
-	if (strcmp(path, "/sys/devices") == 0)
+	} else if (strcmp(path, "/sys/devices") == 0) {
 		type = LXC_TYPE_SYS_DEVICES;
-	if (strcmp(path, "/sys/devices/system") == 0)
+	} else if (strcmp(path, "/sys/devices/system") == 0) {
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM;
-	if (strcmp(path, "/sys/devices/system/cpu") == 0)
+	} else if (strcmp(path, "/sys/devices/system/cpu") == 0) {
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
-	if (strncmp(path, "/sys/devices/system/cpu/",
-		    STRLITERALLEN("/sys/devices/system/cpu/")) == 0 &&
-	    S_ISDIR(get_st_mode(path)))
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR;
+	} else if (strncmp(path, "/sys/devices/system/cpu/",
+			   STRLITERALLEN("/sys/devices/system/cpu/")) == 0) {
+		int ret;
+		mode_t st_mode;
+
+		ret = get_st_mode(path, &st_mode);
+		if (ret)
+			return ret;
+
+		if (S_ISDIR(st_mode))
+			type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR;
+	}
 	if (type == -1)
 		return -ENOENT;
 
