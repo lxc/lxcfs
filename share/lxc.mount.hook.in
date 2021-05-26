@@ -24,10 +24,14 @@ fi
 
 # /sys/devices/system/cpu
 if [ -d @LXCFSTARGETDIR@/sys/devices/system/cpu ] ; then
-    for entry in @LXCFSTARGETDIR@/sys/devices/system/cpu/*; do
-        [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)" ] || continue
-        mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)
-    done
+    if [ -f @LXCFSTARGETDIR@/sys/devices/system/cpu/uevent ]; then
+        mount -n --bind @LXCFSTARGETDIR@/sys/devices/system/cpu ${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu
+    else
+        for entry in @LXCFSTARGETDIR@/sys/devices/system/cpu/*; do
+            [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)" ] || continue
+            mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)
+        done
+    fi
 fi
 
 # Allow nesting lxcfs
