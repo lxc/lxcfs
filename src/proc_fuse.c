@@ -321,8 +321,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	__do_free char *cgroup = NULL, *memusage_str = NULL,
 		 *memswusage_str = NULL, *memswpriority_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
-	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
+	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
 		 swtotal = 0, swusage = 0, memswpriority = 1,
@@ -1157,8 +1156,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct lxcfs_opts *opts = (struct lxcfs_opts *)fuse_get_context()->private_data;
-	bool wants_swap = opts && !opts->swap_off && liblxcfs_can_use_swap();
+	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
 		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
