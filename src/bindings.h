@@ -93,11 +93,41 @@ struct lxcfs_opts {
 	bool use_cfs;
 };
 
+typedef enum lxcfs_opt_t {
+	LXCFS_SWAP_ON	= 0,
+	LXCFS_PIDFD_ON	= 1,
+	LXCFS_CFS_ON	= 2,
+	LXCFS_OPTS_MAX	= LXCFS_CFS_ON,
+} lxcfs_opt_t;
+
+
 extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
 extern bool liblxcfs_can_use_swap(void);
+
+static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
+{
+	if (!opts)
+		return false;
+
+	if (opt > LXCFS_OPTS_MAX)
+		return false;
+
+	switch (opt) {
+	case LXCFS_SWAP_ON:
+		if (!opts->swap_off)
+			return liblxcfs_can_use_swap();
+		return false;
+	case LXCFS_PIDFD_ON:
+		return opts->use_pidfd;
+	case LXCFS_CFS_ON:
+		return opts->use_cfs;
+	}
+
+	return false;
+}
 
 static inline int install_signal_handler(int signo,
 					 void (*handler)(int, siginfo_t *, void *))
