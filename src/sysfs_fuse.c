@@ -58,7 +58,7 @@
 #include "sysfs_fuse.h"
 #include "utils.h"
 
-static size_t get_max_cpus(char *cpulist)
+static ssize_t get_max_cpus(char *cpulist)
 {
 	char *c1, *c2;
 	char *maxcpus = cpulist;
