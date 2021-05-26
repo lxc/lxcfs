@@ -1335,9 +1335,6 @@ int main(int argc, char *argv[])
 	fuse_argv[fuse_argc++] = new_argv[0];
 	fuse_argv[fuse_argc] = NULL;
 
-	for (int i = 0; i < fuse_argc; i++)
-		printf("AAAA: %s\n", fuse_argv[i]);
-
 	do_reload();
 	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
 		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
