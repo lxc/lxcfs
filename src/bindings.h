@@ -164,7 +164,6 @@ static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 	return pid;
 }
 
-__visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn,
-				       struct fuse_config *cfg);
+__visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data);
 
 #endif /* __LXCFS_BINDINGS_H */

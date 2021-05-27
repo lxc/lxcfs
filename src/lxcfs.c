@@ -1015,18 +1015,22 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	return -ENOENT;
 }
 
+#ifdef HAVE_FUSE3
 static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+#else
+static void *lxcfs_init(struct fuse_conn_info *conn)
+#endif
 {
 	char *error;
-	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, struct fuse_config * cfg);
+	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, void * cfg);
 
 	dlerror();
-	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, struct fuse_config * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
+	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, void * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
 	error = dlerror();
 	if (error)
 		return log_error(NULL, "%s - Failed to find lxcfs_fuse_init()", error);
 
-	return __lxcfs_fuse_init(conn, cfg);
+	return __lxcfs_fuse_init(conn, NULL);
 }
 
 const struct fuse_operations lxcfs_ops = {

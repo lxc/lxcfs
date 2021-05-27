@@ -317,6 +317,50 @@ static off_t get_sysfile_size(const char *which)
 	return answer;
 }
 
+static int sys_getattr_legacy(const char *path, struct stat *sb)
+{
+	struct timespec now;
+
+	memset(sb, 0, sizeof(struct stat));
+	if (clock_gettime(CLOCK_REALTIME, &now) < 0)
+		return -EINVAL;
+
+	sb->st_uid = sb->st_gid = 0;
+	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
+	if (strcmp(path, "/sys") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
+		sb->st_size = get_sysfile_size (path);
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
+	return -ENOENT;
+}
+
 __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 {
 	int ret;
@@ -325,6 +369,9 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 
 	if (!liblxcfs_functional())
 		return -EIO;
+
+	if (!liblxcfs_can_use_sys_cpu())
+		return sys_getattr_legacy(path, sb);
 
 	memset(sb, 0, sizeof(struct stat));
 	if (clock_gettime(CLOCK_REALTIME, &now) < 0)
@@ -353,9 +400,20 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	return -ENOENT;
 }
 
-__lxcfs_fuse_ops int sys_write(const char *path, const char *buf,
-			size_t size, off_t offset,
-			struct fuse_file_info *fi)
+__lxcfs_fuse_ops int sys_release(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
+	return 0;
+}
+
+__lxcfs_fuse_ops int sys_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
+	return 0;
+}
+
+__lxcfs_fuse_ops int sys_write(const char *path, const char *buf, size_t size,
+			       off_t offset, struct fuse_file_info *fi)
 {
 	__do_close int fd = -EBADF;
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
@@ -373,15 +431,66 @@ __lxcfs_fuse_ops int sys_write(const char *path, const char *buf,
 	return pwrite(fd, buf, size, offset);
 }
 
+static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t filler,
+			      off_t offset, struct fuse_file_info *fi)
+{
+	if (strcmp(path, "/sys") == 0) {
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "devices",	NULL, 0) != 0)
+			return -ENOENT;
+
+		return 0;
+	}
+	if (strcmp(path, "/sys/devices") == 0) {
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "system",	NULL, 0) != 0)
+			return -ENOENT;
+
+		return 0;
+	}
+	if (strcmp(path, "/sys/devices/system") == 0) {
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "cpu",	NULL, 0) != 0)
+			return -ENOENT;
+
+		return 0;
+	}
+	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
+		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
+		    DIR_FILLER(filler, buf, "online",	NULL, 0) != 0)
+			return -ENOENT;
+
+		return 0;
+	}
+
+	return 0;
+}
+
 __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
-				fuse_fill_dir_t filler, off_t offset,
-				struct fuse_file_info *fi)
+				 fuse_fill_dir_t filler, off_t offset,
+				 struct fuse_file_info *fi)
 {
 	__do_closedir DIR *dir = NULL;
 	struct dirent *dirent;
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	if (!liblxcfs_functional())
+		return -EIO;
+
+	if (!liblxcfs_can_use_sys_cpu())
+		return sys_readdir_legacy(path, buf, filler, offset, fi);
+
+	/*
+	 * When we reload LXCFS and we don't load the lxcfs binary itself
+	 * changes to such functions as lxcfs_opendir() aren't reflected so
+	 * sys_opendir() doesn't run but sys_readdir() does. We need to account
+	 * for that here.
+	 */
+	if (!f)
 		return -EIO;
 
 	switch (f->type) {
@@ -448,6 +557,44 @@ __lxcfs_fuse_ops int sys_readlink(const char *path, char *buf, size_t size)
 
 	return 0;
 }
+
+static int sys_open_legacy(const char *path, struct fuse_file_info *fi)
+{
+	__do_free struct file_info *info = NULL;
+	int type = -1;
+
+	if (strcmp(path, "/sys/devices") == 0)
+		type = LXC_TYPE_SYS_DEVICES;
+	if (strcmp(path, "/sys/devices/system") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM;
+	if (strcmp(path, "/sys/devices/system/cpu") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
+	if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
+	if (type == -1)
+		return -ENOENT;
+
+	info = malloc(sizeof(*info));
+	if (!info)
+		return -ENOMEM;
+
+	memset(info, 0, sizeof(*info));
+	info->type = type;
+
+	info->buflen = get_sysfile_size(path) + BUF_RESERVE_SIZE;
+
+	info->buf = malloc(info->buflen);
+	if (!info->buf)
+		return -ENOMEM;
+
+	memset(info->buf, 0, info->buflen);
+	/* set actual size to buffer size */
+	info->size = info->buflen;
+
+	fi->fh = PTR_TO_UINT64(move_ptr(info));
+	return 0;
+}
+
 __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 {
 	__do_free struct file_info *info = NULL;
@@ -455,6 +602,9 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 
 	if (!liblxcfs_functional())
 		return -EIO;
+
+	if (!liblxcfs_can_use_sys_cpu())
+		return sys_open_legacy(path, fi);
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
@@ -539,33 +689,72 @@ __lxcfs_fuse_ops int sys_opendir(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+static int sys_access_legacy(const char *path, int mask)
+{
+	if (strcmp(path, "/sys") == 0 && access(path, R_OK) == 0)
+		return 0;
+
+	if (strcmp(path, "/sys/devices") == 0 && access(path, R_OK) == 0)
+		return 0;
+
+	if (strcmp(path, "/sys/devices/system") == 0 && access(path, R_OK) == 0)
+		return 0;
+
+	if (strcmp(path, "/sys/devices/system/cpu") == 0 &&
+	    access(path, R_OK) == 0)
+		return 0;
+
+	/* these are all read-only */
+	if ((mask & ~R_OK) != 0)
+		return -EACCES;
+
+	return 0;
+}
+
 __lxcfs_fuse_ops int sys_access(const char *path, int mask)
 {
 	if (!liblxcfs_functional())
 		return -EIO;
 
+	if (!liblxcfs_can_use_sys_cpu())
+		return sys_access_legacy(path, mask);
+
 	return access(path, mask);
 }
 
-__lxcfs_fuse_ops int sys_release(const char *path, struct fuse_file_info *fi)
+static int sys_read_legacy(const char *path, char *buf, size_t size,
+			   off_t offset, struct fuse_file_info *fi)
 {
-	do_release_file_info(fi);
-	return 0;
-}
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
-__lxcfs_fuse_ops int sys_releasedir(const char *path, struct fuse_file_info *fi)
-{
-	do_release_file_info(fi);
-	return 0;
+	switch (f->type) {
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
+		if (liblxcfs_functional())
+			return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_SYS_DEVICES:
+		break;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM:
+		break;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
+		break;
+	}
+
+	return -EINVAL;
 }
 
 __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
-			off_t offset, struct fuse_file_info *fi)
+			      off_t offset, struct fuse_file_info *fi)
 {
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	if (!liblxcfs_functional())
 		return -EIO;
+
+	if (!liblxcfs_can_use_sys_cpu())
+		return sys_read_legacy(path, buf, size, offset, fi);
 
 	switch (f->type) {
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
