@@ -14,6 +14,7 @@
 #define _FILE_OFFSET_BITS 64
 
 #include <fuse.h>
+#include <linux/types.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -65,9 +66,12 @@ enum lxcfs_virt_t {
 	LXC_TYPE_PROC_SLABINFO,
 #define LXC_TYPE_PROC_SLABINFO_PATH "/proc/slabinfo"
 
+	LXC_TYPE_SYS,
 	LXC_TYPE_SYS_DEVICES,
 	LXC_TYPE_SYS_DEVICES_SYSTEM,
 	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU,
+	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR,
+	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE,
 
 	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE,
 #define LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH "/sys/devices/system/cpu/online"
@@ -88,13 +92,50 @@ struct lxcfs_opts {
 	bool swap_off;
 	bool use_pidfd;
 	bool use_cfs;
+	/*
+	 * Ideally we'd version by size but because of backwards compatability
+	 * and the use of bool instead of explicited __u32 and __u64 we can't.
+	 */
+	__u32 version;
 };
+
+typedef enum lxcfs_opt_t {
+	LXCFS_SWAP_ON	= 0,
+	LXCFS_PIDFD_ON	= 1,
+	LXCFS_CFS_ON	= 2,
+	LXCFS_OPTS_MAX	= LXCFS_CFS_ON,
+} lxcfs_opt_t;
+
 
 extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
 extern bool liblxcfs_can_use_swap(void);
+extern bool liblxcfs_can_use_sys_cpu(void);
+extern bool liblxcfs_has_versioned_opts(void);
+
+static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
+{
+	if (!opts)
+		return false;
+
+	if (opt > LXCFS_OPTS_MAX)
+		return false;
+
+	switch (opt) {
+	case LXCFS_SWAP_ON:
+		if (!opts->swap_off)
+			return liblxcfs_can_use_swap();
+		return false;
+	case LXCFS_PIDFD_ON:
+		return opts->use_pidfd;
+	case LXCFS_CFS_ON:
+		return opts->use_cfs;
+	}
+
+	return false;
+}
 
 static inline int install_signal_handler(int signo,
 					 void (*handler)(int, siginfo_t *, void *))
@@ -122,5 +163,7 @@ static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 
 	return pid;
 }
+
+__visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data);
 
 #endif /* __LXCFS_BINDINGS_H */
