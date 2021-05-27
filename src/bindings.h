@@ -14,6 +14,7 @@
 #define _FILE_OFFSET_BITS 64
 
 #include <fuse.h>
+#include <linux/types.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -85,6 +86,11 @@ struct lxcfs_opts {
 	bool swap_off;
 	bool use_pidfd;
 	bool use_cfs;
+	/*
+	 * Ideally we'd version by size but because of backwards compatability
+	 * and the use of bool instead of explicited __u32 and __u64 we can't.
+	 */
+	__u32 version;
 };
 
 typedef enum lxcfs_opt_t {
@@ -100,6 +106,8 @@ extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
 extern bool liblxcfs_can_use_swap(void);
+extern bool liblxcfs_can_use_sys_cpu(void);
+extern bool liblxcfs_has_versioned_opts(void);
 
 static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 {
@@ -149,5 +157,8 @@ static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 
 	return pid;
 }
+
+__visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn,
+				       struct fuse_config *cfg);
 
 #endif /* __LXCFS_BINDINGS_H */

@@ -58,6 +58,8 @@
 
 static bool can_use_pidfd;
 static bool can_use_swap;
+static bool can_use_sys_cpu;
+static bool has_versioned_opts;
 
 static volatile sig_atomic_t reload_successful;
 
@@ -69,6 +71,16 @@ bool liblxcfs_functional(void)
 bool liblxcfs_can_use_swap(void)
 {
 	return can_use_swap;
+}
+
+bool liblxcfs_can_use_sys_cpu(void)
+{
+	return can_use_sys_cpu;
+}
+
+bool liblxcfs_has_versioned_opts(void)
+{
+	return has_versioned_opts;
 }
 
 /* Define pivot_root() if missing from the C library */
@@ -928,4 +940,12 @@ static void __attribute__((destructor)) lxcfs_exit(void)
 	clear_initpid_store();
 	free_cpuview();
 	cgroup_exit(cgroup_ops);
+}
+
+void *lxcfs_fuse_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+{
+	struct fuse_context *fc = fuse_get_context();
+	can_use_sys_cpu = true;
+	has_versioned_opts = true;
+	return fc->private_data;
 }
