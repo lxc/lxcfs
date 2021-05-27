@@ -1015,6 +1015,20 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	return -ENOENT;
 }
 
+static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+{
+	char *error;
+	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, struct fuse_config * cfg);
+
+	dlerror();
+	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, struct fuse_config * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
+	error = dlerror();
+	if (error)
+		return log_error(NULL, "%s - Failed to find lxcfs_fuse_init()", error);
+
+	return __lxcfs_fuse_init(conn, cfg);
+}
+
 const struct fuse_operations lxcfs_ops = {
 	.access		= lxcfs_access,
 	.chmod		= lxcfs_chmod,
@@ -1022,6 +1036,7 @@ const struct fuse_operations lxcfs_ops = {
 	.flush		= lxcfs_flush,
 	.fsync		= lxcfs_fsync,
 	.getattr	= lxcfs_getattr,
+	.init		= lxcfs_init,
 	.mkdir		= lxcfs_mkdir,
 	.open		= lxcfs_open,
 	.opendir	= lxcfs_opendir,
@@ -1045,7 +1060,6 @@ const struct fuse_operations lxcfs_ops = {
 	.getdir		= NULL,
 #endif
 	.getxattr	= NULL,
-	.init		= NULL,
 	.link		= NULL,
 	.listxattr	= NULL,
 	.mknod		= NULL,
@@ -1195,6 +1209,7 @@ int main(int argc, char *argv[])
 	opts->swap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
+	opts->version = 1;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
