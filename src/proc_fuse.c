@@ -1011,9 +1011,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 			if (all_used >= cg_used) {
 				new_idle = idle + (all_used - cg_used);
-
 			} else {
-				lxcfs_error("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
+				lxcfs_debug("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
 					    curcpu, cg, all_used, cg_used);
 				new_idle = idle;
 			}
