@@ -17,8 +17,9 @@ LXC_ROOTFS_MOUNT=$(readlink -f "${LXC_ROOTFS_MOUNT}")
 # /proc files
 if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     for entry in @LXCFSTARGETDIR@/proc/*; do
-        [ -e "${LXC_ROOTFS_MOUNT}/proc/$(basename "$entry")" ] || continue
-        mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/proc/$(basename "$entry")"
+        DEST=$(basename "$entry")
+        [ -e "${LXC_ROOTFS_MOUNT}/proc/${DEST}" ] || continue
+        mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/proc/${DEST}"
     done
 fi
 
@@ -28,8 +29,9 @@ if [ -d @LXCFSTARGETDIR@/sys/devices/system/cpu ] ; then
         mount -n --bind @LXCFSTARGETDIR@/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
     else
         for entry in @LXCFSTARGETDIR@/sys/devices/system/cpu/*; do
-            [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename "$entry")" ] || continue
-            mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename "$entry")"
+            DEST=$(basename "$entry")
+            [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/${DEST}" ] || continue
+            mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/${DEST}"
         done
     fi
 fi
