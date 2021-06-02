@@ -12,31 +12,31 @@ do
 done
 
 # We're dealing with mount entries, so expand any symlink
-LXC_ROOTFS_MOUNT=$(readlink -f ${LXC_ROOTFS_MOUNT})
+LXC_ROOTFS_MOUNT=$(readlink -f "${LXC_ROOTFS_MOUNT}")
 
 # /proc files
 if [ -d @LXCFSTARGETDIR@/proc/ ]; then
     for entry in @LXCFSTARGETDIR@/proc/*; do
-        [ -e "${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)" ] || continue
-        mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/proc/$(basename $entry)
+        [ -e "${LXC_ROOTFS_MOUNT}/proc/$(basename "$entry")" ] || continue
+        mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/proc/$(basename "$entry")"
     done
 fi
 
 # /sys/devices/system/cpu
 if [ -d @LXCFSTARGETDIR@/sys/devices/system/cpu ] ; then
     if [ -f @LXCFSTARGETDIR@/sys/devices/system/cpu/uevent ]; then
-        mount -n --bind @LXCFSTARGETDIR@/sys/devices/system/cpu ${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu
+        mount -n --bind @LXCFSTARGETDIR@/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
     else
         for entry in @LXCFSTARGETDIR@/sys/devices/system/cpu/*; do
-            [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)" ] || continue
-            mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename $entry)
+            [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename "$entry")" ] || continue
+            mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/$(basename "$entry")"
         done
     fi
 fi
 
 # Allow nesting lxcfs
-if [ -d ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/ ]; then
-    mount -n --bind @LXCFSTARGETDIR@ ${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/
+if [ -d "${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/" ]; then
+    mount -n --bind @LXCFSTARGETDIR@ "${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/"
 fi
 
 # no need for lxcfs cgroups if we have cgroup namespaces
@@ -44,14 +44,14 @@ fi
 
 # Don't mess with containers that don't have /sys/fs/cgroup configured
 # (lxc.mount.auto = cgroup:mixed)
-if touch ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs; then
-    rm ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs
+if touch "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs"; then
+    rm "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs"
 else
     exit 0
 fi
 
 # Skip mounting cgroup tree if requested.
-if [ "${SKIP_CGROUP_MOUNTS}" == "1" ]; then
+if [ "${SKIP_CGROUP_MOUNTS}" = "1" ]; then
         exit 0
 fi
 
@@ -59,8 +59,8 @@ fi
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
     if [ -d @LXCFSTARGETDIR@/cgroup ]; then
         # Cleanup existing mounts
-        for entry in ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/*; do
-            DEST=$(basename $entry)
+        for entry in "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup"/*; do
+            DEST=$(basename "$entry")
 
             if [ "${DEST}" = "cgmanager" ]; then
                 continue
@@ -71,35 +71,36 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
             fi
 
             while grep -q "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo; do
-                grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo | cut -d' ' -f5 | while read line; do
-                     [ -e "${line}" ] && umount -l "${line}" || true
+                grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo | cut -d' ' -f5 | while read -r line; do
+                     [ -e "${line}" ] || continue
+                     umount -l "${line}" || true
                 done
             done
 
-            rm -Rf ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}
+            rm -Rf "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
         done
 
         # Mount the new entries
         for entry in @LXCFSTARGETDIR@/cgroup/*; do
-            DEST=$(basename $entry)
+            DEST=$(basename "$entry")
             if [ "$DEST" = "name=systemd" ]; then
                 DEST="systemd"
             fi
 
-            if [ ! -d ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST} ]; then
-                mkdir ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}
+            if [ ! -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" ]; then
+                mkdir "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
             fi
 
-            mount -n --bind $entry ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$DEST
+            mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
 
             # make sure that cpu,cpuacct shows up as cpu and cpuacct
             # separately, else systemd is unhappy
-            if echo $DEST | grep -q ","; then
-                arr=$(echo $DEST | tr "," "\n")
+            if echo "$DEST" | grep -q ","; then
+                arr=$(echo "$DEST" | tr "," "\n")
                 for single in $arr
                 do
-                    if [ ! -L ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single ]; then
-                        ln -s $DEST ${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/$single
+                    if [ ! -L "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${single}" ]; then
+                        ln -s "$DEST" "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${single}"
                     fi
                 done
             fi
