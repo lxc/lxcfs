@@ -190,7 +190,7 @@ static bool is_child_cgroup(const char *controller, const char *cgroup,
 }
 
 /*
- * If pid is in /a/b/c, he may see that /a exists, but not /b or /a/c.
+ * If pid is in /a/b/c, they may see that /a exists, but not /b or /a/c.
  */
 static bool caller_may_see_dir(pid_t pid, const char *contrl, const char *cg)
 {
@@ -267,8 +267,8 @@ static char *get_next_cgroup_dir(const char *taskcg, const char *querycg)
 }
 
 /*
- * If pid is in /a/b/c/d, he may only act on things under cg=/a/b/c/d.
- * If pid is in /a, he may act on /a/b, but not on /b.
+ * If pid is in /a/b/c/d, they may only act on things under cg=/a/b/c/d.
+ * If pid is in /a, they may act on /a/b, but not on /b.
  * if the answer is false and nextcg is not NULL, then *nextcg will point
  * to a string containing the next cgroup directory under cg, which must be
  * freed by the caller.
@@ -396,7 +396,7 @@ static unsigned int convert_id_to_ns(FILE *idfile, unsigned int in_id)
 
 /*
  * for is_privileged_over,
- * specify whether we require the calling uid to be root in his
+ * specify whether we require the calling uid to be root in their
  * namespace
  */
 #define NS_ROOT_REQD true
@@ -429,7 +429,7 @@ static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_r
 	if (!f)
 		return false;
 
-	/* if caller's not root in his namespace, reject */
+	/* if caller's not root in their namespace, reject */
 	nsuid = convert_id_to_ns(f, uid);
 	if (nsuid)
 		goto out;
@@ -955,7 +955,7 @@ __lxcfs_fuse_ops int cg_chmod(const char *path, mode_t mode)
 	/*
 	 * This being a fuse request, the uid and gid must be valid
 	 * in the caller's namespace.  So we can just check to make
-	 * sure that the caller is root in his uid, and privileged
+	 * sure that the caller is root in their uid, and privileged
 	 * over the file's current owner.
 	 */
 	if (!is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_OPT)) {
@@ -1068,7 +1068,7 @@ __lxcfs_fuse_ops int cg_chown(const char *path, uid_t uid, gid_t gid)
 	/*
 	 * This being a fuse request, the uid and gid must be valid
 	 * in the caller's namespace.  So we can just check to make
-	 * sure that the caller is root in his uid, and privileged
+	 * sure that the caller is root in their uid, and privileged
 	 * over the file's current owner.
 	 */
 	if (!is_privileged_over(fc->pid, fc->uid, k->uid, NS_ROOT_REQD)) {
