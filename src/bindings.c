@@ -942,7 +942,7 @@ static void __attribute__((destructor)) lxcfs_exit(void)
 	cgroup_exit(cgroup_ops);
 }
 
-void *lxcfs_fuse_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 {
 	struct fuse_context *fc = fuse_get_context();
 	can_use_sys_cpu = true;
