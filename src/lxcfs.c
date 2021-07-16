@@ -944,7 +944,11 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	return -ENOENT;
 }
 
+#ifdef HAVE_FUSE3
 static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+#else
+static void *lxcfs_init(struct fuse_conn_info *conn)
+#endif
 {
 	char *error;
 	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, struct fuse_config * cfg);
