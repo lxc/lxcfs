@@ -613,7 +613,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 	diff = zalloc(sizeof(struct cpuacct_usage) * nprocs);
 	if (!diff)
-		return 0;
+		goto out_pthread_mutex_unlock;
 
 	/*
 	 * If the new values are LOWER than values stored in memory, it means
@@ -657,7 +657,6 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		uint64_t max_diff_idle = 0;
 		uint64_t max_diff_idle_index = 0;
 		double exact_cpus;
-
 		/* threshold = maximum usage per cpu, including idle */
 		threshold = total_sum / cpu_cnt * max_cpus;
 
@@ -767,8 +766,11 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
 	}
-	if (l >= buf_size)
-		return log_error(0, "Write to cache was truncated");
+	if (l >= buf_size) {
+		lxcfs_error("Write to cache was truncated");
+		total_len = 0;
+		goto out_pthread_mutex_unlock;
+	}
 
 	buf += l;
 	buf_size -= l;
