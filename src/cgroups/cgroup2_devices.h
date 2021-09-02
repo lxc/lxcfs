@@ -30,7 +30,7 @@
 #include <linux/filter.h>
 #endif
 
-#include "syscall_numbers.h"
+#include "../syscall_numbers.h"
 
 #if !HAVE_BPF
 

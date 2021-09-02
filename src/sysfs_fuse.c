@@ -40,11 +40,12 @@
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
+#include "sysfs_fuse.h"
+
 #include "bindings.h"
 #include "memory_utils.h"
 #include "cgroups/cgroup.h"
 #include "lxcfs_fuse_compat.h"
-#include "sysfs_fuse.h"
 #include "utils.h"
 
 static ssize_t get_max_cpus(char *cpulist)

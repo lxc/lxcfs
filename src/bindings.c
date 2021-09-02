@@ -34,8 +34,9 @@
 #include <unistd.h>
 #include <wait.h>
 
-#include "api_extensions.h"
 #include "bindings.h"
+
+#include "api_extensions.h"
 #include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"

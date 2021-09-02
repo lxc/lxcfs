@@ -35,6 +35,8 @@
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
+#include "cgroup_fuse.h"
+
 #include "bindings.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
