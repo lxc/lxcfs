@@ -609,7 +609,7 @@ static bool is_on_ramfs(void)
 	return false;
 }
 
-static int pivot_enter()
+static int pivot_enter(void)
 {
 	__do_close int oldroot = -EBADF, newroot = -EBADF;
 
@@ -652,7 +652,7 @@ static int pivot_enter()
 	return 0;
 }
 
-static int chroot_enter()
+static int chroot_enter(void)
 {
 	if (mount(ROOTDIR, "/", NULL, MS_REC | MS_BIND, NULL)) {
 		lxcfs_error("Failed to recursively bind-mount %s into /.", ROOTDIR);
