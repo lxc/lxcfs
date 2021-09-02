@@ -1,6 +1,5 @@
 .deps/
 INSTALL
-Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache/
@@ -25,10 +24,10 @@ lxcfs.spec
 share/00-lxcfs.conf
 share/lxc.mount.hook
 share/lxc.reboot.hook
-tests/cpusetrange
+tests/test-cpusetrange
 tests/test-read
 lxcfs_mkdir
-tests/test_syscalls
+tests/test-syscalls
 config/init/systemd/lxcfs.service
 *.o
 tags

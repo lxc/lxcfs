@@ -20,11 +20,10 @@ cleanup() {
 
 cmdline=$(realpath $0)
 dirname=$(dirname ${cmdline})
-topdir=$(dirname ${dirname})
 
 trap cleanup EXIT HUP INT TERM
 
-${topdir}/lxcfs $d &
+lxcfs="@LXCFS_BUILD_ROOT@/lxcfs" $d &
 pid=$!
 
 # put ourselves into x1
@@ -80,8 +79,8 @@ fi
 # make sure things like truncate and access don't leak info about
 # the /${UUID}_a1 cgroup which we shouldn't be able to reach
 echo "Testing other system calls"
-${dirname}/test_syscalls $d/cgroup/freezer/${UUID}_a1
-${dirname}/test_syscalls $d/cgroup/freezer/${UUID}_a1/${UUID}_a2
+${dirname}/test-syscalls $d/cgroup/freezer/${UUID}_a1
+${dirname}/test-syscalls $d/cgroup/freezer/${UUID}_a1/${UUID}_a2
 
 echo "Making sure root can act on descendents"
 mycg=$(cgm getpidcgroupabs freezer 1)
