@@ -174,7 +174,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	uint64_t a, b, c;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -252,7 +252,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	d->size = (int)total_len;
 	d->cached = 1;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);

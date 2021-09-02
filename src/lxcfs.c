@@ -145,7 +145,7 @@ static void do_reload(void)
 #else
         ret = snprintf(lxcfs_lib_path, sizeof(lxcfs_lib_path), "/usr/local/lib/lxcfs/liblxcfs.so");
 #endif
-	if (ret < 0 || ret >= sizeof(lxcfs_lib_path))
+	if (ret < 0 || (size_t)ret >= sizeof(lxcfs_lib_path))
 		log_exit("Failed to create path to open liblxcfs");
 
         dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
@@ -1045,7 +1045,7 @@ static int set_pidfile(char *pidfile)
 		return log_error(-1, "Error truncating PID file '%s': %m", pidfile);
 
 	ret = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
-	if (ret < 0 || ret >= sizeof(buf))
+	if (ret < 0 || (size_t)ret >= sizeof(buf))
 		return log_error(-1, "Failed to convert pid to string %m");
 
 	if (write(fd, buf, ret) != ret)

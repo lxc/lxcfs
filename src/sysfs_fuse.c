@@ -57,7 +57,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	ssize_t total_len = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (!d->cached)
 			return 0;
@@ -106,7 +106,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	d->size = (int)total_len;
 	d->cached = 1;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);

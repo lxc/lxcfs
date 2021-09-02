@@ -325,7 +325,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -422,7 +422,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	d->cached = 1;
 	d->size = (int)total_len;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
@@ -496,7 +496,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	int ret;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -627,7 +627,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;
@@ -804,7 +804,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 #endif
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -836,7 +836,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
@@ -869,7 +869,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	int cg_cpu_usage_size = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -943,7 +943,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -980,7 +980,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1012,7 +1012,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				     cg_cpu_usage[physcpu].system, new_idle);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1156,7 +1156,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	int ret;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -1366,7 +1366,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;

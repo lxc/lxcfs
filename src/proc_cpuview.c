@@ -756,7 +756,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
 	}
-	if (l >= buf_size) {
+	if ((size_t)l >= buf_size) {
 		lxcfs_error("Write to cache was truncated");
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
@@ -787,7 +787,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
 		}
-		if (l >= buf_size) {
+		if ((size_t)l >= buf_size) {
 			lxcfs_error("Write to cache was truncated");
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
@@ -805,7 +805,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
 	}
-	if (l >= buf_size) {
+	if ((size_t)l >= buf_size) {
 		lxcfs_error("Write to cache was truncated");
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
@@ -823,7 +823,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
 		}
-		if (l >= buf_size) {
+		if ((size_t)l >= buf_size) {
 			lxcfs_error("Write to cache was truncated");
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
@@ -877,7 +877,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -940,7 +940,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
 				if (l < 0)
 					return log_error(0, "Failed to write cache");
-				if (l >= cache_size)
+				if ((size_t)l >= cache_size)
 					return log_error(0, "Write to cache was truncated");
 				cache += l;
 				cache_size -= l;
@@ -965,7 +965,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -978,7 +978,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1001,21 +1001,21 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		cache_size = d->buflen;
 		total_len = 0;
 		l = snprintf(cache, cache_size, "vendor_id       : IBM/S390\n");
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "# processors    : %d\n", curcpu + 1);
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "%s", origcache);
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 		total_len += l;
 	}
