@@ -22,7 +22,7 @@ static void verify(bool condition) {
 	}
 }
 
-int main() {
+int main(void) {
 	char *a = "1,2";
 	char *b = "1-3,5";
 	char *c = "1,4-5";

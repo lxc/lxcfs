@@ -66,7 +66,7 @@ void test_access(const char *path)
 void test_bind(const char *path)
 {
 	int sfd;
-	struct sockaddr_un my_addr, peer_addr;
+	struct sockaddr_un my_addr;
 
 	sfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
