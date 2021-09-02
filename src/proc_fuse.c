@@ -644,7 +644,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-#if RELOADTEST
+#ifdef RELOADTEST
 static inline void iwashere(void)
 {
 	mknod("/tmp/lxcfs-iwashere", S_IFREG, 0644);
@@ -799,7 +799,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	ssize_t total_len = 0, ret = 0;
 	double busytime, idletime, reaperage;
 
-#if RELOADTEST
+#ifdef RELOADTEST
 	iwashere();
 #endif
 

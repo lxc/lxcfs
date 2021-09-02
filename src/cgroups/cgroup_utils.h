@@ -70,11 +70,11 @@ extern bool dir_exists(const char *path);
 extern int safe_mount(const char *src, const char *dest, const char *fstype,
 		      unsigned long flags, const void *data, const char *rootfs);
 
-#ifndef HAVE_STRLCPY
+#if !HAVE_STRLCPY
 extern size_t strlcpy(char *, const char *, size_t);
 #endif
 
-#ifndef HAVE_STRLCAT
+#if !HAVE_STRLCAT
 extern size_t strlcat(char *d, const char *s, size_t n);
 #endif
 
