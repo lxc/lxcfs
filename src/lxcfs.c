@@ -1071,7 +1071,7 @@ const struct fuse_operations lxcfs_ops = {
 #endif
 };
 
-static void usage()
+static void usage(void)
 {
 	lxcfs_info("Usage: lxcfs <directory>\n");
 	lxcfs_info("lxcfs is a FUSE-based proc, sys and cgroup virtualizing filesystem\n");
