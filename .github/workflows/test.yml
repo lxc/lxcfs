@@ -28,6 +28,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -qq gcc clang
           sudo apt-get install -qq libfuse-dev uuid-runtime
+          sudo apt-get install -qq python3 python3-setuptools
+          sudo pip3 install meson==0.55.1 ninja
 
       - name: Compiler version
         env:
@@ -39,17 +41,11 @@ jobs:
         env:
           CC: ${{ matrix.compiler }}
         run: |
-          # Configure
-          ./bootstrap.sh
-          CFLAGS='-g -O0 -std=c11 -DDEBUG -DVERBOSE -DRESOLVE_NOW -Wall -Werror' ./configure --prefix=/usr
-
-          # Build
-          make -j4
-          (cd tests && make tests)
-
+          meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
+          ninja -C build
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
         run: |
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
-          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" tests/main.sh
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
