@@ -11,6 +11,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
+
 #include "macro.h"
 
 __visible extern int sys_getattr(const char *path, struct stat *sb);

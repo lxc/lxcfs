@@ -11,7 +11,6 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <getopt.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -28,6 +27,12 @@
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <linux/limits.h>
+
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
 
 #include "bindings.h"
 #include "lxcfs_fuse_compat.h"
