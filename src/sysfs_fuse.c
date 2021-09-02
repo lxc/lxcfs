@@ -6,22 +6,10 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
 /* Taken over modified from the kernel sources. */
 #define NBITS 32 /* bits in uint32_t */
 #define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
 #define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
-
-#define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
 #include <ctype.h>
