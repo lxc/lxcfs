@@ -235,7 +235,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 
 	for (struct cg_proc_stat *prev = NULL; node; ) {
 		if (!cgroup_supports("cpu", node->cg, "cpu.shares")) {
-			call_cleaner(free_proc_stat_node) struct cg_proc_stat *cur = node;
+			struct cg_proc_stat *cur = node;
 
 			if (prev)
 				prev->next = node->next;
@@ -243,7 +243,9 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 				first = node->next;
 
 			node = node->next;
-			lxcfs_debug("Removing stat node for %s\n", cur->cg);
+			lxcfs_debug("Removing stat node for %s\n", cur);
+
+			free_proc_stat_node(cur);
 		} else {
 			if (!first)
 				first = node;
