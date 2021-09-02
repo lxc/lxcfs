@@ -35,6 +35,8 @@
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
+#include "proc_cpuview.h"
+
 #include "bindings.h"
 #include "cgroup_fuse.h"
 #include "cpuset_parse.h"

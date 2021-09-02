@@ -25,10 +25,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "utils.h"
+
 #include "bindings.h"
 #include "macro.h"
 #include "memory_utils.h"
-#include "utils.h"
 
 /*
  * append the given formatted string to *src.
