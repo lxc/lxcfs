@@ -320,10 +320,12 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 		return 0;
 
 	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l = snprintf(cache, cache_size, "%s", line);
+		ssize_t l;
+
+		l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;
@@ -338,7 +340,7 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 	/* read from off 0 */
 	memcpy(buf, d->buf, total_len);
 
-	if (d->size > total_len)
+	if (d->size > (int)total_len)
 		d->cached = d->size - total_len;
 
 	return total_len;
@@ -350,7 +352,7 @@ int read_file_fuse_with_offset(const char *path, char *buf, size_t size,
 	if (offset) {
 		ssize_t total_len = 0;
 		char *cache = d->buf;
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;

@@ -899,8 +899,8 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		lxcfs_info("Kernel does not support swap accounting");
 
 	lxcfs_info("api_extensions:");
-	for (i = 0; i < nr_api_extensions; i++)
-		lxcfs_info("- %s", api_extensions[i]);
+	for (size_t nr = 0; nr < nr_api_extensions; nr++)
+		lxcfs_info("- %s", api_extensions[nr]);
 
 	root_fd = open("/", O_PATH | O_CLOEXEC);
 	if (root_fd < 0)
