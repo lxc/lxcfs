@@ -5,8 +5,12 @@
 
 #include "config.h"
 
-
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
 #include <fuse.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>

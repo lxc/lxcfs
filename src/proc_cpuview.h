@@ -10,6 +10,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
+
 #include "macro.h"
 
 struct cpuacct_usage {

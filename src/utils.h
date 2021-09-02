@@ -5,7 +5,6 @@
 
 #include "config.h"
 
-#include <fuse.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <sys/socket.h>
@@ -13,6 +12,12 @@
 #include <sys/un.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
 
 #include "macro.h"
 #include "syscall_numbers.h"

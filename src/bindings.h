@@ -5,7 +5,6 @@
 
 #include "config.h"
 
-#include <fuse.h>
 #include <linux/types.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -14,6 +13,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
 
 #include "cgroup_fuse.h"
 #include "macro.h"
