@@ -431,7 +431,7 @@ int safe_mount(const char *src, const char *dest, const char *fstype,
 	return 0;
 }
 
-#ifndef HAVE_STRLCPY
+#if !HAVE_STRLCPY
 size_t strlcpy(char *dest, const char *src, size_t size)
 {
 	size_t ret = strlen(src);
@@ -446,7 +446,7 @@ size_t strlcpy(char *dest, const char *src, size_t size)
 }
 #endif
 
-#ifndef HAVE_STRLCAT
+#if !HAVE_STRLCAT
 size_t strlcat(char *d, const char *s, size_t n)
 {
 	size_t l = strnlen(d, n);
