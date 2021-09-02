@@ -4,11 +4,7 @@
 #define _GNU_SOURCE
 #endif
 
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
+#include "config.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -26,7 +22,7 @@ static void verify(bool condition) {
 	}
 }
 
-int main() {
+int main(void) {
 	char *a = "1,2";
 	char *b = "1-3,5";
 	char *c = "1,4-5";

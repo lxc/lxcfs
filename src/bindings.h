@@ -3,17 +3,8 @@
 #ifndef __LXCFS_BINDINGS_H
 #define __LXCFS_BINDINGS_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
+#include "config.h"
 
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
-#include <fuse.h>
 #include <linux/types.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -23,8 +14,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
+
 #include "cgroup_fuse.h"
-#include "config.h"
 #include "macro.h"
 #include "proc_cpuview.h"
 #include "proc_fuse.h"

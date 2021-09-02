@@ -1,0 +1,14 @@
+# -*- mode: meson -*-
+
+option('tests', type : 'boolean', value: 'false',
+       description : 'enable tests')
+
+option('runtime-path', type : 'string', value : '/run',
+       description : 'the runtime directory')
+
+option('with-init-script', type : 'string', value : 'systemd',
+       description : 'the runtime directory')
+
+option('init-script', type : 'combo',
+       choices : ['systemd', 'sysvinit', 'openrc', 'upstart'], value : 'systemd',
+       description : 'init script')

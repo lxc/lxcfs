@@ -3,17 +3,8 @@
 #ifndef __LXCFS_UTILS_H
 #define __LXCFS_UTILS_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
+#include "config.h"
 
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
-#include <fuse.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <sys/socket.h>
@@ -22,7 +13,12 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include "config.h"
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
+
 #include "macro.h"
 #include "syscall_numbers.h"
 
@@ -49,14 +45,14 @@ extern int read_file_fuse_with_offset(const char *path, char *buf, size_t size,
 extern void prune_init_slice(char *cg);
 extern int wait_for_pid(pid_t pid);
 
-#ifndef HAVE_PIDFD_OPEN
+#if !HAVE_PIDFD_OPEN
 static inline int pidfd_open(pid_t pid, unsigned int flags)
 {
 	return syscall(__NR_pidfd_open, pid, flags);
 }
 #endif
 
-#ifndef HAVE_PIDFD_SEND_SIGNAL
+#if !HAVE_PIDFD_SEND_SIGNAL
 static inline int pidfd_send_signal(int pidfd, int sig, siginfo_t *info,
 				    unsigned int flags)
 {

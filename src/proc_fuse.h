@@ -3,24 +3,20 @@
 #ifndef __LXCFS_PROC_FUSE_H
 #define __LXCFS_PROC_FUSE_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
+#include "config.h"
 
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
 #include <fuse.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "config.h"
 #include "macro.h"
 
 __visible extern int proc_getattr(const char *path, struct stat *sb);

@@ -4,11 +4,7 @@
 #define _GNU_SOURCE
 #endif
 
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
+#include "config.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -70,7 +66,7 @@ void test_access(const char *path)
 void test_bind(const char *path)
 {
 	int sfd;
-	struct sockaddr_un my_addr, peer_addr;
+	struct sockaddr_un my_addr;
 
 	sfd = socket(AF_UNIX, SOCK_STREAM, 0);
 

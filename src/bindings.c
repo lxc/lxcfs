@@ -6,22 +6,9 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <linux/magic.h>
@@ -46,8 +33,9 @@
 #include <unistd.h>
 #include <wait.h>
 
-#include "api_extensions.h"
 #include "bindings.h"
+
+#include "api_extensions.h"
 #include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
@@ -621,7 +609,7 @@ static bool is_on_ramfs(void)
 	return false;
 }
 
-static int pivot_enter()
+static int pivot_enter(void)
 {
 	__do_close int oldroot = -EBADF, newroot = -EBADF;
 
@@ -664,7 +652,7 @@ static int pivot_enter()
 	return 0;
 }
 
-static int chroot_enter()
+static int chroot_enter(void)
 {
 	if (mount(ROOTDIR, "/", NULL, MS_REC | MS_BIND, NULL)) {
 		lxcfs_error("Failed to recursively bind-mount %s into /.", ROOTDIR);
@@ -911,8 +899,8 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		lxcfs_info("Kernel does not support swap accounting");
 
 	lxcfs_info("api_extensions:");
-	for (i = 0; i < nr_api_extensions; i++)
-		lxcfs_info("- %s", api_extensions[i]);
+	for (size_t nr = 0; nr < nr_api_extensions; nr++)
+		lxcfs_info("- %s", api_extensions[nr]);
 
 	root_fd = open("/", O_PATH | O_CLOEXEC);
 	if (root_fd < 0)

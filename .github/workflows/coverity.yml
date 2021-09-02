@@ -24,16 +24,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -qq gcc clang
           sudo apt-get install -qq libfuse-dev uuid-runtime
+          sudo apt-get install -qq python3 python3-setuptools
+          sudo pip3 install meson ninja
 
       - name: Run coverity
         run: |
           export PATH="$(pwd)/cov-analysis-linux64/bin:${PATH}"
 
-          # Configure
-          ./bootstrap.sh
-          mkdir build
+          meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
+          meson compile -C build
+          ninja -C build
           cd build
-          ../configure --prefix=/usr
 
           # Build
           cov-build --dir cov-int make -j4

@@ -6,24 +6,11 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #include <alloca.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <getopt.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -40,6 +27,12 @@
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <linux/limits.h>
+
+#if HAVE_FUSE3
+#include <fuse3/fuse.h>
+#else
+#include <fuse.h>
+#endif
 
 #include "bindings.h"
 #include "lxcfs_fuse_compat.h"
@@ -152,7 +145,7 @@ static void do_reload(void)
 #else
         ret = snprintf(lxcfs_lib_path, sizeof(lxcfs_lib_path), "/usr/local/lib/lxcfs/liblxcfs.so");
 #endif
-	if (ret < 0 || ret >= sizeof(lxcfs_lib_path))
+	if (ret < 0 || (size_t)ret >= sizeof(lxcfs_lib_path))
 		log_exit("Failed to create path to open liblxcfs");
 
         dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
@@ -1078,7 +1071,7 @@ const struct fuse_operations lxcfs_ops = {
 #endif
 };
 
-static void usage()
+static void usage(void)
 {
 	lxcfs_info("Usage: lxcfs <directory>\n");
 	lxcfs_info("lxcfs is a FUSE-based proc, sys and cgroup virtualizing filesystem\n");
@@ -1123,7 +1116,7 @@ static int set_pidfile(char *pidfile)
 		return log_error(-1, "Error truncating PID file '%s': %m", pidfile);
 
 	ret = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
-	if (ret < 0 || ret >= sizeof(buf))
+	if (ret < 0 || (size_t)ret >= sizeof(buf))
 		return log_error(-1, "Failed to convert pid to string %m");
 
 	if (write(fd, buf, ret) != ret)

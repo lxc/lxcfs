@@ -6,23 +6,10 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -46,6 +33,8 @@
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
+
+#include "proc_loadavg.h"
 
 #include "bindings.h"
 #include "cgroup_fuse.h"
@@ -185,7 +174,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	uint64_t a, b, c;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -263,7 +252,7 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	d->size = (int)total_len;
 	d->cached = 1;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);

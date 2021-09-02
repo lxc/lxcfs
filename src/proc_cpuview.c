@@ -6,23 +6,10 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -46,6 +33,8 @@
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
+
+#include "proc_cpuview.h"
 
 #include "bindings.h"
 #include "cgroup_fuse.h"
@@ -246,7 +235,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 
 	for (struct cg_proc_stat *prev = NULL; node; ) {
 		if (!cgroup_supports("cpu", node->cg, "cpu.shares")) {
-			call_cleaner(free_proc_stat_node) struct cg_proc_stat *cur = node;
+			struct cg_proc_stat *cur = node;
 
 			if (prev)
 				prev->next = node->next;
@@ -254,7 +243,9 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 				first = node->next;
 
 			node = node->next;
-			lxcfs_debug("Removing stat node for %s\n", cur->cg);
+			lxcfs_debug("Removing stat node for %s\n", cur);
+
+			free_proc_stat_node(cur);
 		} else {
 			if (!first)
 				first = node;
@@ -766,7 +757,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
 	}
-	if (l >= buf_size) {
+	if ((size_t)l >= buf_size) {
 		lxcfs_error("Write to cache was truncated");
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
@@ -797,7 +788,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
 		}
-		if (l >= buf_size) {
+		if ((size_t)l >= buf_size) {
 			lxcfs_error("Write to cache was truncated");
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
@@ -815,7 +806,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
 	}
-	if (l >= buf_size) {
+	if ((size_t)l >= buf_size) {
 		lxcfs_error("Write to cache was truncated");
 		total_len = 0;
 		goto out_pthread_mutex_unlock;
@@ -833,7 +824,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
 		}
-		if (l >= buf_size) {
+		if ((size_t)l >= buf_size) {
 			lxcfs_error("Write to cache was truncated");
 			total_len = 0;
 			goto out_pthread_mutex_unlock;
@@ -887,7 +878,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	size_t cache_size = d->buflen;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -950,7 +941,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
 				if (l < 0)
 					return log_error(0, "Failed to write cache");
-				if (l >= cache_size)
+				if ((size_t)l >= cache_size)
 					return log_error(0, "Write to cache was truncated");
 				cache += l;
 				cache_size -= l;
@@ -975,7 +966,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -988,7 +979,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1011,21 +1002,21 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		cache_size = d->buflen;
 		total_len = 0;
 		l = snprintf(cache, cache_size, "vendor_id       : IBM/S390\n");
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "# processors    : %d\n", curcpu + 1);
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 
 		cache_size -= l;
 		cache += l;
 		total_len += l;
 		l = snprintf(cache, cache_size, "%s", origcache);
-		if (l < 0 || l >= cache_size)
+		if (l < 0 || (size_t)l >= cache_size)
 			return 0;
 		total_len += l;
 	}

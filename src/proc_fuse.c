@@ -6,23 +6,10 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -46,6 +33,8 @@
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
+
+#include "proc_fuse.h"
 
 #include "bindings.h"
 #include "cgroup_fuse.h"
@@ -340,7 +329,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -437,7 +426,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	d->cached = 1;
 	d->size = (int)total_len;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
@@ -511,7 +500,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	int ret;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -642,7 +631,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;
@@ -659,7 +648,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-#if RELOADTEST
+#ifdef RELOADTEST
 static inline void iwashere(void)
 {
 	mknod("/tmp/lxcfs-iwashere", S_IFREG, 0644);
@@ -814,12 +803,12 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 	ssize_t total_len = 0, ret = 0;
 	double busytime, idletime, reaperage;
 
-#if RELOADTEST
+#ifdef RELOADTEST
 	iwashere();
 #endif
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -851,7 +840,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 
 	d->cached = 1;
 	d->size = total_len;
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
 
@@ -884,7 +873,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	int cg_cpu_usage_size = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -958,7 +947,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -995,7 +984,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1027,7 +1016,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				     cg_cpu_usage[physcpu].system, new_idle);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
-			if (l >= cache_size)
+			if ((size_t)l >= cache_size)
 				return log_error(0, "Write to cache was truncated");
 
 			cache += l;
@@ -1171,7 +1160,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	int ret;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -1381,7 +1370,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;
@@ -1413,7 +1402,7 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	pid_t initpid;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (offset > d->size)
 			return -EINVAL;
@@ -1450,7 +1439,7 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0)
 			return log_error(0, "Failed to write cache");
-		if (l >= cache_size)
+		if ((size_t)l >= cache_size)
 			return log_error(0, "Write to cache was truncated");
 
 		cache += l;

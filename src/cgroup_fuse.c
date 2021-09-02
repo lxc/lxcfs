@@ -6,23 +6,10 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
-#define _FILE_OFFSET_BITS 64
-
 #define __STDC_FORMAT_MACROS
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -46,6 +33,8 @@
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
+
+#include "cgroup_fuse.h"
 
 #include "bindings.h"
 #include "cgroups/cgroup.h"
@@ -357,7 +346,7 @@ static struct cgfs_files *cgfs_get_key(const char *controller,
  * pid's namespace.
  * Returns the mapped id, or -1 on error.
  */
-static unsigned int convert_id_to_ns(FILE *idfile, unsigned int in_id)
+static int convert_id_to_ns(FILE *idfile, unsigned int in_id)
 {
 	unsigned int nsuid,   // base id for a range in the idfile's namespace
 		     hostuid, // base id for a range in the caller's namespace
@@ -406,12 +395,13 @@ static unsigned int convert_id_to_ns(FILE *idfile, unsigned int in_id)
 
 static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_root)
 {
+	FILE *f;
 	char fpath[PROCLEN];
 	int ret;
 	bool answer = false;
 	uid_t nsuid;
 
-	if (victim == -1 || uid == -1)
+	if (victim == (uid_t)-1 || uid == (uid_t)-1)
 		return false;
 
 	/*
@@ -425,7 +415,8 @@ static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_r
 	ret = snprintf(fpath, PROCLEN, "/proc/%d/uid_map", pid);
 	if (ret < 0 || ret >= PROCLEN)
 		return false;
-	FILE *f = fopen(fpath, "re");
+
+	f = fopen(fpath, "re");
 	if (!f)
 		return false;
 
@@ -440,7 +431,7 @@ static bool is_privileged_over(pid_t pid, uid_t uid, uid_t victim, bool req_ns_r
 	 * will be sending requests where the vfs has converted
 	 */
 	nsuid = convert_id_to_ns(f, victim);
-	if (nsuid == -1)
+	if (nsuid == (uid_t)-1)
 		goto out;
 
 	answer = true;
@@ -1218,7 +1209,7 @@ static void pid_to_ns_wrapper(int sock, pid_t tpid)
 	char v;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
-	if (ret < 0 || ret >= sizeof(fnam))
+	if (ret < 0 || (size_t)ret >= sizeof(fnam))
 		_exit(1);
 	newnsfd = open(fnam, O_RDONLY);
 	if (newnsfd < 0)
@@ -1361,7 +1352,8 @@ __lxcfs_fuse_ops int cg_read(const char *path, char *buf, size_t size,
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	struct cgfs_files *k = NULL;
 	char *data = NULL;
-	int ret, s;
+	int ret;
+	size_t s;
 	bool r;
 
 	if (!liblxcfs_functional())
@@ -1414,7 +1406,7 @@ __lxcfs_fuse_ops int cg_read(const char *path, char *buf, size_t size,
 	if (s > size)
 		s = size;
 	memcpy(buf, data, s);
-	if (s > 0 && s < size && data[s-1] != '\n')
+	if ((s > 0) && (s < size) && (data[s - 1] != '\n'))
 		buf[s++] = '\n';
 
 	ret = s;
@@ -1555,7 +1547,7 @@ static void pid_from_ns_wrapper(int sock, pid_t tpid)
 	char v;
 
 	ret = snprintf(fnam, sizeof(fnam), "/proc/%d/ns/pid", tpid);
-	if (ret < 0 || ret >= sizeof(fnam))
+	if (ret < 0 || (size_t)ret >= sizeof(fnam))
 		_exit(1);
 	newnsfd = open(fnam, O_RDONLY);
 	if (newnsfd < 0)
@@ -1647,7 +1639,7 @@ static bool hostuid_to_ns(uid_t uid, pid_t pid, uid_t *answer)
 	*answer = convert_id_to_ns(f, uid);
 	fclose(f);
 
-	if (*answer == -1)
+	if (*answer == (uid_t)-1)
 		return false;
 	return true;
 }
@@ -1764,6 +1756,7 @@ static bool cgfs_set_value(const char *controller, const char *cgroup,
 	__do_free char *path = NULL;
 	int cfd;
 	size_t len;
+	ssize_t ret;
 
 	cfd = get_cgroup_fd_handle_named(controller);
 	if (cfd < 0)
@@ -1776,7 +1769,11 @@ static bool cgfs_set_value(const char *controller, const char *cgroup,
 		return false;
 
 	len = strlen(value);
-	return write_nointr(fd, value, len) == len;
+	ret = write_nointr(fd, value, len);
+	if (ret < 0)
+		return false;
+
+	return (size_t)ret == len;
 }
 
 __lxcfs_fuse_ops int cg_write(const char *path, const char *buf, size_t size,
@@ -1872,7 +1869,7 @@ static bool cgfs_iterate_cgroup(const char *controller, const char *cgroup,
 			continue;
 
 		ret = snprintf(pathname, sizeof(pathname), "%s/%s", path, dirent->d_name);
-		if (ret < 0 || ret >= sizeof(pathname)) {
+		if (ret < 0 || (size_t)ret >= sizeof(pathname)) {
 			lxcfs_error("Pathname too long under %s\n", path);
 			continue;
 		}

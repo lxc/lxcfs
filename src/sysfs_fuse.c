@@ -6,29 +6,16 @@
 
 #include "config.h"
 
-#ifdef HAVE_FUSE3
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
-#endif
-#else
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-#endif
-
 /* Taken over modified from the kernel sources. */
 #define NBITS 32 /* bits in uint32_t */
 #define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
 #define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
-
-#define _FILE_OFFSET_BITS 64
 
 #define __STDC_FORMAT_MACROS
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -52,11 +39,12 @@
 #include <sys/sysinfo.h>
 #include <sys/vfs.h>
 
+#include "sysfs_fuse.h"
+
 #include "bindings.h"
 #include "memory_utils.h"
 #include "cgroups/cgroup.h"
 #include "lxcfs_fuse_compat.h"
-#include "sysfs_fuse.h"
 #include "utils.h"
 
 static ssize_t get_max_cpus(char *cpulist)
@@ -159,7 +147,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	ssize_t total_len = 0;
 
 	if (offset) {
-		int left;
+		size_t left;
 
 		if (!d->cached)
 			return 0;
@@ -209,7 +197,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	d->size = (int)total_len;
 	d->cached = 1;
 
-	if (total_len > size)
+	if ((size_t)total_len > size)
 		total_len = size;
 
 	memcpy(buf, d->buf, total_len);
@@ -250,7 +238,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	if (!cpumask)
 		return -errno;
 
-	for (size_t i = 0; i < max_cpus; i++) {
+	for (ssize_t i = 0; i < max_cpus; i++) {
 		int ret;
 		char cpu[100];
 
@@ -258,7 +246,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 			continue;
 
 		ret = snprintf(cpu, sizeof(cpu), "cpu%ld", i);
-		if (ret < 0 || ret >= sizeof(cpu))
+		if (ret < 0 || (size_t)ret >= sizeof(cpu))
 			continue;
 
 		if (DIR_FILLER(filler, buf, cpu, NULL, 0) != 0)
@@ -543,14 +531,16 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 
 __lxcfs_fuse_ops int sys_readlink(const char *path, char *buf, size_t size)
 {
-	int ret = readlink(path, buf, size);
+	ssize_t ret;
 
 	if (!liblxcfs_functional())
 		return -EIO;
 
+	ret = readlink(path, buf, size);
 	if (ret < 0)
 		return -errno;
-	if (ret > size)
+
+	if ((size_t)ret > size)
 		return -1;
 
 	buf[ret] = '\0';
