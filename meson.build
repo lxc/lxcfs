@@ -33,16 +33,22 @@ lxcfsdir = join_paths(libdir, 'lxcfs')
 sysconfdir = join_paths(prefixdir, get_option('sysconfdir'))
 runtimepath = join_paths(prefixdir, get_option('runtime-path'))
 localstatedir = join_paths('/', get_option('localstatedir'))
+datadir = join_paths(prefixdir, get_option('datadir'))
 
-conf.set_quoted('LXCFS_BUILD_ROOT',	project_build_root)
-conf.set_quoted('LXCFS_SOURCE_ROOT',	project_source_root)
 conf.set_quoted('BINDIR',		bindir)
 conf.set_quoted('LIBDIR',		libdir)
 conf.set_quoted('LOCALSTATEDIR',	localstatedir)
-conf.set_quoted('LXCFSSHAREDIR',	join_paths(localstatedir, 'lxcfs'))
-conf.set_quoted('LXCCONFDIR',		join_paths(localstatedir, '/lxc/config/common.conf.d'))
 conf.set_quoted('RUNTIME_PATH',		runtimepath)
 conf.set_quoted('SYSCONFDIR',		sysconfdir)
+
+conf.set_quoted('LXCFS_BUILD_ROOT',	project_build_root)
+conf.set_quoted('LXCFS_SOURCE_ROOT',	project_source_root)
+
+lxcfssharedir = join_paths(datadir, 'lxcfs')
+conf.set_quoted('LXCFSSHAREDIR',	lxcfssharedir)
+
+lxcconfdir = join_paths(datadir, 'lxc/config/common.conf.d')
+conf.set_quoted('LXCCONFDIR',		lxcconfdir)
 
 init_script = get_option('init-script')
 
@@ -233,12 +239,16 @@ endif
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
-        'prefix directory:		@0@'.format(prefixdir),
-        'sysconf directory:		@0@'.format(sysconfdir),
         'bin directory:			@0@'.format(bindir),
-        'lxcfs directory:		@0@'.format(lxcfsdir),
-        'runtime directory:		@0@'.format(runtimepath),
+        'lib directory:			@0@'.format(libdir),
+        'data directory:		@0@'.format(datadir),
         'local state directory:		@0@'.format(localstatedir),
+        'prefix directory:		@0@'.format(prefixdir),
+        'runtime directory:		@0@'.format(runtimepath),
+        'sysconf directory:		@0@'.format(sysconfdir),
+        'lxc conf directory:		@0@'.format(lxcconfdir),
+        'lxcfs directory:		@0@'.format(lxcfsdir),
+        'lxcfs shared directory:	@0@'.format(lxcfssharedir),
         'lxcfs build root directory:	@0@'.format(project_build_root),
         'lxcfs source root directory:	@0@'.format(project_source_root),
         'init system:			@0@'.format(init_script),
