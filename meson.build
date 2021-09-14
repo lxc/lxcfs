@@ -59,7 +59,6 @@ want_tests = get_option('tests')
 
 possible_cc_flags = [
 	'-Wvla',
-	'-std=gnu11',
 	'-Wimplicit-fallthrough=5',
 	'-Wcast-align',
 	'-Wstrict-prototypes',
