@@ -197,12 +197,14 @@ liblxcfs_sources = files(
 	'src/utils.c',
 	'src/utils.h')
 
+liblxcfs_common_dependencies = declare_dependency(
+	sources: liblxcfs_sources,
+	dependencies: [threads, libdl, libfuse])
+
 liblxcfs = shared_library(
         'lxcfs',
         liblxcfs_sources,
-        dependencies : [threads,
-			libdl,
-			libfuse],
+        dependencies : liblxcfs_common_dependencies,
         install : true,
         install_dir : lxcfsdir)
 
@@ -210,9 +212,7 @@ if want_tests == true
 	liblxcfs_test = shared_library(
 	        'lxcfstest',
 	        liblxcfs_sources,
-	        dependencies : [threads,
-				libdl,
-				libfuse],
+		dependencies : liblxcfs_common_dependencies,
 	        install : false,
 	        install_dir : lxcfsdir,
 		c_args : '-DRELOADTEST -DDEBUG')
