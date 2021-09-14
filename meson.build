@@ -200,7 +200,6 @@ liblxcfs_sources = files(
 liblxcfs = shared_library(
         'lxcfs',
         liblxcfs_sources,
-        link_args : ['-shared'],
         dependencies : [threads,
 			libdl,
 			libfuse],
@@ -211,7 +210,6 @@ if want_tests == true
 	liblxcfs_test = shared_library(
 	        'lxcfstest',
 	        liblxcfs_sources,
-	        link_args : ['-shared'],
 	        dependencies : [threads,
 				libdl,
 				libfuse],
