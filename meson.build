@@ -24,9 +24,6 @@ project_build_root = meson.current_build_dir()
 # encountered, so this should canonicalize various paths when they are
 # absolute or relative.
 prefixdir = get_option('prefix')
-if not prefixdir.startswith('/')
-        error('Prefix is not absolute: "@0@"'.format(prefixdir))
-endif
 bindir = join_paths(prefixdir, get_option('bindir'))
 libdir = join_paths(prefixdir, get_option('libdir'))
 lxcfsdir = join_paths(libdir, 'lxcfs')
