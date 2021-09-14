@@ -130,14 +130,15 @@ endforeach
 
 conf.set('_FILE_OFFSET_BITS', 64)
 
-libfuse = cc.find_library('fuse3', required : false)
+libfuse = dependency('fuse3', required : false)
 if libfuse.found()
-	conf.set10('HAVE_FUSE3', libfuse.found())
+	conf.set10('HAVE_FUSE3', true)
 	conf.set('FUSE_USE_VERSION', 30)
 else
-	libfuse = cc.find_library('fuse')
-	conf.set10('HAVE_FUSE', libfuse.found())
-	conf.set('FUSE_USE_VERSION', 26)
+	if dependency('fuse').found()
+		conf.set10('HAVE_FUSE', true)
+		conf.set('FUSE_USE_VERSION', 26)
+	endif
 endif
 
 libdl = cc.find_library('dl')
@@ -238,6 +239,7 @@ endif
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
+        'FUSE version:			@0@'.format(libfuse.version()),
         'bin directory:			@0@'.format(bindir),
         'lib directory:			@0@'.format(libdir),
         'data directory:		@0@'.format(datadir),
