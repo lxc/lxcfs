@@ -10,7 +10,7 @@ project('lxcfs', 'c',
                 'c_std=gnu11',
                 'warning_level=2',
         ],
-        meson_version : '>= 0.45',
+        meson_version : '>= 0.46',
        )
 
 conf = configuration_data()
