@@ -10,7 +10,7 @@ project('lxcfs', 'c',
                 'c_std=gnu11',
                 'warning_level=2',
         ],
-        meson_version : '>= 0.45',
+        meson_version : '>= 0.46',
        )
 
 conf = configuration_data()
@@ -24,9 +24,6 @@ project_build_root = meson.current_build_dir()
 # encountered, so this should canonicalize various paths when they are
 # absolute or relative.
 prefixdir = get_option('prefix')
-if not prefixdir.startswith('/')
-        error('Prefix is not absolute: "@0@"'.format(prefixdir))
-endif
 bindir = join_paths(prefixdir, get_option('bindir'))
 libdir = join_paths(prefixdir, get_option('libdir'))
 lxcfsdir = join_paths(libdir, 'lxcfs')
@@ -59,7 +56,6 @@ want_tests = get_option('tests')
 
 possible_cc_flags = [
 	'-Wvla',
-	'-std=gnu11',
 	'-Wimplicit-fallthrough=5',
 	'-Wcast-align',
 	'-Wstrict-prototypes',
@@ -131,14 +127,16 @@ endforeach
 
 conf.set('_FILE_OFFSET_BITS', 64)
 
-libfuse = cc.find_library('fuse3', required : false)
+libfuse = dependency('fuse3', required : false)
 if libfuse.found()
-	conf.set10('HAVE_FUSE3', libfuse.found())
+	conf.set10('HAVE_FUSE3', true)
 	conf.set('FUSE_USE_VERSION', 30)
 else
-	libfuse = cc.find_library('fuse')
-	conf.set10('HAVE_FUSE', libfuse.found())
-	conf.set('FUSE_USE_VERSION', 26)
+	libfuse = dependency('fuse', version: '>= 2.6')
+	if libfuse.found()
+		conf.set10('HAVE_FUSE', true)
+		conf.set('FUSE_USE_VERSION', 26)
+	endif
 endif
 
 libdl = cc.find_library('dl')
@@ -197,13 +195,14 @@ liblxcfs_sources = files(
 	'src/utils.c',
 	'src/utils.h')
 
+liblxcfs_common_dependencies = declare_dependency(
+	sources: liblxcfs_sources,
+	dependencies: [threads, libdl, libfuse])
+
 liblxcfs = shared_library(
         'lxcfs',
         liblxcfs_sources,
-        link_args : ['-shared'],
-        dependencies : [threads,
-			libdl,
-			libfuse],
+        dependencies : liblxcfs_common_dependencies,
         install : true,
         install_dir : lxcfsdir)
 
@@ -211,10 +210,7 @@ if want_tests == true
 	liblxcfs_test = shared_library(
 	        'lxcfstest',
 	        liblxcfs_sources,
-	        link_args : ['-shared'],
-	        dependencies : [threads,
-				libdl,
-				libfuse],
+		dependencies : liblxcfs_common_dependencies,
 	        install : false,
 	        install_dir : lxcfsdir,
 		c_args : '-DRELOADTEST -DDEBUG')
@@ -239,6 +235,7 @@ endif
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
+        'FUSE version:			@0@'.format(libfuse.version()),
         'bin directory:			@0@'.format(bindir),
         'lib directory:			@0@'.format(libdir),
         'data directory:		@0@'.format(datadir),
