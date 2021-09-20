@@ -57,8 +57,11 @@ containers making use of it.
 
 ## Building
 Build lxcfs as follows:
+> Notes:In some operating systems, fuse3 is required for compilation, not fuse.
+>
+>For example: yum install fuse3 fuse3-libs fuse3-devel
 
-    yum install fuse fuse-lib fuse-devel
+    yum install fuse fuse-libs fuse-devel
     git clone git://github.com/lxc/lxcfs
     cd lxcfs
     ./bootstrap.sh
