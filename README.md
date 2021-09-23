@@ -58,18 +58,16 @@ So users of `LXCFS` on `musl` are advised to restart `LXCFS` completely and all
 containers making use of it.
 
 ## Building
-Build lxcfs as follows:
-> Notes:In some operating systems, fuse3 is required for compilation, not fuse.
->
->For example: yum install fuse3 fuse3-libs fuse3-devel
 
-    yum install fuse fuse-libs fuse-devel
+In order to build LXCFS install fuse and the fuse development headers according
+to your distro. LXCFS prefers `fuse3` but does work with new enough `fuse2`
+versions:
+
     git clone git://github.com/lxc/lxcfs
     cd lxcfs
-    ./bootstrap.sh
-    ./configure
-    make
-    make install
+    meson setup -Dinit-script=systemd --prefix=/usr build/
+    meson compile -C build/
+    sudo meson install -C build/
 
 ## Usage
 The recommended command to run lxcfs is:
