@@ -145,4 +145,7 @@
 #define __returns_twice __attribute__((returns_twice))
 #endif
 
+#define STRINGIFY(a) __STRINGIFY(a)
+#define __STRINGIFY(a) #a
+
 #endif /* __LXCFS_MACRO_H */
