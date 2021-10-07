@@ -1174,7 +1174,6 @@ int main(int argc, char *argv[])
 			opts->swap_off = true;
 			break;
 		case 'v':
-		case 'version':
 			lxcfs_info("%s", STRINGIFY(PROJECT_VERSION));
 			exit(EXIT_SUCCESS);
 		default:
@@ -1187,9 +1186,11 @@ int main(int argc, char *argv[])
 
 	new_argv = &argv[optind];
 	new_argc = argc - optind;
-	if (new_argc == 0) {
+
+	/* Older LXCFS versions printed help when used without any argument. */
+	if (new_argc == 0)
 		usage();
-	}
+
 	if (new_argc != 1) {
 		lxcfs_error("Missing mountpoint");
 		goto out;
