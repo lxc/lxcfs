@@ -232,6 +232,14 @@ elif init_script == 'sysvinit'
         install_data('config/init/sysvinit/lxcfs', install_dir : join_paths(sysconfdir, 'rc.d/init.d/lxcfs'))
 endif
 
+lxcfs_spec_data = configuration_data()
+lxcfs_spec_data.set('PACKAGE_VERSION', meson.project_version())
+lxcfs_spec_data.set('PACKAGE', meson.project_name())
+lxcfs_spec_data = configure_file(
+			configuration : lxcfs_spec_data,
+                        input : 'lxcfs.spec.in',
+                        output : 'lxcfs.spec')
+
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
