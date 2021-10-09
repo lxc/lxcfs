@@ -1277,7 +1277,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
-			snprintf(lbuf, 100, "Slab:        %8" PRIu64 " kB\n", (uint64_t)0);
+			snprintf(lbuf, 100, "Slab:           %8" PRIu64 " kB\n", (uint64_t)0);
 			printme = lbuf;
 		} else if (startswith(line, "Buffers:")) {
 			snprintf(lbuf, 100, "Buffers:        %8" PRIu64 " kB\n", (uint64_t)0);
