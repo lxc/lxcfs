@@ -584,10 +584,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 		if (all_used >= cg_used) {
 			cg_cpu_usage[curcpu].idle = idle + (all_used - cg_used);
-
 		} else {
-			lxcfs_error("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
-				    curcpu, cg, all_used, cg_used);
+			lxcfs_v("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
+				curcpu, cg, all_used, cg_used);
 			cg_cpu_usage[curcpu].idle = idle;
 		}
 	}
