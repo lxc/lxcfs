@@ -3,7 +3,7 @@
 #ifndef __LXC_CGROUP_UTILS_H
 #define __LXC_CGROUP_UTILS_H
 
-#include "../config.h"
+#include "config.h"
 
 #include <fcntl.h>
 #include <stdarg.h>

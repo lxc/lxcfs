@@ -3,7 +3,7 @@
 #ifndef __LXC_CGROUP_H
 #define __LXC_CGROUP_H
 
-#include "../config.h"
+#include "config.h"
 
 #include <errno.h>
 #include <stdbool.h>

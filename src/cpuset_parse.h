@@ -3,11 +3,7 @@
 #ifndef __LXCFS_CPUSET_PARSE_H
 #define __LXCFS_CPUSET_PARSE_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#define _FILE_OFFSET_BITS 64
+#include "config.h"
 
 #include <stdbool.h>
 #include <stdio.h>

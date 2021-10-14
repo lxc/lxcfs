@@ -1,12 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "config.h"
 
-#define __STDC_FORMAT_MACROS
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>

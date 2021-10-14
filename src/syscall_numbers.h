@@ -2,9 +2,8 @@
 #ifndef __LXCFS_SYSCALL_NUMBERS_H
 #define __LXCFS_SYSCALL_NUMBERS_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
-#endif
+#include "config.h"
+
 #include <asm/unistd.h>
 #include <errno.h>
 #include <sched.h>
