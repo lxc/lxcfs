@@ -5,15 +5,7 @@
 #ifndef __LXC_CGROUP2_DEVICES_H
 #define __LXC_CGROUP2_DEVICES_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
+#include "config.h"
 
 #include <errno.h>
 #include <fcntl.h>
