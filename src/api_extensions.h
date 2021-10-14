@@ -3,10 +3,10 @@
 #ifndef __LXCFS_API_EXTENSIONS_H
 #define __LXCFS_API_EXTENSIONS_H
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "config.h"
 
 /*
  * api_extensions is the list of all API extensions in the order they were

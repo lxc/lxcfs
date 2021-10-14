@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "config.h"
 
 #include <alloca.h>
@@ -28,11 +24,7 @@
 #include <sys/socket.h>
 #include <linux/limits.h>
 
-#if HAVE_FUSE3
-#include <fuse3/fuse.h>
-#else
-#include <fuse.h>
-#endif
+#include "lxcfs_fuse.h"
 
 #include "bindings.h"
 #include "lxcfs_fuse_compat.h"
@@ -607,7 +599,7 @@ static int do_sys_releasedir(const char *path, struct fuse_file_info *fi)
 	return __sys_releasedir(path, fi);
 }
 
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_info *fi)
 #else
 static int lxcfs_getattr(const char *path, struct stat *sb)
@@ -678,7 +670,7 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	return -ENOENT;
 }
 
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
 #else
@@ -926,7 +918,7 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 	return -EPERM;
 }
 
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
 #else
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
@@ -955,7 +947,7 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
  * really make sense for cgroups.  So just return 0 always but do
  * nothing.
  */
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
 #else
 int lxcfs_truncate(const char *path, off_t newsize)
@@ -984,7 +976,7 @@ int lxcfs_rmdir(const char *path)
 	return -EPERM;
 }
 
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 int lxcfs_chmod(const char *path, mode_t mode, struct fuse_file_info *fi)
 #else
 int lxcfs_chmod(const char *path, mode_t mode)
@@ -1008,7 +1000,7 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	return -ENOENT;
 }
 
-#ifdef HAVE_FUSE3
+#if HAVE_FUSE3
 static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 #else
 static void *lxcfs_init(struct fuse_conn_info *conn)
@@ -1048,11 +1040,11 @@ const struct fuse_operations lxcfs_ops = {
 
 	.create		= NULL,
 	.destroy	= NULL,
-#ifndef HAVE_FUSE3
+#if !HAVE_FUSE3
 	.fgetattr	= NULL,
 #endif
 	.fsyncdir	= NULL,
-#ifndef HAVE_FUSE3
+#if !HAVE_FUSE3
 	.ftruncate	= NULL,
 	.getdir		= NULL,
 #endif
@@ -1066,7 +1058,7 @@ const struct fuse_operations lxcfs_ops = {
 	.statfs		= NULL,
 	.symlink	= NULL,
 	.unlink		= NULL,
-#ifndef HAVE_FUSE3
+#if !HAVE_FUSE3
 	.utime		= NULL,
 #endif
 };
@@ -1181,7 +1173,7 @@ int main(int argc, char *argv[])
 	char *pidfile = NULL, *token = NULL;
 	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
 	bool debug = false, foreground = false;
-#ifndef HAVE_FUSE3
+#if !HAVE_FUSE3
 	bool nonempty = false;
 #endif
 	bool load_use = false;
@@ -1307,7 +1299,7 @@ int main(int argc, char *argv[])
 
 			/* default with fuse3 */
 			if (strcmp(token, "nonempty") == 0) {
-				#ifndef HAVE_FUSE3
+				#if !HAVE_FUSE3
 				nonempty = true;
 				#endif
 				continue;
@@ -1327,7 +1319,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-#ifndef HAVE_FUSE3
+#if !HAVE_FUSE3
 	if (nonempty) {
 		if (append_comma_separate(&new_fuse_opts, "nonempty")) {
 			lxcfs_error("Failed to copy fuse argument \"nonempty\"");

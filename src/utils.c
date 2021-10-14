@@ -1,12 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "config.h"
 
-#define _FILE_OFFSET_BITS 64
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>

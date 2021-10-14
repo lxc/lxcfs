@@ -125,7 +125,9 @@ foreach ident : [
         conf.set10('HAVE_' + ident[0].to_upper(), have)
 endforeach
 
+conf.set('_GNU_SOURCE', true)
 conf.set('_FILE_OFFSET_BITS', 64)
+conf.set('__STDC_FORMAT_MACROS', true)
 
 libfuse = dependency('fuse3', required : false)
 if libfuse.found()

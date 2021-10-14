@@ -3,6 +3,8 @@
 #ifndef __LXCFS_MEMORY_UTILS_H
 #define __LXCFS_MEMORY_UTILS_H
 
+#include "config.h"
+
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>

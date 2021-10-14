@@ -1,17 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "config.h"
 
-/* Taken over modified from the kernel sources. */
-#define NBITS 32 /* bits in uint32_t */
-#define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
-#define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
-
-#define __STDC_FORMAT_MACROS
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -46,6 +36,11 @@
 #include "cgroups/cgroup.h"
 #include "lxcfs_fuse_compat.h"
 #include "utils.h"
+
+/* Taken over modified from the kernel sources. */
+#define NBITS 32 /* bits in uint32_t */
+#define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
+#define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
 
 static ssize_t get_max_cpus(char *cpulist)
 {

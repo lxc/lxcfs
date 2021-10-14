@@ -14,11 +14,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if HAVE_FUSE3
-#include <fuse3/fuse.h>
-#else
-#include <fuse.h>
-#endif
+#include "lxcfs_fuse.h"
 
 #include "cgroup_fuse.h"
 #include "macro.h"
