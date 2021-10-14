@@ -3,19 +3,9 @@
 #ifndef __LXCFS_MACRO_H
 #define __LXCFS_MACRO_H
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 26
-#endif
-
-#define _FILE_OFFSET_BITS 64
+#include "config.h"
 
 #include <stdio.h>
-
-#include "config.h"
 
 #define BATCH_SIZE 50
 

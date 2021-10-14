@@ -60,9 +60,13 @@ AC_CONFIG_FILES([
 
 AC_CHECK_LIB(pthread, main)
 
-PKG_CHECK_MODULES(FUSE, fuse, [], [
-	PKG_CHECK_MODULES(FUSE, fuse3, [AC_DEFINE([HAVE_FUSE3], [1], [Use fuse3])])
-])
+PKG_CHECK_MODULES(FUSE, fuse3, [have_fuse3=yes], [have_fuse3=no])
+if test "x$have_fuse3" = "xyes"; then
+	AC_DEFINE([HAVE_FUSE3], [1], [Use fuse3])
+	AC_DEFINE_UNQUOTED([FUSE_USE_VERSION], [30], [Use fuse version 30])
+else
+	PKG_CHECK_MODULES(FUSE, fuse, [AC_DEFINE_UNQUOTED([FUSE_USE_VERSION], [26], [Use fuse])])
+fi
 
 AC_PATH_PROG(HELP2MAN, help2man, false // No help2man //)
 AM_CONDITIONAL([HAVE_HELP2MAN], [test "x$HELP2MAN" != "xfalse // No help2man //" ])
