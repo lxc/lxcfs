@@ -5,11 +5,7 @@
 
 #include "config.h"
 
-#if HAVE_FUSE3
-#include <fuse3/fuse.h>
-#else
-#include <fuse.h>
-#endif
+#include "lxcfs_fuse.h"
 
 #include <stdio.h>
 #include <stdlib.h>
