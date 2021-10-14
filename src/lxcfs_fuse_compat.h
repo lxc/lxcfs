@@ -10,4 +10,5 @@
 #else
 #define DIR_FILLER(F,B,N,S,O) F(B,N,S,O)
 #endif
+
 #endif /* __LXCFS_FUSE_COMPAT_H */
