@@ -24,11 +24,7 @@
 #include <sys/socket.h>
 #include <linux/limits.h>
 
-#if HAVE_FUSE3
-#include <fuse3/fuse.h>
-#else
-#include <fuse.h>
-#endif
+#include "lxcfs_fuse.h"
 
 #include "bindings.h"
 #include "lxcfs_fuse_compat.h"
