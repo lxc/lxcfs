@@ -199,9 +199,9 @@ liblxcfs_sources = files(
 
 liblxcfs_common_dependencies = declare_dependency(
 	sources: liblxcfs_sources,
-	dependencies: [threads, libdl, libfuse])
+	dependencies: [threads, libfuse])
 
-liblxcfs = shared_library(
+liblxcfs = shared_module(
         'lxcfs',
         liblxcfs_sources,
         dependencies : liblxcfs_common_dependencies,
@@ -209,7 +209,7 @@ liblxcfs = shared_library(
         install_dir : lxcfsdir)
 
 if want_tests == true
-	liblxcfs_test = shared_library(
+	liblxcfs_test = shared_module(
 	        'lxcfstest',
 	        liblxcfs_sources,
 		dependencies : liblxcfs_common_dependencies,
