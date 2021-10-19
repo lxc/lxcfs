@@ -43,7 +43,9 @@ To force a reload of the shared library at the next possible instance simply
 send `SIGUSR1` to the pid of the running `LXCFS` process. This can be as simple
 as doing:
 
-    kill -s USR1 $(pidof lxcfs)
+    rm /usr/lib64/lxcfs/liblxcfs.so # MUST to delete the old library file first
+    cp liblxcfs.so /usr/lib64/lxcfs/liblxcfs.so # to place new library file
+    kill -s USR1 $(pidof lxcfs) # reload
 
 ### musl
 
