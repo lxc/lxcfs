@@ -63,4 +63,15 @@ extern ssize_t write_nointr(int fd, const void *buf, size_t count);
 extern int safe_uint64(const char *numstr, uint64_t *converted, int base);
 extern char *trim_whitespace_in_place(char *buffer);
 
+static inline bool file_exists(const char *f)
+{
+	struct stat statbuf;
+
+	return stat(f, &statbuf) == 0;
+}
+
+#define PROTECT_OPEN_WITH_TRAILING_SYMLINKS (O_CLOEXEC | O_NOCTTY | O_RDONLY)
+#define PROTECT_OPEN (PROTECT_OPEN_WITH_TRAILING_SYMLINKS | O_NOFOLLOW)
+extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
+
 #endif /* __LXCFS_UTILS_H */

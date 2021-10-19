@@ -705,9 +705,9 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 	*value = NULL;
 	path = must_make_path_relative(cgroup, NULL);
 	cgroup_fd = openat_safe(h->fd, path);
-	if (cgroup_fd < 0) {
+	if (cgroup_fd < 0)
 		return -1;
-	}
+
 	v = readat_cpuset(cgroup_fd);
 	if (v) {
 		*value = v;
