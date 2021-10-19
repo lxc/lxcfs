@@ -37,52 +37,6 @@
 #include "lxcfs_fuse_compat.h"
 #include "utils.h"
 
-/* Taken over modified from the kernel sources. */
-#define NBITS 32 /* bits in uint32_t */
-#define DIV_ROUND_UP(n, d) (((n) + (d)-1) / (d))
-#define BITS_TO_LONGS(nr) DIV_ROUND_UP(nr, NBITS)
-
-static ssize_t get_max_cpus(char *cpulist)
-{
-	char *c1, *c2;
-	char *maxcpus = cpulist;
-	size_t cpus = 0;
-
-	c1 = strrchr(maxcpus, ',');
-	if (c1)
-		c1++;
-
-	c2 = strrchr(maxcpus, '-');
-	if (c2)
-		c2++;
-
-	if (!c1 && !c2)
-		c1 = maxcpus;
-	else if (c1 > c2)
-		c2 = c1;
-	else if (c1 < c2)
-		c1 = c2;
-	else if (!c1 && c2)
-		c1 = c2;
-
-	errno = 0;
-	cpus = strtoul(c1, NULL, 0);
-	if (errno != 0)
-		return -1;
-
-	return cpus;
-}
-
-static void set_bit(unsigned bit, uint32_t *bitarr)
-{
-	bitarr[bit / NBITS] |= (1 << (bit % NBITS));
-}
-
-static bool is_set(unsigned bit, uint32_t *bitarr)
-{
-	return (bitarr[bit / NBITS] & (1 << (bit % NBITS))) != 0;
-}
-
 /* Create cpumask from cpulist aka turn:
  *
  *	0,2-3
@@ -91,39 +45,150 @@ static bool is_set(unsigned bit, uint32_t *bitarr)
  *
  *	1 0 1 1
  */
-static uint32_t *lxc_cpumask(char *buf, size_t nbits)
+static int lxc_cpumask(char *buf, __u32 **bitarr, __u32 *last_set_bit)
 {
-	__do_free uint32_t *bitarr = NULL;
+	__do_free __u32 *arr_u32 = NULL;
+	__u32 cur_last_set_bit = 0, nbits = 256;
+	__u32 nr_u32;
 	char *token;
-	size_t arrlen;
 
-	arrlen = BITS_TO_LONGS(nbits);
-	bitarr = calloc(arrlen, sizeof(uint32_t));
-	if (!bitarr)
-		return ret_set_errno(NULL, ENOMEM);
+	nr_u32 = BITS_TO_LONGS(nbits);
+	arr_u32 = zalloc(nr_u32 * sizeof(__u32));
+	if (!arr_u32)
+		return ret_errno(ENOMEM);
 
 	lxc_iterate_parts(token, buf, ",") {
-		errno = 0;
-		unsigned end, start;
+		__u32 last_bit, first_bit;
 		char *range;
 
-		start = strtoul(token, NULL, 0);
-		end = start;
+		errno = 0;
+		first_bit = strtoul(token, NULL, 0);
+		last_bit = first_bit;
 		range = strchr(token, '-');
 		if (range)
-			end = strtoul(range + 1, NULL, 0);
+			last_bit = strtoul(range + 1, NULL, 0);
 
-		if (!(start <= end))
-			return ret_set_errno(NULL, EINVAL);
+		if (!(first_bit <= last_bit))
+			return ret_errno(EINVAL);
 
-		if (end >= nbits)
-			return ret_set_errno(NULL, EINVAL);
+		if (last_bit >= nbits) {
+			__u32 add_bits = last_bit - nbits + 32;
+			__u32 new_nr_u32;
+			__u32 *p;
 
-		while (start <= end)
-			set_bit(start++, bitarr);
+			new_nr_u32 = BITS_TO_LONGS(nbits + add_bits);
+			p = realloc(arr_u32, new_nr_u32 * sizeof(uint32_t));
+			if (!p)
+				return ret_errno(ENOMEM);
+			arr_u32 = move_ptr(p);
+
+			memset(arr_u32 + nr_u32, 0,
+			       (new_nr_u32 - nr_u32) * sizeof(uint32_t));
+			nbits += add_bits;
+		}
+
+		while (first_bit <= last_bit)
+			set_bit(first_bit++, arr_u32);
+
+		if (last_bit > cur_last_set_bit)
+			cur_last_set_bit = last_bit;
 	}
 
-	return move_ptr(bitarr);
+	*last_set_bit = cur_last_set_bit;
+	*bitarr = move_ptr(arr_u32);
+	return 0;
+}
+
+static int lxc_cpumask_update(char *buf, __u32 *bitarr, __u32 last_set_bit,
+			      bool clear)
+{
+	bool flipped = false;
+	char *token;
+
+	lxc_iterate_parts(token, buf, ",") {
+		__u32 last_bit, first_bit;
+		char *range;
+
+		errno = 0;
+		first_bit = strtoul(token, NULL, 0);
+		last_bit = first_bit;
+		range = strchr(token, '-');
+		if (range)
+			last_bit = strtoul(range + 1, NULL, 0);
+
+		if (!(first_bit <= last_bit)) {
+			lxcfs_debug("The cup range seems to be inverted: %u-%u", first_bit, last_bit);
+			continue;
+		}
+
+		if (last_bit > last_set_bit)
+			continue;
+
+		while (first_bit <= last_bit) {
+			if (clear && is_set(first_bit, bitarr)) {
+				flipped = true;
+				clear_bit(first_bit, bitarr);
+			} else if (!clear && !is_set(first_bit, bitarr)) {
+				flipped = true;
+				set_bit(first_bit, bitarr);
+			}
+
+			first_bit++;
+		}
+	}
+
+	if (flipped)
+		return 1;
+
+	return 0;
+}
+
+#define __ISOL_CPUS "/sys/devices/system/cpu/isolated"
+#define __OFFLINE_CPUS "/sys/devices/system/cpu/offline"
+static int cpumask(char *posscpus, __u32 **bitarr, __u32 *last_set_bit)
+{
+	__do_free char *isolcpus = NULL, *offlinecpus = NULL;
+	__do_free __u32 *possmask = NULL;
+	int ret;
+	__u32 poss_last_set_bit = 0;
+
+	if (file_exists(__ISOL_CPUS)) {
+		isolcpus = read_file_at(-EBADF, __ISOL_CPUS, PROTECT_OPEN);
+		if (!isolcpus)
+			return -1;
+
+		if (!isdigit(isolcpus[0]))
+			free_disarm(isolcpus);
+	} else {
+		lxcfs_debug("The path \""__ISOL_CPUS"\" to read isolated cpus from does not exist");
+	}
+
+	if (file_exists(__OFFLINE_CPUS)) {
+		offlinecpus = read_file_at(-EBADF, __OFFLINE_CPUS, PROTECT_OPEN);
+		if (!offlinecpus)
+			return -1;
+
+		if (!isdigit(offlinecpus[0]))
+			free_disarm(offlinecpus);
+	} else {
+		lxcfs_debug("The path \""__OFFLINE_CPUS"\" to read offline cpus from does not exist");
+	}
+
+	ret = lxc_cpumask(posscpus, &possmask, &poss_last_set_bit);
+	if (ret)
+		return ret;
+
+	if (isolcpus)
+		ret = lxc_cpumask_update(isolcpus, possmask, poss_last_set_bit, true);
+
+	if (offlinecpus)
+		ret |= lxc_cpumask_update(offlinecpus, possmask, poss_last_set_bit, true);
+	if (ret)
+		return ret;
+
+	*bitarr = move_ptr(possmask);
+	*last_set_bit = poss_last_set_bit;
+	return 0;
 }
 
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
@@ -135,11 +200,10 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
-	bool use_view;
-
-	int max_cpus = 0;
 	pid_t initpid;
+	int max_cpus = 0;
 	ssize_t total_len = 0;
+	bool use_view;
 
 	if (offset) {
 		size_t left;
@@ -203,13 +267,14 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
 					 fuse_fill_dir_t filler)
 {
-	__do_free uint32_t *cpumask = NULL;
+	__do_free __u32 *bitarr = NULL;
 	__do_free char *cg = NULL, *cpuset = NULL;
 	__do_closedir DIR *dir = NULL;
-	struct dirent *dirent;
 	struct fuse_context *fc = fuse_get_context();
+	__u32 last_set_bit = 0;
+	int ret;
+	struct dirent *dirent;
 	pid_t initpid;
-	ssize_t max_cpus;
 
 	initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
@@ -224,23 +289,17 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	if (!cpuset)
 		return 0;
 
-	max_cpus = get_max_cpus(cpuset);
-	if (max_cpus < 0 || max_cpus >= (INT_MAX - 1))
-		return -1;
-	max_cpus++;
+	ret = cpumask(cpuset, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
 
-	cpumask = lxc_cpumask(cpuset, max_cpus);
-	if (!cpumask)
-		return -errno;
-
-	for (ssize_t i = 0; i < max_cpus; i++) {
-		int ret;
+	for (__u32 bit = 0; bit <= last_set_bit; bit++) {
 		char cpu[100];
 
-		if (!is_set(i, cpumask))
+		if (!is_set(bit, bitarr))
 			continue;
 
-		ret = snprintf(cpu, sizeof(cpu), "cpu%ld", i);
+		ret = snprintf(cpu, sizeof(cpu), "cpu%u", bit);
 		if (ret < 0 || (size_t)ret >= sizeof(cpu))
 			continue;
 
