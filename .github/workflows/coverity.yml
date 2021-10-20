@@ -33,7 +33,6 @@ jobs:
 
           meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
           meson compile -C build
-          ninja -C build
           cd build
 
           # Build
