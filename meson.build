@@ -182,6 +182,7 @@ liblxcfs_sources = files(
 	'src/cpuset_parse.c',
 	'src/cpuset_parse.h',
 	'src/lxcfs.c',
+	'src/lxcfs_fuse.h',
 	'src/lxcfs_fuse_compat.h',
 	'src/macro.h',
 	'src/memory_utils.h',
