@@ -70,4 +70,3 @@ test_cpusetrange = executable(
 	include_directories: config_include,
 	install: false,
         build_by_default : want_tests != false)
-
