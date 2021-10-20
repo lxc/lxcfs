@@ -10,7 +10,7 @@ project('lxcfs', 'c',
                 'c_std=gnu11',
                 'warning_level=2',
         ],
-        meson_version : '>= 0.46',
+        meson_version : '>= 0.50',
        )
 
 conf = configuration_data()
@@ -241,6 +241,8 @@ lxcfs_spec_data = configure_file(
 			configuration : lxcfs_spec_data,
                         input : 'lxcfs.spec.in',
                         output : 'lxcfs.spec')
+
+subdir('share')
 
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),

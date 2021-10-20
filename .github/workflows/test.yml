@@ -38,7 +38,7 @@ jobs:
           CC: ${{ matrix.compiler }}
         run: |
           meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
-          ninja -C build
+          meson compile -C build
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
