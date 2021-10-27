@@ -15,6 +15,7 @@ AM_INIT_AUTOMAKE([-Wall -Werror -Wno-portability subdir-objects])
 AC_CANONICAL_HOST
 AM_PROG_CC_C_O
 AC_USE_SYSTEM_EXTENSIONS
+AC_SYS_LARGEFILE
 AC_GNU_SOURCE
 
 # Test if we have a new enough compiler.
