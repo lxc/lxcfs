@@ -5,10 +5,10 @@ Before=lxc.service
 Documentation=man:lxcfs(1)
 
 [Service]
-ExecStart=/usr/bin/lxcfs @LXCFSTARGETDIR@
+ExecStart=/usr/bin/lxcfs {{LXCFSTARGETDIR}}
 KillMode=process
 Restart=on-failure
-ExecStopPost=-/bin/fusermount -u @LXCFSTARGETDIR@
+ExecStopPost=-/bin/fusermount -u {{LXCFSTARGETDIR}}
 Delegate=yes
 ExecReload=/bin/kill -USR1 $MAINPID
 

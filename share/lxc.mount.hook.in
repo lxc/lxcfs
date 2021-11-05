@@ -15,8 +15,8 @@ done
 LXC_ROOTFS_MOUNT=$(readlink -f "${LXC_ROOTFS_MOUNT}")
 
 # /proc files
-if [ -d @LXCFSTARGETDIR@/proc/ ]; then
-    for entry in @LXCFSTARGETDIR@/proc/*; do
+if [ -d {{LXCFSTARGETDIR}}/proc/ ]; then
+    for entry in {{LXCFSTARGETDIR}}/proc/*; do
         DEST=$(basename "$entry")
         [ -e "${LXC_ROOTFS_MOUNT}/proc/${DEST}" ] || continue
         mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/proc/${DEST}"
@@ -24,11 +24,11 @@ if [ -d @LXCFSTARGETDIR@/proc/ ]; then
 fi
 
 # /sys/devices/system/cpu
-if [ -d @LXCFSTARGETDIR@/sys/devices/system/cpu ] ; then
-    if [ -f @LXCFSTARGETDIR@/sys/devices/system/cpu/uevent ]; then
-        mount -n --bind @LXCFSTARGETDIR@/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
+if [ -d {{LXCFSTARGETDIR}}/sys/devices/system/cpu ] ; then
+    if [ -f {{LXCFSTARGETDIR}}/sys/devices/system/cpu/uevent ]; then
+        mount -n --bind {{LXCFSTARGETDIR}}/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
     else
-        for entry in @LXCFSTARGETDIR@/sys/devices/system/cpu/*; do
+        for entry in {{LXCFSTARGETDIR}}/sys/devices/system/cpu/*; do
             DEST=$(basename "$entry")
             [ -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/${DEST}" ] || continue
             mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu/${DEST}"
@@ -37,8 +37,8 @@ if [ -d @LXCFSTARGETDIR@/sys/devices/system/cpu ] ; then
 fi
 
 # Allow nesting lxcfs
-if [ -d "${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/" ]; then
-    mount -n --bind @LXCFSTARGETDIR@ "${LXC_ROOTFS_MOUNT}@LXCFSTARGETDIR@/"
+if [ -d "${LXC_ROOTFS_MOUNT}{{LXCFSTARGETDIR}}/" ]; then
+    mount -n --bind {{LXCFSTARGETDIR}} "${LXC_ROOTFS_MOUNT}{{LXCFSTARGETDIR}}/"
 fi
 
 # no need for lxcfs cgroups if we have cgroup namespaces
@@ -59,7 +59,7 @@ fi
 
 # /sys/fs/cgroup files
 if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
-    if [ -d @LXCFSTARGETDIR@/cgroup ]; then
+    if [ -d {{LXCFSTARGETDIR}}/cgroup ]; then
         # Cleanup existing mounts
         for entry in "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup"/*; do
             DEST=$(basename "$entry")
@@ -83,7 +83,7 @@ if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
         done
 
         # Mount the new entries
-        for entry in @LXCFSTARGETDIR@/cgroup/*; do
+        for entry in {{LXCFSTARGETDIR}}/cgroup/*; do
             DEST=$(basename "$entry")
             if [ "$DEST" = "name=systemd" ]; then
                 DEST="systemd"

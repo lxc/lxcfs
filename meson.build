@@ -14,8 +14,9 @@ project('lxcfs', 'c',
        )
 
 conf = configuration_data()
+conf.set_quoted('PROJECT', meson.project_name())
 conf.set_quoted('PROJECT_URL', 'https://linuxcontainers.org/lxcfs/introduction/')
-conf.set('PROJECT_VERSION',    meson.project_version(),
+conf.set_quoted('PROJECT_VERSION',    meson.project_version(),
          description : 'Numerical project version (used where a simple number is expected)')
 project_source_root = meson.current_source_dir()
 project_build_root = meson.current_build_dir()
@@ -52,6 +53,12 @@ init_script = get_option('init-script')
 
 cc = meson.get_compiler('c')
 meson_build_sh = find_program('tools/meson-build.sh')
+
+if run_command('python3', '-c', 'import jinja2').returncode() != 0
+        error('python3 jinja2 missing')
+endif
+
+meson_render_jinja2 = find_program('tools/meson-render-jinja2.py')
 
 want_tests = get_option('tests')
 
@@ -152,6 +159,7 @@ config_include = include_directories('.')
 
 add_project_arguments('-include', 'config.h', language : 'c')
 
+test_programs = []
 subdir('tests')
 
 public_programs = []
@@ -220,31 +228,15 @@ if want_tests == true
 		c_args : '-DRELOADTEST -DDEBUG')
 endif
 
-if init_script == 'systemd'
-        systemd_service_data = configuration_data()
-	systemd_service_data.set_quoted('LXCFSTARGETDIR', join_paths(localstatedir, 'lib/lxcfs'))
-        systemd_service = configure_file(
-				configuration : systemd_service_data,
-                                input : 'config/init/systemd/lxcfs.service.in',
-                                output : 'lxcfs.service')
-        install_data(join_paths(project_build_root, 'lxcfs.service'), install_dir : '/lib/systemd/system')
-elif init_script == 'upstart'
-        install_data('config/init/upstart/lxcfs.conf', install_dir : join_paths(sysconfdir, 'init'))
-elif init_script == 'openrc'
-        install_data('config/init/sysvinit/lxcfs', install_dir : join_paths(sysconfdir, 'rc.d/init.d/lxcfs'))
-elif init_script == 'sysvinit'
-        install_data('config/init/sysvinit/lxcfs', install_dir : join_paths(sysconfdir, 'rc.d/init.d/lxcfs'))
-endif
-
-lxcfs_spec_data = configuration_data()
-lxcfs_spec_data.set('PACKAGE_VERSION', meson.project_version())
-lxcfs_spec_data.set('PACKAGE', meson.project_name())
-lxcfs_spec_data = configure_file(
-			configuration : lxcfs_spec_data,
-                        input : 'lxcfs.spec.in',
-                        output : 'lxcfs.spec')
+lxcfs_spec = custom_target(
+	'lxcfs.spec',
+	build_by_default : true,
+        input : 'lxcfs.spec.in',
+        output : 'lxcfs.spec',
+	command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'])
 
 subdir('share')
+subdir('config/init')
 
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),

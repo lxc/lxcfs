@@ -19,8 +19,8 @@ BuildRequires: systemd
 %endif
 
 Summary: Linux Containers File System
-Name: @PACKAGE@
-Version: @PACKAGE_VERSION@
+Name: {{PROJECT}}
+Version: {{PROJECT_VERSION}}
 Release: 1%{?dist}
 URL: https://linuxcontainers.org/lxcfs/downloads/
 Source0: %{name}-%{version}.tar.gz
