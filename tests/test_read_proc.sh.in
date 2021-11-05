@@ -12,12 +12,12 @@ if ! mountpoint -q $DIR; then
 fi
 
 echo "==> Testing /proc/cpuinfo"
-@LXCFS_BUILD_ROOT@/tests/test-read $DIR/proc/cpuinfo 3 >/dev/null
+{{LXCFS_BUILD_ROOT}}/tests/test-read $DIR/proc/cpuinfo 3 >/dev/null
 
 echo "==> Testing /proc/stat"
-@LXCFS_BUILD_ROOT@/tests/test-read $DIR/proc/stat 3 >/dev/null
+{{LXCFS_BUILD_ROOT}}/tests/test-read $DIR/proc/stat 3 >/dev/null
 
 echo "==> Testing /proc/meminfo"
-@LXCFS_BUILD_ROOT@/tests/test-read $DIR/proc/meminfo 3 >/dev/null
+{{LXCFS_BUILD_ROOT}}/tests/test-read $DIR/proc/meminfo 3 >/dev/null
 
 exit 0

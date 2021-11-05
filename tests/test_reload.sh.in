@@ -7,12 +7,12 @@ set -eu
 [ $(id -u) -eq 0 ]
 
 cmdline=$(realpath $0)
-topdir=@LXCFS_BUILD_ROOT@
+topdir={{LXCFS_BUILD_ROOT}}
 
 testdir=`mktemp -t -d libs.XXX`
 installdir=`mktemp -t -d libs.XXX`
 pidfile=$(mktemp)
-libdir=${installdir}/@LIBDIR@
+libdir=${installdir}/{{LIBDIR}}
 bindir=${installdir}/usr/bin
 lxcfspid=-1
 FAILED=1
@@ -39,7 +39,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 echo "==> Installing lxcfs to temporary path"
-cd @LXCFS_BUILD_ROOT@
+cd {{LXCFS_BUILD_ROOT}}
 DESTDIR=${installdir} meson install
 if [ -n "${LD_LIBRARY_PATH:-}" ]; then
     export LD_LIBRARY_PATH="${libdir}:${LD_LIBRARY_PATH}"
@@ -66,7 +66,7 @@ cat ${testdir}/proc/uptime
 
 [ ! -f /tmp/lxcfs-iwashere ]
 rm -f ${libdir}/liblxcfs.so* ${libdir}/liblxcfs.la
-cp @LXCFS_BUILD_ROOT@/liblxcfstest.so ${libdir}/liblxcfs.so
+cp {{LXCFS_BUILD_ROOT}}/liblxcfstest.so ${libdir}/liblxcfs.so
 
 kill -USR1 ${lxcfspid}
 sleep 1

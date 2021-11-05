@@ -23,7 +23,7 @@ dirname=$(dirname ${cmdline})
 
 trap cleanup EXIT HUP INT TERM
 
-lxcfs="@LXCFS_BUILD_ROOT@/lxcfs" $d &
+lxcfs="{{LXCFS_BUILD_ROOT}}/lxcfs" $d &
 pid=$!
 
 # put ourselves into x1

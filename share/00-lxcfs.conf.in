@@ -1,2 +1,2 @@
-lxc.hook.mount = @LXCFSSHAREDIR@/lxc.mount.hook
-lxc.hook.post-stop = @LXCFSSHAREDIR@/lxc.reboot.hook
+lxc.hook.mount = {{LXCFSSHAREDIR}}/lxc.mount.hook
+lxc.hook.post-stop = {{LXCFSSHAREDIR}}/lxc.reboot.hook

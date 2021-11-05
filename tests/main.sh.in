@@ -36,20 +36,20 @@ cleanup() {
 }
 
 TESTCASE="setup"
-lxcfs="@LXCFS_BUILD_ROOT@/lxcfs"
+lxcfs="{{LXCFS_BUILD_ROOT}}/lxcfs"
 
 if [ -x ${lxcfs} ]; then
 	if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-		export LD_LIBRARY_PATH="@LXCFS_BUILD_ROOT@:${LD_LIBRARY_PATH}"
+		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}:${LD_LIBRARY_PATH}"
 	else
-		export LD_LIBRARY_PATH="@LXCFS_BUILD_ROOT@"
+		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}"
 	fi
 	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
 	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	LXCFSPID=$!
 else
 	UNSHARE=0
-	LXCFSPID=$(cat "@RUNTIME_PATH@/lxcfs.pid")
+	LXCFSPID=$(cat "{{RUNTIME_PATH}}/lxcfs.pid")
 	echo "=> Re-using host lxcfs"
 	rmdir $LXCFSDIR
 	export LXCFSDIR=/var/lib/lxcfs
