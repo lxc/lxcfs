@@ -37,6 +37,7 @@ conf.set_quoted('LIBDIR',		libdir)
 conf.set_quoted('LOCALSTATEDIR',	localstatedir)
 conf.set_quoted('RUNTIME_PATH',		runtimepath)
 conf.set_quoted('SYSCONFDIR',		sysconfdir)
+conf.set_quoted('LXCFSTARGETDIR',	join_paths(localstatedir, 'lib/lxcfs'))
 
 conf.set_quoted('LXCFS_BUILD_ROOT',	project_build_root)
 conf.set_quoted('LXCFS_SOURCE_ROOT',	project_source_root)
