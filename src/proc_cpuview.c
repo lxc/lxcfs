@@ -452,6 +452,19 @@ static double exact_cpu_count(const char *cg)
 }
 
 /*
+ * Return true if cfs quota of the cgroup is neg / not set
+ */
+static bool cfs_quota_disabled(const char *cg)
+{
+	int64_t cfs_quota;
+
+	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+		return true;
+
+	return cfs_quota < 0;
+}
+
+/*
  * Return the maximum number of visible CPUs based on CPU quotas.
  * If there is no quota set, zero is returned.
  */
@@ -705,7 +718,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 
 		/* revise cpu usage view to support partial cpu case. */
 		exact_cpus = exact_cpu_count(cg);
-		if (exact_cpus < (double)max_cpus){
+
+		/* skip revise cpu when cfs quota is disabled (exact_cpus == 0) */
+		if (!cfs_quota_disabled(cg) && exact_cpus < (double)max_cpus){
 			uint64_t delta = (uint64_t)((double)(diff_user + diff_system + diff_idle) * (1 - exact_cpus / (double)max_cpus));
 
 			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
