@@ -517,7 +517,7 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+	if (!fc || !cgroup_ops)
 		return -EIO;
 
 	memset(sb, 0, sizeof(struct stat));
@@ -529,7 +529,7 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 	sb->st_atim = sb->st_mtim = sb->st_ctim = now;
 	sb->st_size = 0;
 
-	if (strcmp(path, "/cgroup") == 0) {
+	if (pure_unified_layout(cgroup_ops) || strcmp(path, "/cgroup") == 0) {
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
 		return 0;
@@ -545,6 +545,7 @@ __lxcfs_fuse_ops int cg_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 2;
 		return 0;
 	}
+
 
 	get_cgdir_and_path(cgroup, &cgdir, &last);
 
@@ -1421,10 +1422,10 @@ __lxcfs_fuse_ops int cg_opendir(const char *path, struct fuse_file_info *fi)
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+	if (!fc || !cgroup_ops)
 		return -EIO;
 
-	if (strcmp(path, "/cgroup") == 0) {
+	if (pure_unified_layout(cgroup_ops) || strcmp(path, "/cgroup") == 0) {
 		cgroup = NULL;
 		controller = NULL;
 	} else {
@@ -1950,8 +1951,13 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (!fc || !cgroup_ops || pure_unified_layout(cgroup_ops))
+	if (!fc || !cgroup_ops)
 		return -EIO;
+
+	if (pure_unified_layout(cgroup_ops)) {
+		ret = 0;
+		goto out;
+	}
 
 	if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 || DIR_FILLER(filler, buf, "..", NULL, 0) != 0)
 		return -EIO;
