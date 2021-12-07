@@ -164,7 +164,9 @@ subdir('tests')
 
 public_programs = []
 
-lxcfs_sources = files('src/lxcfs.c')
+lxcfs_sources = files(
+	'src/atomic_utils.h',
+	'src/lxcfs.c')
 
 public_programs += executable(
         'lxcfs',

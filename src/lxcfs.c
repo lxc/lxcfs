@@ -29,6 +29,7 @@
 #include "bindings.h"
 #include "lxcfs_fuse_compat.h"
 #include "macro.h"
+#include "atomic_utils.h"
 #include "memory_utils.h"
 
 void *dlopen_handle;
@@ -37,6 +38,7 @@ void *dlopen_handle;
 
 static int users_count;
 static pthread_mutex_t user_count_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cond_zero = PTHREAD_COND_INITIALIZER;
 static void lock_mutex(pthread_mutex_t *l)
 {
 	int ret;
@@ -103,7 +105,7 @@ static int stop_loadavg(void)
 	return 0;
 }
 
-static volatile sig_atomic_t need_reload;
+int need_reload;
 
 /* do_reload - reload the dynamic library.  Done under
  * lock and when we know the user_count was 0 */
@@ -149,31 +151,41 @@ static void do_reload(void)
 good:
 	if (loadavg_pid > 0)
 		start_loadavg();
-
-	if (need_reload)
-		lxcfs_info("Reloaded LXCFS");
-	need_reload = 0;
 }
 
 static void up_users(void)
 {
-	users_lock();
-	if (users_count == 0 && need_reload)
-		do_reload();
-	users_count++;
-	users_unlock();
+	if (atomic_load_acquire(&need_reload)) {
+		int val = -1;
+		int expected = 1;
+
+		if (atomic_fetch_inc(&users_count) > 1) {
+			users_lock();
+			pthread_cond_wait(&cond_zero, &user_count_mutex);
+			users_unlock();
+		} else {
+			do_reload();
+
+			val = atomic_cmpxchg(&need_reload, expected, 0);
+			if (val == expected) {
+				users_lock();
+				pthread_cond_broadcast(&cond_zero);
+				users_unlock();
+			}
+		}
+	} else {
+		atomic_fetch_inc(&users_count);
+	}
 }
 
 static void down_users(void)
 {
-	users_lock();
-	users_count--;
-	users_unlock();
+	atomic_fetch_dec(&users_count);
 }
 
 static void sigusr1_reload(int signo, siginfo_t *info, void *extra)
 {
-	need_reload = 1;
+	atomic_store_release(&need_reload, 1);
 }
 
 /* Functions to run the library methods */
