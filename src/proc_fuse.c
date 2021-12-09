@@ -303,6 +303,43 @@ static inline bool startswith(const char *line, const char *pref)
 	return strncmp(line, pref, strlen(pref)) == 0;
 }
 
+static void get_swap_info(const char *cgroup, uint64_t memlimit,
+			  uint64_t memusage, uint64_t *swtotal,
+			  uint64_t *swusage, uint64_t *memswpriority)
+{
+	__do_free char *memswusage_str = NULL, *memswpriority_str = NULL;
+	size_t memswlimit = 0, memswusage = 0;
+	int ret;
+
+	*swtotal = *swusage = 0;
+	*memswpriority = 1;
+
+	memswlimit = get_min_memlimit(cgroup, true);
+	if (memswlimit > 0) {
+		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
+		if (ret < 0 || safe_uint64(memswusage_str, &memswusage, 10) != 0)
+			return;
+
+		if (liblxcfs_memory_is_cgroupv2()) {
+			*swtotal = memswlimit / 1024;
+			*swusage = memswusage / 1024;
+		} else {
+			if (memlimit > memswlimit)
+				*swtotal = 0;
+			else
+				*swtotal = (memswlimit - memlimit) / 1024;
+			if (memusage > memswusage || swtotal == 0)
+				*swusage = 0;
+			else
+				*swusage = (memswusage - memusage) / 1024;
+		}
+
+		ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+		if (ret >= 0)
+			safe_uint64(memswpriority_str, memswpriority, 10);
+	}
+}
+
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
 			   struct fuse_file_info *fi)
 {
@@ -311,7 +348,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	uint64_t memswlimit = 0, memlimit = 0, memusage = 0, memswusage = 0,
+	uint64_t memlimit = 0, memusage = 0,
 		 swtotal = 0, swusage = 0, memswpriority = 1,
 		 hostswtotal = 0, hostswfree = 0;
 	ssize_t total_len = 0;
@@ -357,26 +394,8 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
 		lxcfs_error("Failed to convert memusage %s", memusage_str);
 
-	if (wants_swap) {
-		memswlimit = get_min_memlimit(cgroup, true);
-		if (memswlimit > 0) {
-			ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
-			if (ret >= 0 && safe_uint64(memswusage_str, &memswusage, 10) == 0) {
-				if (memlimit > memswlimit)
-					swtotal = 0;
-				else
-					swtotal = (memswlimit - memlimit) / 1024;
-				if (memusage > memswusage || swtotal == 0)
-					swusage = 0;
-				else
-					swusage = (memswusage - memusage) / 1024;
-			}
-
-			ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
-			if (ret >= 0)
-				safe_uint64(memswpriority_str, &memswpriority, 10);
-		}
-	}
+	if (wants_swap)
+		get_swap_info(cgroup, memlimit, memusage, &swtotal, &swusage, &memswpriority);
 
 	total_len = snprintf(d->buf, d->size, "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n");
 
@@ -1145,7 +1164,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	struct fuse_context *fc = fuse_get_context();
 	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	uint64_t memlimit = 0, memusage = 0, memswlimit = 0, memswusage = 0,
+	uint64_t memlimit = 0, memusage = 0,
 		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
 		 memswpriority = 1;
 	struct memory_stat mstat = {};
@@ -1197,26 +1216,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	 * Following values are allowed to fail, because swapaccount might be
 	 * turned off for current kernel.
 	 */
-	if (wants_swap) {
-		memswlimit = get_min_memlimit(cgroup, true);
-		if (memswlimit > 0) {
-			ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
-			if (ret >= 0 && safe_uint64(memswusage_str, &memswusage, 10) == 0) {
-				if (memlimit > memswlimit)
-					swtotal = 0;
-				else
-					swtotal = (memswlimit - memlimit) / 1024;
-				if (memusage > memswusage || swtotal == 0)
-					swusage = 0;
-				else
-					swusage = (memswusage - memusage) / 1024;
-			}
-		}
-
-		ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
-		if (ret >= 0)
-			safe_uint64(memswpriority_str, &memswpriority, 10);
-	}
+	if (wants_swap)
+		get_swap_info(cgroup, memlimit, memusage, &swtotal, &swusage, &memswpriority);
 
 	f = fopen_cached("/proc/meminfo", "re", &fopen_cache);
 	if (!f)
@@ -1255,7 +1256,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				   This is because the kernel can swap as much as it
 				   wants and not only up to swtotal. */
 
-				swtotal = memlimit + swtotal;
+				if (!liblxcfs_memory_is_cgroupv2())
+					swtotal += memlimit;
+
 				if (hostswtotal < swtotal) {
 					swtotal = hostswtotal;
 				}
