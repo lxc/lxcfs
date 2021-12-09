@@ -44,6 +44,7 @@ static bool can_use_pidfd;
 static bool can_use_swap;
 static bool can_use_sys_cpu;
 static bool has_versioned_opts;
+static bool memory_is_cgroupv2;
 
 static volatile sig_atomic_t reload_successful;
 
@@ -65,6 +66,11 @@ bool liblxcfs_can_use_sys_cpu(void)
 bool liblxcfs_has_versioned_opts(void)
 {
 	return has_versioned_opts;
+}
+
+bool liblxcfs_memory_is_cgroupv2(void)
+{
+	return memory_is_cgroupv2;
 }
 
 /* Define pivot_root() if missing from the C library */
@@ -837,6 +843,7 @@ static void __attribute__((constructor)) lxcfs_init(void)
 				  pidfd = -EBADF;
 	int i = 0;
 	pid_t pid;
+	struct hierarchy *hierarchy;
 
 	lxcfs_info("Running constructor %s to reload liblxcfs", __func__);
 
@@ -893,6 +900,9 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		lxcfs_info("Kernel supports swap accounting");
 	else
 		lxcfs_info("Kernel does not support swap accounting");
+
+	hierarchy = cgroup_ops->get_hierarchy(cgroup_ops, "memory");
+	memory_is_cgroupv2 = hierarchy && is_unified_hierarchy(hierarchy);
 
 	lxcfs_info("api_extensions:");
 	for (size_t nr = 0; nr < nr_api_extensions; nr++)
