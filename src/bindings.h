@@ -98,6 +98,7 @@ extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);
 extern bool liblxcfs_can_use_swap(void);
+extern bool liblxcfs_memory_is_cgroupv2(void);
 extern bool liblxcfs_can_use_sys_cpu(void);
 extern bool liblxcfs_has_versioned_opts(void);
 
