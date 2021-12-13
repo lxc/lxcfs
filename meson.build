@@ -18,6 +18,11 @@ conf.set_quoted('PROJECT', meson.project_name())
 conf.set_quoted('PROJECT_URL', 'https://linuxcontainers.org/lxcfs/introduction/')
 conf.set_quoted('PROJECT_VERSION',    meson.project_version(),
          description : 'Numerical project version (used where a simple number is expected)')
+conf.set_quoted('PACKAGE_VERSION',    meson.project_version())
+conf.set('_GNU_SOURCE', true)
+conf.set('_FILE_OFFSET_BITS', 64)
+conf.set('__STDC_FORMAT_MACROS', true)
+
 project_source_root = meson.current_source_dir()
 project_build_root = meson.current_build_dir()
 
@@ -132,10 +137,6 @@ foreach ident : [
         have = cc.has_function(ident[0], prefix : ident[1], args : '-D_GNU_SOURCE')
         conf.set10('HAVE_' + ident[0].to_upper(), have)
 endforeach
-
-conf.set('_GNU_SOURCE', true)
-conf.set('_FILE_OFFSET_BITS', 64)
-conf.set('__STDC_FORMAT_MACROS', true)
 
 libfuse = dependency('fuse3', required : false)
 if libfuse.found()
