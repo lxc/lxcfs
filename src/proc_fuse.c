@@ -308,7 +308,7 @@ static void get_swap_info(const char *cgroup, uint64_t memlimit,
 			  uint64_t *swusage, uint64_t *memswpriority)
 {
 	__do_free char *memswusage_str = NULL, *memswpriority_str = NULL;
-	size_t memswlimit = 0, memswusage = 0;
+	uint64_t memswlimit = 0, memswusage = 0;
 	int ret;
 
 	*swtotal = *swusage = 0;
