@@ -49,13 +49,13 @@ static int loadavg = 0;
 #define FLUSH_TIME 5  /*the flush rate */
 #define DEPTH_DIR 3   /*the depth of per cgroup */
 /* The function of calculate loadavg .*/
-#define FSHIFT		11		/* nr of bits of precision */
-#define FIXED_1		(1 << FSHIFT)	/* 1.0 as fixed-point */
-#define EXP_1		1884		/* 1/exp(5sec/1min) as fixed-point */
-#define EXP_5		2014		/* 1/exp(5sec/5min) */
-#define EXP_15		2037		/* 1/exp(5sec/15min) */
+#define FSHIFT		(uint64_t)11		/* nr of bits of precision */
+#define FIXED_1		((uint64_t)1 << FSHIFT)	/* 1.0 as fixed-point */
+#define EXP_1		(uint64_t)1884		/* 1/exp(5sec/1min) as fixed-point */
+#define EXP_5		(uint64_t)2014		/* 1/exp(5sec/5min) */
+#define EXP_15		(uint64_t)2037		/* 1/exp(5sec/15min) */
 #define LOAD_INT(x) ((x) >> FSHIFT)
-#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
+#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1 - 1)) * (uint64_t)100)
 static volatile sig_atomic_t loadavg_stop = 0;
 
 struct load_node {
@@ -225,9 +225,9 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 	b = n->avenrun[1] + (FIXED_1 / 200);
 	c = n->avenrun[2] + (FIXED_1 / 200);
 	total_len = snprintf(d->buf, d->buflen,
-			     "%lu.%02lu "
-			     "%lu.%02lu "
-			     "%lu.%02lu "
+			     "%" PRIu64 ".%02" PRIu64 " "
+			     "%" PRIu64 ".%02lu "
+			     "%" PRIu64 ".%02" PRIu64 " "
 			     "%d/"
 			     "%d "
 			     "%d\n",

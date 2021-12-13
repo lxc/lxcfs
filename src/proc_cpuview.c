@@ -683,9 +683,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		}
 
 		if (user_surplus > 0)
-			lxcfs_debug("leftover user: %lu for %s\n", user_surplus, cg);
+			lxcfs_debug("leftover user: %" PRIu64 "for %s\n", user_surplus, cg);
 		if (system_surplus > 0)
-			lxcfs_debug("leftover system: %lu for %s\n", system_surplus, cg);
+			lxcfs_debug("leftover system: %" PRIu64 "for %s\n", system_surplus, cg);
 
 		for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
 			if (!stat_node->usage[curcpu].online)
@@ -712,9 +712,9 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 				max_diff_idle_index 	= curcpu;
 			}
 
-			lxcfs_v("curcpu: %d, diff_user: %lu, diff_system: %lu, diff_idle: %lu\n", curcpu, diff[curcpu].user, diff[curcpu].system, diff[curcpu].idle);
+			lxcfs_v("curcpu: %d, diff_user: %" PRIu64 ", diff_system: %" PRIu64 ", diff_idle: %" PRIu64 "\n", curcpu, diff[curcpu].user, diff[curcpu].system, diff[curcpu].idle);
 		}
-		lxcfs_v("total. diff_user: %lu, diff_system: %lu, diff_idle: %lu\n", diff_user, diff_system, diff_idle);
+		lxcfs_v("total. diff_user: %" PRIu64 ", diff_system: %" PRIu64 ", diff_idle: %" PRIu64 "\n", diff_user, diff_system, diff_idle);
 
 		/* revise cpu usage view to support partial cpu case. */
 		exact_cpus = exact_cpu_count(cg);
@@ -724,21 +724,21 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			uint64_t delta = (uint64_t)((double)(diff_user + diff_system + diff_idle) * (1 - exact_cpus / (double)max_cpus));
 
 			lxcfs_v("revising cpu usage view to match the exact cpu count [%f]\n", exact_cpus);
-			lxcfs_v("delta: %lu\n", delta);
-			lxcfs_v("idle_sum before: %lu\n", idle_sum);
+			lxcfs_v("delta: %" PRIu64 "\n", delta);
+			lxcfs_v("idle_sum before: %" PRIu64 "\n", idle_sum);
 			if (idle_sum > delta)
 				idle_sum = idle_sum - delta;
 			else
 				idle_sum = 0;
-			lxcfs_v("idle_sum after: %lu\n", idle_sum);
+			lxcfs_v("idle_sum after: %l" PRIu64 "\n", idle_sum);
 
 			curcpu = max_diff_idle_index;
-			lxcfs_v("curcpu: %d, idle before: %lu\n", curcpu, stat_node->view[curcpu].idle);
+			lxcfs_v("curcpu: %d, idle before: %" PRIu64 "\n", curcpu, stat_node->view[curcpu].idle);
 			if (stat_node->view[curcpu].idle > delta)
 				stat_node->view[curcpu].idle = stat_node->view[curcpu].idle - delta;
 			else
 				stat_node->view[curcpu].idle = 0;
-			lxcfs_v("curcpu: %d, idle after: %lu\n", curcpu, stat_node->view[curcpu].idle);
+			lxcfs_v("curcpu: %d, idle after: %" PRIu64 "\n", curcpu, stat_node->view[curcpu].idle);
 		}
 	} else {
 		for (curcpu = 0; curcpu < nprocs; curcpu++) {
