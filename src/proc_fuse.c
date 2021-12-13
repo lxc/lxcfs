@@ -461,13 +461,13 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor,
 	len = strlen(key);
 	while (*str) {
 		if (startswith(str, key)) {
-			sscanf(str + len, "%lu", v);
+			sscanf(str + len, "%" PRIu64, v);
 			return;
 		}
 		eol = strchr(str, '\n');
 		if (!eol)
 			return;
-		str = eol+1;
+		str = eol + 1;
 	}
 }
 
@@ -621,7 +621,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		    stats.read_sectors || stats.write_sectors || stats.read_ticks ||
 		    stats.write_ticks || stats.ios_pgr || stats.total_ticks || stats.rq_ticks ||
 		    stats.discard_merged || stats.discard_sectors || stats.discard_ticks)
-			snprintf(lbuf, 256, "%u       %u %s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
+			snprintf(lbuf, 256, "%u       %u %s %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "\n",
 				stats.major,
 				stats.minor,
 				stats.dev_name,
@@ -979,7 +979,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 		curcpu++;
 
-		ret = sscanf(line, "%*s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+		ret = sscanf(line, "%*s %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64,
 			   &user,
 			   &nice,
 			   &system,
@@ -1056,7 +1056,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	cache = d->buf;
 
-	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "cpu  %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
+	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "cpu  %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "\n",
 			user_sum,
 			nice_sum,
 			system_sum,
