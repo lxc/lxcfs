@@ -617,7 +617,26 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		    stats.read_sectors || stats.write_sectors || stats.read_ticks ||
 		    stats.write_ticks || stats.ios_pgr || stats.total_ticks || stats.rq_ticks ||
 		    stats.discard_merged || stats.discard_sectors || stats.discard_ticks)
-			snprintf(lbuf, 256, "%u       %u %s %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "\n",
+			snprintf(
+				lbuf,
+				256,
+				"%u       %u" /* major, minor */
+				" %s"         /* dev_name */
+				" %" PRIu64   /* read */
+				" %" PRIu64   /* read_merged */
+				" %" PRIu64   /* read_sectors */
+				" %" PRIu64   /* read_ticks */
+				" %" PRIu64   /* write */
+				" %" PRIu64   /* write_merged */
+				" %" PRIu64   /* write_sectors */
+				" %" PRIu64   /* write_ticks */
+				" %" PRIu64   /* ios_pgr */
+				" %" PRIu64   /* total_ticks */
+				" %" PRIu64   /* rq_ticks */
+				" %" PRIu64   /* discard_merged */
+				" %" PRIu64   /* discard_sectors */
+				" %" PRIu64   /* discard_ticks */
+				"\n",
 				stats.major,
 				stats.minor,
 				stats.dev_name,
@@ -975,7 +994,19 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 		curcpu++;
 
-		ret = sscanf(line, "%*s %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64,
+		ret = sscanf(
+			   line,
+			   "%*s"        /* <skip> */
+			   " %" PRIu64  /* user */
+			   " %" PRIu64  /* nice */
+			   " %" PRIu64  /* system */
+			   " %" PRIu64  /* idle */
+			   " %" PRIu64  /* iowait */
+			   " %" PRIu64  /* irq */
+			   " %" PRIu64  /* softirq */
+			   " %" PRIu64  /* steal */
+			   " %" PRIu64  /* guest */
+			   " %" PRIu64, /* guest_nice */
 			   &user,
 			   &nice,
 			   &system,
@@ -1052,7 +1083,21 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 	cache = d->buf;
 
-	int cpuall_len = snprintf(cpuall, CPUALL_MAX_SIZE, "cpu  %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64 "\n",
+	int cpuall_len = snprintf(
+			cpuall,
+			CPUALL_MAX_SIZE,
+			"cpu  "
+			" %" PRIu64 /* user_sum */
+			" %" PRIu64 /* nice_sum */
+			" %" PRIu64 /* system_sum */
+			" %" PRIu64 /* idle_sum */
+			" %" PRIu64 /* iowait_sum */
+			" %" PRIu64 /* irq_sum */
+			" %" PRIu64 /* softirq_sum */
+			" %" PRIu64 /* steal_sum */
+			" %" PRIu64 /* guest_sum */
+			" %" PRIu64 /* guest_nice_sum */
+			"\n",
 			user_sum,
 			nice_sum,
 			system_sum,
