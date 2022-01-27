@@ -38,3 +38,4 @@ lxcfs-*.tar.gz
 *.la
 .vscode
 src/cgroups/.dirstamp
+.idea/
