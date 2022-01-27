@@ -700,10 +700,6 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			stat_node->view[curcpu].system 	+= diff[curcpu].system;
 			stat_node->view[curcpu].idle 	+= diff[curcpu].idle;
 
-			user_sum 	+= stat_node->view[curcpu].user;
-			system_sum 	+= stat_node->view[curcpu].system;
-			idle_sum 	+= stat_node->view[curcpu].idle;
-
 			diff_user 	+= diff[curcpu].user;
 			diff_system 	+= diff[curcpu].system;
 			diff_idle 	+= diff[curcpu].idle;
@@ -715,6 +711,12 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 			lxcfs_v("curcpu: %d, diff_user: %" PRIu64 ", diff_system: %" PRIu64 ", diff_idle: %" PRIu64 "\n", curcpu, diff[curcpu].user, diff[curcpu].system, diff[curcpu].idle);
 		}
 		lxcfs_v("total. diff_user: %" PRIu64 ", diff_system: %" PRIu64 ", diff_idle: %" PRIu64 "\n", diff_user, diff_system, diff_idle);
+
+		for (curcpu = 0; curcpu < nprocs; curcpu++) {
+			user_sum 	+= stat_node->view[curcpu].user;
+			system_sum 	+= stat_node->view[curcpu].system;
+			idle_sum 	+= stat_node->view[curcpu].idle;
+		}
 
 		/* revise cpu usage view to support partial cpu case. */
 		exact_cpus = exact_cpu_count(cg);
@@ -776,21 +778,50 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	buf_size -= l;
 	total_len += l;
 
-	/* Render visible CPUs */
-	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
-		if (!stat_node->usage[curcpu].online)
-			continue;
+	/* Render visible CPUs 
+	Assume there are K CPUs: 0, 1, 2, ..., K-1.
+	Among them, there are M online CPUs with index: a1, a2, ... aN ... aM (M >= N)
+	N = max_cpus, M = number of online CPUs
 
+	There will be N rendered cpus, indexed from 0 to N-1, cpu times of the cpus are calculated from those formula:
+	- user_time[0] = stat_node->view[0].user + stat_node->view[1].user + ... + stat_node->view[a1].user
+	- user_time[1] = stat_node->view[a1+1].user + stat_node->view[a1+1].user + ... + stat_node->view[a2].user
+	...
+	- user_time[N-2] = stat_node->view[a(N-2)+1].user + stat_node->view[a(N-2)+2].user + ... 
+	                    + stat_node->view[a(N-1)].user
+	- user_time[N-1] = stat_node->view[a(N-1)+1].user + stat_node->view[a(N-1)+2].user + ...
+	                    + stat_node->view[aN] + ... + stat_node->view[K-1] (sum of all remaining CPUs)
+	
+	Similar formula applied for system and idle time
+	*/
+
+	uint64_t curcpu_view_user_sum = 0, curcpu_view_system_sum = 0, curcpu_view_idle_sum = 0;
+	for (curcpu = 0, i = -1; curcpu < nprocs; curcpu++) {
+		curcpu_view_user_sum += stat_node->view[curcpu].user;
+		curcpu_view_system_sum += stat_node->view[curcpu].system;
+		curcpu_view_idle_sum += stat_node->view[curcpu].idle;
+
+		if (!stat_node->usage[curcpu].online && curcpu < nprocs - 1) {
+			continue;
+		}
+		
 		i++;
 
-		if (max_cpus > 0 && i == max_cpus)
-			break;
+		if (max_cpus > 0 && i >= max_cpus) {
+			// max(i) = count(rendered cpus) = max_cpus - 1
+			i--;
+		}
+
+		if (max_cpus > 0 && i == max_cpus - 1 && curcpu < nprocs - 1) {
+			// last 'rendered' cpu, sum until reaches the last cpu
+			continue;
+		}
 
 		l = snprintf(buf, buf_size, "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
 			     i,
-			     stat_node->view[curcpu].user,
-			     stat_node->view[curcpu].system,
-			     stat_node->view[curcpu].idle);
+			     curcpu_view_user_sum,
+			     curcpu_view_system_sum,
+			     curcpu_view_idle_sum);
 		lxcfs_v("cpu: %s\n", buf);
 		if (l < 0) {
 			lxcfs_error("Failed to write cache");
@@ -806,6 +837,10 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 		buf += l;
 		buf_size -= l;
 		total_len += l;
+
+		curcpu_view_user_sum = 0;
+		curcpu_view_system_sum = 0;
+		curcpu_view_idle_sum = 0;
 	}
 
 	/* Pass the rest of /proc/stat, start with the last line read */
