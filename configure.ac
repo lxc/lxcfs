@@ -1,6 +1,6 @@
 AC_PREREQ([2.69])
 
-AC_INIT([lxcfs], [4.0.11], [lxc-devel@lists.linuxcontainers.org])
+AC_INIT([lxcfs], [4.0.12], [lxc-devel@lists.linuxcontainers.org])
 
 # We need pkg-config
 PKG_PROG_PKG_CONFIG
