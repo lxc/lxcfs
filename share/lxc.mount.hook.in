@@ -47,7 +47,7 @@ else
 fi
 
 # Skip mounting cgroup tree if requested.
-if [ "${SKIP_CGROUP_MOUNTS}" == "1" ]; then
+if [ "${SKIP_CGROUP_MOUNTS}" = "1" ]; then
         exit 0
 fi
 
