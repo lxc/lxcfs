@@ -204,7 +204,8 @@ static uint64_t get_memlimit(const char *cgroup, bool swap)
 	else
 		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
 	if (ret > 0 && memlimit_str[0] && safe_uint64(memlimit_str, &memlimit, 10) < 0)
-		lxcfs_error("Failed to convert memlimit %s", memlimit_str);
+		lxcfs_error("Failed to convert memory%s.max=%s for cgroup %s",
+			    swap ? ".swap" : "", memlimit_str, cgroup);
 
 	return memlimit;
 }
