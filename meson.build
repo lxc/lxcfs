@@ -18,7 +18,9 @@ project(
 cc = meson.get_compiler('c')
 
 # Templater.
-if run_command('python3', '-c', 'import jinja2').returncode() != 0
+if run_command(
+    'python3', '-c', 'import jinja2',
+    check: false).returncode() != 0
         error('python3 jinja2 missing')
 endif
 
