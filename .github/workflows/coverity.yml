@@ -31,7 +31,7 @@ jobs:
         run: |
           export PATH="$(pwd)/cov-analysis-linux64/bin:${PATH}"
 
-          meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
+          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
           meson compile -C build
           cd build
 
