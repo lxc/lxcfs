@@ -6,9 +6,17 @@
 #include "config.h"
 
 #if HAVE_FUSE3
-#define DIR_FILLER(F,B,N,S,O) F(B,N,S,O,FUSE_FILL_DIR_PLUS)
+static inline int dir_filler(fuse_fill_dir_t filler, void *buf,
+			     const char *name, off_t off)
+{
+	return filler(buf, name, NULL, off, FUSE_FILL_DIR_PLUS);
+}
 #else
-#define DIR_FILLER(F,B,N,S,O) F(B,N,S,O)
+static inline int dir_filler(fuse_fill_dir_t filler, void *buf,
+			     const char *name, off_t off)
+{
+	return filler(buf, name, NULL, off);
+}
 #endif
 
 #endif /* __LXCFS_FUSE_COMPAT_H */
