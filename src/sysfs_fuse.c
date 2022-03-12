@@ -322,7 +322,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		if (isdigit(*entry))
 			continue;
 
-		if (dir_filler(filler, buf, dirent->d_name, 0) != 0)
+		if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
 
@@ -479,7 +479,7 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dir_filler(filler, buf, "devices",	0) != 0)
+		    dirent_filler(filler, path, "devices", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -487,7 +487,7 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys/devices") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dir_filler(filler, buf, "system",	0) != 0)
+		    dirent_filler(filler, path, "system", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -495,7 +495,7 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys/devices/system") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dir_filler(filler, buf, "cpu",	0) != 0)
+		    dirent_filler(filler, path, "cpu", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -503,7 +503,7 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dir_filler(filler, buf, "online",	0) != 0)
+		    dirent_filler(filler, path, "online", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -539,7 +539,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 	case LXC_TYPE_SYS: {
 			if (dir_filler(filler, buf, ".",	0) != 0 ||
 			    dir_filler(filler, buf, "..",	0) != 0 ||
-			    dir_filler(filler, buf, "devices",  0) != 0)
+			    dirent_filler(filler, path, "devices", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
@@ -547,7 +547,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 	case LXC_TYPE_SYS_DEVICES: {
 			if (dir_filler(filler, buf, ".",	0) != 0 ||
 			    dir_filler(filler, buf, "..",   	0) != 0 ||
-			    dir_filler(filler, buf, "system",	0) != 0)
+			    dirent_filler(filler, path, "system", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
@@ -555,7 +555,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 	case LXC_TYPE_SYS_DEVICES_SYSTEM: {
 			if (dir_filler(filler, buf, ".",    0) != 0 ||
 			    dir_filler(filler, buf, "..",   0) != 0 ||
-			    dir_filler(filler, buf, "cpu",  0) != 0)
+			    dirent_filler(filler, path, "cpu", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
@@ -572,7 +572,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				return -ENOENT;
 
 			while ((dirent = readdir(dir))) {
-				if (dir_filler(filler, buf, dirent->d_name, 0) != 0)
+				if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
 					return -ENOENT;
 			}
 
