@@ -82,6 +82,8 @@ TESTCASE="Stress readdir"
 RUNTEST ${dirname}/test_readdir
 TESTCASE="test_proc"
 RUNTEST ${dirname}/test_proc
+TESTCASE="test_sysfs"
+RUNTEST ${dirname}/test_sysfs
 TESTCASE="test_cgroup"
 RUNTEST ${dirname}/test_cgroup
 TESTCASE="test_read_proc.sh"
