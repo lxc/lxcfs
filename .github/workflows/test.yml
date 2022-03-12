@@ -37,7 +37,7 @@ jobs:
         env:
           CC: ${{ matrix.compiler }}
         run: |
-          meson setup -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
+          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
           meson compile -C build
       - name: Test
         env:
