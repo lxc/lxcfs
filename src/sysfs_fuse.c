@@ -303,7 +303,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		if (ret < 0 || (size_t)ret >= sizeof(cpu))
 			continue;
 
-		if (DIR_FILLER(filler, buf, cpu, NULL, 0) != 0)
+		if (dir_filler(filler, buf, cpu, 0) != 0)
 			return -ENOENT;
 	}
 
@@ -322,7 +322,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		if (isdigit(*entry))
 			continue;
 
-		if (DIR_FILLER(filler, buf, dirent->d_name, NULL, 0) != 0)
+		if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
 
@@ -477,33 +477,33 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 			      off_t offset, struct fuse_file_info *fi)
 {
 	if (strcmp(path, "/sys") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "devices",	NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "devices", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "system",	NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "system", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "cpu",	NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "cpu", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
 	}
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
-		if (DIR_FILLER(filler, buf, ".",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..",	NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "online",	NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "online", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -537,32 +537,32 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 
 	switch (f->type) {
 	case LXC_TYPE_SYS: {
-			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "devices",  NULL, 0) != 0)
+			if (dir_filler(filler, buf, ".",	0) != 0 ||
+			    dir_filler(filler, buf, "..",	0) != 0 ||
+			    dirent_filler(filler, path, "devices", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
 		}
 	case LXC_TYPE_SYS_DEVICES: {
-			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "system",  NULL, 0) != 0)
+			if (dir_filler(filler, buf, ".",	0) != 0 ||
+			    dir_filler(filler, buf, "..",   	0) != 0 ||
+			    dirent_filler(filler, path, "system", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
 		}
 	case LXC_TYPE_SYS_DEVICES_SYSTEM: {
-			if (DIR_FILLER(filler, buf, ".",    NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "..",   NULL, 0) != 0 ||
-			    DIR_FILLER(filler, buf, "cpu",  NULL, 0) != 0)
+			if (dir_filler(filler, buf, ".",    0) != 0 ||
+			    dir_filler(filler, buf, "..",   0) != 0 ||
+			    dirent_filler(filler, path, "cpu", buf,  0) != 0)
 					return -ENOENT;
 
 			return 0;
 		}
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-		if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..", NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0)
 			return -ENOENT;
 
 		return filler_sys_devices_system_cpu(path, buf, filler);
@@ -572,7 +572,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				return -ENOENT;
 
 			while ((dirent = readdir(dir))) {
-				if (DIR_FILLER(filler, buf, dirent->d_name, NULL, 0) != 0)
+				if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
 					return -ENOENT;
 			}
 

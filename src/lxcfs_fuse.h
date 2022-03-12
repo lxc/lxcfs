@@ -5,12 +5,12 @@
 
 #include "config.h"
 
-#include "lxcfs_fuse_compat.h"
-
 #if HAVE_FUSE3
 #include <fuse3/fuse.h>
 #else
 #include <fuse.h>
 #endif
+
+#include "lxcfs_fuse_compat.h"
 
 #endif /* __LXCFS_FUSE_H */

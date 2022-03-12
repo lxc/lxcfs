@@ -681,11 +681,11 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	int ret;
 
 	if (strcmp(path, "/") == 0) {
-		if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "..", NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "proc", NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "sys", NULL, 0) != 0 ||
-		    DIR_FILLER(filler, buf, "cgroup", NULL, 0) != 0)
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dir_filler(filler, buf, "proc", 0) != 0 ||
+		    dir_filler(filler, buf, "sys", 0) != 0 ||
+		    dir_filler(filler, buf, "cgroup", 0) != 0)
 			return -ENOMEM;
 
 		return 0;

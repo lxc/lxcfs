@@ -1959,7 +1959,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 		goto out;
 	}
 
-	if (DIR_FILLER(filler, buf, ".", NULL, 0) != 0 || DIR_FILLER(filler, buf, "..", NULL, 0) != 0)
+	if (dir_filler(filler, buf, ".", 0) != 0 || dir_filler(filler, buf, "..", 0) != 0)
 		return -EIO;
 
 	if (d->type != LXC_TYPE_CGDIR) {
@@ -1975,7 +1975,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 			if (is_unified_hierarchy(*h))
 				continue;
 
-			if ((*h)->__controllers && DIR_FILLER(filler, buf, (*h)->__controllers, NULL, 0))
+			if ((*h)->__controllers && dir_filler(filler, buf, (*h)->__controllers, 0))
 				return -EIO;
 		}
 
@@ -1993,7 +1993,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 		initpid = fc->pid;
 	if (!caller_is_in_ancestor(initpid, d->controller, d->cgroup, &nextcg)) {
 		if (nextcg) {
-			ret = DIR_FILLER(filler, buf, nextcg,  NULL, 0);
+			ret = dir_filler(filler, buf, nextcg, 0);
 			free(nextcg);
 			if (ret != 0) {
 				ret = -EIO;
@@ -2005,7 +2005,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	}
 
 	for (i = 0; list && list[i]; i++) {
-		if (DIR_FILLER(filler, buf, list[i]->name, NULL, 0) != 0) {
+		if (dir_filler(filler, buf, list[i]->name, 0) != 0) {
 			ret = -EIO;
 			goto out;
 		}
@@ -2019,7 +2019,7 @@ __lxcfs_fuse_ops int cg_readdir(const char *path, void *buf,
 	}
 	if (clist) {
 		for (i = 0; clist[i]; i++) {
-			if (DIR_FILLER(filler, buf, clist[i], NULL, 0) != 0) {
+			if (dir_filler(filler, buf, clist[i], 0) != 0) {
 				ret = -EIO;
 				goto out;
 			}
