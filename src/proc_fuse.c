@@ -118,16 +118,16 @@ __lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
 				  fuse_fill_dir_t filler, off_t offset,
 				  struct fuse_file_info *fi)
 {
-	if (DIR_FILLER(filler, buf, ".",		NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "..",		NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "cpuinfo",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "meminfo",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "stat",		NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "uptime",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "diskstats",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "swaps",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "loadavg",	NULL, 0) != 0 ||
-	    DIR_FILLER(filler, buf, "slabinfo",	NULL, 0) != 0)
+	if (dir_filler(filler, buf, ".",		0) != 0 ||
+	    dir_filler(filler, buf, "..",		0) != 0 ||
+	    dir_filler(filler, buf, "cpuinfo",		0) != 0 ||
+	    dir_filler(filler, buf, "meminfo",		0) != 0 ||
+	    dir_filler(filler, buf, "stat",		0) != 0 ||
+	    dir_filler(filler, buf, "uptime",		0) != 0 ||
+	    dir_filler(filler, buf, "diskstats",	0) != 0 ||
+	    dir_filler(filler, buf, "swaps",		0) != 0 ||
+	    dir_filler(filler, buf, "loadavg",		0) != 0 ||
+	    dir_filler(filler, buf, "slabinfo",		0) != 0)
 		return -EINVAL;
 
 	return 0;
