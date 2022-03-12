@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+PASS=0
+
+cleanup() {
+    [ "$PASS" = "1" ] || (echo FAIL && exit 1)
+}
+
+trap cleanup EXIT HUP INT TERM
+
+LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
+
+if ! mountpoint -q ${LXCFSDIR}; then
+    echo "lxcfs isn't mounted on ${LXCFSDIR}"
+    exit 1
+fi
+
+echo "==> Setting up memory/cpuset cgroup in lxcfs_test_proc"
+[ ! -d /sys/devices/system/cpu ] && exit 0
+num_cpus="$(getconf _NPROCESSORS_CONF)"
+echo "Detected ${num_cpus} cpus"
+[ "${num_cpus}" != "0" ] 
+
+PASS=1

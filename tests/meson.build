@@ -61,6 +61,18 @@ test_programs += custom_target(
     ])
 
 test_programs += custom_target(
+   'test_sysfs',
+    build_by_default: want_tests != false,
+    input: 'test_sysfs.in',
+    output: 'test_sysfs',
+    command: [
+        meson_render_jinja2,
+        config_h,
+        '@INPUT@',
+        '@OUTPUT@',
+    ])
+
+test_programs += custom_target(
     'test_read_proc.sh',
     build_by_default: want_tests != false,
     input: 'test_read_proc.sh.in',
