@@ -150,11 +150,17 @@ libfuse = dependency('fuse3', required: false)
 if libfuse.found()
     conf.set10('HAVE_FUSE3', true)
     conf.set('FUSE_USE_VERSION', 35)
+    if libfuse.version().version_compare('>=3.10.3')
+	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
+    else
+	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', false)
+    endif
 else
     libfuse = dependency('fuse', version: '>= 2.6')
     if libfuse.found()
         conf.set10('HAVE_FUSE', true)
         conf.set('FUSE_USE_VERSION', 26)
+	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
     endif
 endif
 
