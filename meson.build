@@ -149,7 +149,7 @@ endforeach
 libfuse = dependency('fuse3', required: false)
 if libfuse.found()
     conf.set10('HAVE_FUSE3', true)
-    conf.set('FUSE_USE_VERSION', 30)
+    conf.set('FUSE_USE_VERSION', 35)
 else
     libfuse = dependency('fuse', version: '>= 2.6')
     if libfuse.found()
