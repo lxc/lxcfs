@@ -314,13 +314,13 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	while ((dirent = readdir(dir))) {
 		char *entry = dirent->d_name;
 
-		if (strlen(entry) <= 3)
-			continue;
-		entry += 3;
+		if (strlen(entry) > 3) {
+			entry += 3;
 
-		/* Don't emit entries we already filtered above. */
-		if (isdigit(*entry))
-			continue;
+			/* Don't emit entries we already filtered above. */
+			if (isdigit(*entry))
+				continue;
+		}
 
 		if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
 			return -ENOENT;
