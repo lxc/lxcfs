@@ -269,7 +269,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 {
 	__do_free __u32 *bitarr = NULL;
 	__do_free char *cg = NULL, *cpuset = NULL;
-	__do_closedir DIR *dir = NULL;
+	__do_closedir DIR *dirp = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	__u32 last_set_bit = 0;
 	int ret;
@@ -293,6 +293,10 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 	if (ret)
 		return ret;
 
+	dirp = opendir(path);
+	if (!dirp)
+		return -ENOENT;
+
 	for (__u32 bit = 0; bit <= last_set_bit; bit++) {
 		char cpu[100];
 
@@ -303,15 +307,11 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		if (ret < 0 || (size_t)ret >= sizeof(cpu))
 			continue;
 
-		if (dir_filler(filler, buf, cpu, 0) != 0)
+		if (dir_fillerat(filler, dirp, cpu, buf, 0) != 0)
 			return -ENOENT;
 	}
 
-	dir = opendir(path);
-	if (!dir)
-		return -ENOENT;
-
-	while ((dirent = readdir(dir))) {
+	while ((dirent = readdir(dirp))) {
 		char *entry = dirent->d_name;
 
 		if (strlen(entry) > 3) {
@@ -322,7 +322,7 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 				continue;
 		}
 
-		if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
+		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
 
