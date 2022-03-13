@@ -939,7 +939,9 @@ static void __attribute__((destructor)) lxcfs_exit(void)
 void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 {
 	struct fuse_context *fc = fuse_get_context();
+#if HAVE_FUSE_RETURNS_DT_TYPE
 	can_use_sys_cpu = true;
+#endif
 	has_versioned_opts = true;
 	return fc->private_data;
 }

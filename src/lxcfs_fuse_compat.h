@@ -59,10 +59,10 @@ static inline int dir_fillerat(fuse_fill_dir_t filler, DIR *dp,
 	int ret;
 
 	ret = fstatat(dirfd(dp), name, &st, AT_SYMLINK_NOFOLLOW);
-	if (ret)
-		return DIR_FILLER(filler, buf, name, NULL, off);
+	if (!ret)
+		return DIR_FILLER(filler, buf, name, &st, off);
 
-	return DIR_FILLER(filler, buf, name, &st, off);
+	return DIR_FILLER(filler, buf, name, NULL, off);
 }
 
 #endif /* __LXCFS_FUSE_COMPAT_H */
