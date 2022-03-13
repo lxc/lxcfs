@@ -536,48 +536,40 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 		return -EIO;
 
 	switch (f->type) {
-	case LXC_TYPE_SYS: {
-			if (dir_filler(filler, buf, ".",	0) != 0 ||
-			    dir_filler(filler, buf, "..",	0) != 0 ||
-			    dirent_filler(filler, path, "devices", buf,  0) != 0)
-					return -ENOENT;
-
-			return 0;
-		}
-	case LXC_TYPE_SYS_DEVICES: {
-			if (dir_filler(filler, buf, ".",	0) != 0 ||
-			    dir_filler(filler, buf, "..",   	0) != 0 ||
-			    dirent_filler(filler, path, "system", buf,  0) != 0)
-					return -ENOENT;
-
-			return 0;
-		}
-	case LXC_TYPE_SYS_DEVICES_SYSTEM: {
-			if (dir_filler(filler, buf, ".",    0) != 0 ||
-			    dir_filler(filler, buf, "..",   0) != 0 ||
-			    dirent_filler(filler, path, "cpu", buf,  0) != 0)
-					return -ENOENT;
-
-			return 0;
-		}
+	case LXC_TYPE_SYS:
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dirent_filler(filler, path, "devices", buf, 0) != 0)
+			return -ENOENT;
+		return 0;
+	case LXC_TYPE_SYS_DEVICES:
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dirent_filler(filler, path, "system", buf, 0) != 0)
+			return -ENOENT;
+		return 0;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM:
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dirent_filler(filler, path, "cpu", buf, 0) != 0)
+			return -ENOENT;
+		return 0;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-		if (dir_filler(filler, buf, ".",	0) != 0 ||
-		    dir_filler(filler, buf, "..",	0) != 0)
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0)
 			return -ENOENT;
 
 		return filler_sys_devices_system_cpu(path, buf, filler);
-	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR: {
-			dirp = opathdir(path);
-			if (!dirp)
-				return -errno;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR:
+		dirp = opathdir(path);
+		if (!dirp)
+			return -errno;
 
-			while ((dirent = readdir(dirp))) {
-				if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
-					return -ENOENT;
-			}
-
-			return 0;
+		while ((dirent = readdir(dirp))) {
+			if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
+				return -ENOENT;
 		}
+		return 0;
 	}
 
 	return -EINVAL;
