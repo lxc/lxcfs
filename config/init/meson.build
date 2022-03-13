@@ -12,7 +12,7 @@ if init_script == 'systemd'
             '@OUTPUT@',
         ],
         install: true,
-        install_dir: '/lib/systemd/system')
+        install_dir: join_paths(libdir, 'systemd/system'))
 
 elif init_script == 'upstart'
         install_data('upstart/lxcfs.conf', install_dir: join_paths(sysconfdir, 'init'))
