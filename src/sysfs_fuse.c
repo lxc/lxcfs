@@ -516,7 +516,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				 fuse_fill_dir_t filler, off_t offset,
 				 struct fuse_file_info *fi)
 {
-	__do_closedir DIR *dir = NULL;
+	__do_closedir DIR *dirp = NULL;
 	struct dirent *dirent;
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
@@ -567,12 +567,12 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 
 		return filler_sys_devices_system_cpu(path, buf, filler);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR: {
-			dir = opendir(path);
-			if (!dir)
-				return -ENOENT;
+			dirp = opathdir(path);
+			if (!dirp)
+				return -errno;
 
-			while ((dirent = readdir(dir))) {
-				if (dirent_fillerat(filler, dir, dirent, buf, 0) != 0)
+			while ((dirent = readdir(dirp))) {
+				if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 					return -ENOENT;
 			}
 
