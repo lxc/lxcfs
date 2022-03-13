@@ -11,29 +11,16 @@
 
 #include "memory_utils.h"
 
-#if HAVE_FUSE3
-static inline int dir_filler(fuse_fill_dir_t filler, void *buf,
-			     const char *name, off_t off)
-{
-	return filler(buf, name, NULL, off, FUSE_FILL_DIR_PLUS);
-}
-
-static inline int dirent_filler(fuse_fill_dir_t filler, const char *path,
-				const char *name, void *buf, off_t off)
-{
-	return filler(buf, name, NULL, off, FUSE_FILL_DIR_PLUS);
-}
-
-static inline int dirent_fillerat(fuse_fill_dir_t filler, DIR *dp,
-				  struct dirent *dentry, void *buf, off_t off)
-{
-	return filler(buf, dentry->d_name, NULL, off, FUSE_FILL_DIR_PLUS);
-}
+#ifdef HAVE_FUSE3
+#define DIR_FILLER(F,B,N,S,O) F(B,N,S,O,FUSE_FILL_DIR_PLUS)
 #else
+#define DIR_FILLER(F,B,N,S,O) F(B,N,S,O)
+#endif
+
 static inline int dir_filler(fuse_fill_dir_t filler, void *buf,
 			     const char *name, off_t off)
 {
-	return filler(buf, name, NULL, off);
+	return DIR_FILLER(filler, buf, name, NULL, off);
 }
 
 static inline int dirent_filler(fuse_fill_dir_t filler, const char *path,
@@ -44,9 +31,9 @@ static inline int dirent_filler(fuse_fill_dir_t filler, const char *path,
 
 	dirp = opendir(path);
 	if (dirp && !fstatat(dirfd(dirp), name, &st, AT_SYMLINK_NOFOLLOW))
-		return filler(buf, name, &st, off);
+		return DIR_FILLER(filler, buf, name, &st, off);
 
-	return filler(buf, name, NULL, off);
+	return DIR_FILLER(filler, buf, name, NULL, off);
 }
 
 static inline int dirent_fillerat(fuse_fill_dir_t filler, DIR *dp,
@@ -63,8 +50,19 @@ static inline int dirent_fillerat(fuse_fill_dir_t filler, DIR *dp,
 		};
 	}
 
-	return filler(buf, dentry->d_name, &st, off);
+	return DIR_FILLER(filler, buf, dentry->d_name, &st, off);
 }
-#endif
+static inline int dir_fillerat(fuse_fill_dir_t filler, DIR *dp,
+			       const char *name, void *buf, off_t off)
+{
+	struct stat st;
+	int ret;
+
+	ret = fstatat(dirfd(dp), name, &st, AT_SYMLINK_NOFOLLOW);
+	if (!ret)
+		return DIR_FILLER(filler, buf, name, &st, off);
+
+	return DIR_FILLER(filler, buf, name, NULL, off);
+}
 
 #endif /* __LXCFS_FUSE_COMPAT_H */

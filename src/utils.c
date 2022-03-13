@@ -634,3 +634,19 @@ char *read_file_at(int dfd, const char *fnam, unsigned int o_flags)
 
 	return move_ptr(buf);
 }
+
+DIR *opathdir(const char *path)
+{
+	__do_close int dfd = -EBADF;
+	DIR *dirp;
+
+	dfd = open(path, O_DIRECTORY | O_PATH | O_CLOEXEC | O_NOFOLLOW);
+	if (dfd < 0)
+		return NULL;
+
+	dirp = fdopendir(dfd);
+	if (dirp)
+		move_fd(dfd); /* Transfer ownership to fdopendir(). */
+
+	return dirp;
+}
