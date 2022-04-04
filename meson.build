@@ -146,22 +146,31 @@ foreach ident: [
     conf.set10('HAVE_' + ident[0].to_upper(), have)
 endforeach
 
-libfuse = dependency('fuse3', required: false)
-if libfuse.found()
-    conf.set10('HAVE_FUSE3', true)
-    conf.set('FUSE_USE_VERSION', 35)
-    if libfuse.version().version_compare('>=3.10.3')
-	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
-    else
-	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', false)
+fuse_version = get_option('fuse-version')
+if fuse_version == '3' or fuse_version == 'auto'
+    libfuse = dependency('fuse3', required: false)
+    if libfuse.found()
+        conf.set10('HAVE_FUSE3', true)
+        conf.set('FUSE_USE_VERSION', 35)
+        if libfuse.version().version_compare('>=3.10.3')
+            conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
+        else
+            conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', false)
+        endif
     endif
-else
+endif
+
+if fuse_version == '2' or (not libfuse.found() and fuse_version == 'auto')
     libfuse = dependency('fuse', version: '>= 2.6')
     if libfuse.found()
         conf.set10('HAVE_FUSE', true)
         conf.set('FUSE_USE_VERSION', 26)
-	conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
+        conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
     endif
+endif
+
+if not libfuse.found()
+	error('no usable fuse version found')
 endif
 
 libdl = cc.find_library('dl')

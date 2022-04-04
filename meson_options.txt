@@ -15,3 +15,7 @@ option('init-script', type : 'combo',
 
 option('docs', type : 'boolean', value: 'true',
        description : 'build documentation')
+
+option('fuse-version', type : 'combo',
+       choices : ['auto', '2', '3'], value : 'auto',
+       description : 'fuse version to use')
