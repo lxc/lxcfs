@@ -19,6 +19,12 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
+if [ "{{ HAVE_FUSE_RETURNS_DT_TYPE }}" != "1" ]; then
+    echo "FUSE3 version doesn't support what's needed for sysfs cpu"
+    PASS=1
+    exit 0
+fi
+
 echo "==> Setting up memory/cpuset cgroup in lxcfs_test_proc"
 [ ! -d /sys/devices/system/cpu ] && exit 0
 mount -o bind "${LXCFSDIR}/sys/devices/system/cpu" "/sys/devices/system/cpu"
