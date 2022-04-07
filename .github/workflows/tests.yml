@@ -1,10 +1,11 @@
-name: Build and test
+name: Tests
 on:
   - push
   - pull_request
 
 jobs:
   fuse2:
+    name: FUSE2
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +46,9 @@ jobs:
         run: |
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
   fuse3:
+    name: FUSE3
     strategy:
       fail-fast: false
       matrix:
