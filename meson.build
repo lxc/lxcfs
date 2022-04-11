@@ -71,7 +71,6 @@ init_script = get_option('init-script')
 want_tests = get_option('tests')
 want_docs= get_option('docs')
 
-
 # Build flags.
 possible_cc_flags = [
     '-Wvla',
@@ -307,7 +306,7 @@ status = [
     'lxcfs shared directory:	@0@'.format(lxcfssharedir),
     'lxcfs build root directory:	@0@'.format(project_build_root),
     'lxcfs source root directory:	@0@'.format(project_source_root),
-    'init system:			@0@'.format(init_script),
+    'init system(s):		@0@'.format(init_script),
     'tests:				@0@'.format(want_tests),
     'documentation:			@0@'.format(want_docs),
 ]
