@@ -19,7 +19,7 @@ if init_script == 'systemd'
 elif init_script == 'upstart'
         install_data('upstart/lxcfs.conf', install_dir: join_paths(sysconfdir, 'init'))
 elif init_script == 'openrc'
-        install_data('sysvinit/lxcfs', install_dir: join_paths(sysconfdir, 'rc.d/init.d/lxcfs'))
+        install_data('sysvinit/lxcfs', install_dir: join_paths(sysconfdir, 'rc.d/init.d'))
 elif init_script == 'sysvinit'
-        install_data('sysvinit/lxcfs', install_dir: join_paths(sysconfdir, 'rc.d/init.d/lxcfs'))
+        install_data('sysvinit/lxcfs', install_dir: join_paths(sysconfdir, 'init.d'))
 endif
