@@ -69,7 +69,7 @@ conf.set_quoted('LXCFSTARGETDIR', join_paths(localstatedir, 'lib/lxcfs'))
 # Custom configuration.
 init_script = get_option('init-script')
 want_tests = get_option('tests')
-want_docs= get_option('docs')
+want_docs = get_option('docs')
 
 # Build flags.
 possible_cc_flags = [
