@@ -1091,7 +1091,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	int cpuall_len = snprintf(
 			cpuall,
 			CPUALL_MAX_SIZE,
-			"cpu  "
+			"cpu "
 			" %" PRIu64 /* user_sum */
 			" %" PRIu64 /* nice_sum */
 			" %" PRIu64 /* system_sum */
