@@ -33,14 +33,6 @@
  * format: string format. See printf for details.
  * ...: varargs. See printf for details.
  */
-/*
- * append the given formatted string to *src.
- * src: a pointer to a char* in which to append the formatted string.
- * sz: the number of characters printed so far, minus trailing \0.
- * asz: the allocated size so far
- * format: string format. See printf for details.
- * ...: varargs. See printf for details.
- */
 char *must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...)
 {
 	char tmp[BUF_RESERVE_SIZE];
