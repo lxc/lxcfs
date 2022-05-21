@@ -37,6 +37,7 @@
 #include "lxcfs_fuse_compat.h"
 #include "utils.h"
 
+static off_t get_sysfile_size(const char *which);
 /* Create cpumask from cpulist aka turn:
  *
  *	0,2-3
@@ -191,19 +192,51 @@ static int cpumask(char *posscpus, __u32 **bitarr, __u32 *last_set_bit)
 	return 0;
 }
 
+static int do_cpuset_read(char *cg, char *buf, size_t buflen)
+{
+        __do_free char *cpuset = NULL;
+        struct fuse_context *fc = fuse_get_context();
+        struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
+        int max_cpus = 0;
+        ssize_t total_len = 0;
+        bool use_view;
+
+        cpuset = get_cpuset(cg);
+        if (!cpuset)
+                return 0;
+
+        if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
+                use_view = true;
+        else
+                use_view = false;
+
+        if (use_view)
+                max_cpus = max_cpu_count(cg);
+
+        if (use_view) {
+                if (max_cpus > 1)
+                        total_len = snprintf(buf, buflen, "0-%d\n", max_cpus - 1);
+                else
+                        total_len = snprintf(buf, buflen, "0\n");
+        } else {
+                total_len = snprintf(buf, buflen, "%s\n", cpuset);
+        }
+        if (total_len < 0 || total_len >= buflen)
+                return log_error(0, "Failed to write to cache");
+
+        return total_len;
+}
+
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,
 					      struct fuse_file_info *fi)
 {
-	__do_free char *cg = NULL, *cpuset = NULL;
+	__do_free char *cg = NULL;
 	struct fuse_context *fc = fuse_get_context();
-	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
 	pid_t initpid;
-	int max_cpus = 0;
 	ssize_t total_len = 0;
-	bool use_view;
 
 	if (offset) {
 		size_t left;
@@ -230,28 +263,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
 	prune_init_slice(cg);
 
-	cpuset = get_cpuset(cg);
-	if (!cpuset)
-		return 0;
-
-	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
-		use_view = true;
-	else
-		use_view = false;
-
-	if (use_view)
-		max_cpus = max_cpu_count(cg);
-
-	if (use_view) {
-		if (max_cpus > 1)
-			total_len = snprintf(d->buf, d->buflen, "0-%d\n", max_cpus - 1);
-		else
-			total_len = snprintf(d->buf, d->buflen, "0\n");
-	} else {
-		total_len = snprintf(d->buf, d->buflen, "%s\n", cpuset);
-	}
-	if (total_len < 0 || total_len >= d->buflen)
-		return log_error(0, "Failed to write to cache");
+        total_len = do_cpuset_read(cg, d->buf, d->buflen);
 
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -262,6 +274,27 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	memcpy(buf, d->buf, total_len);
 
 	return total_len;
+}
+
+static int sys_devices_system_cpu_online_getsize(const char *path,
+                                                 struct stat *sb)
+{
+        __do_free char *cg = NULL, *cpuset = NULL;
+        struct fuse_context *fc = fuse_get_context();
+        pid_t initpid;
+        char buf[BUF_RESERVE_SIZE];
+        int buflen = sizeof(buf);
+
+        initpid = lookup_initpid_in_store(fc->pid);
+        if (initpid <= 1 || is_shared_pidns(initpid))
+                initpid = fc->pid;
+
+        cg = get_pid_cgroup(initpid, "cpuset");
+        if (!cg)
+                return get_sysfile_size(path);
+        prune_init_slice(cg);
+
+        return do_cpuset_read(cg, buf, buflen);
 }
 
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
@@ -394,7 +427,7 @@ static int sys_getattr_legacy(const char *path, struct stat *sb)
 	}
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		sb->st_size = get_sysfile_size (path);
+		sb->st_size = sys_devices_system_cpu_online_getsize(path, sb);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -433,7 +466,10 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	}
 
 	if (S_ISREG(st_mode) || S_ISLNK(st_mode)) {
-		sb->st_size = get_sysfile_size(path);
+                if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
+                        sb->st_size = sys_devices_system_cpu_online_getsize(path, sb);
+                else
+                        sb->st_size = get_sysfile_size(path);
 		sb->st_mode = st_mode;
 		sb->st_nlink = 1;
 		return 0;
