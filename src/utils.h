@@ -74,5 +74,5 @@ static inline bool file_exists(const char *f)
 #define PROTECT_OPEN_WITH_TRAILING_SYMLINKS (O_CLOEXEC | O_NOCTTY | O_RDONLY)
 #define PROTECT_OPEN (PROTECT_OPEN_WITH_TRAILING_SYMLINKS | O_NOFOLLOW)
 extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
-
+extern int bitarr_to_list(char *list, __u32 *bitarr, __u32 last_set_bit);
 #endif /* __LXCFS_UTILS_H */

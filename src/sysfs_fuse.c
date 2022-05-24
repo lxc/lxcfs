@@ -416,6 +416,612 @@ static int sys_devices_system_cpu_online_getsize(const char *path)
         return do_cpuset_read(cg, buf, buflen);
 }
 
+static int sys_devices_system_node_online_read(char *buf, size_t size,
+					      off_t offset,
+					      struct fuse_file_info *fi)
+{
+	__do_free char *cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	char *cache = d->buf;
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__u32 last_set_bit = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+
+	if (offset) {
+		size_t left;
+
+		if (!d->cached)
+			return 0;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return read_file_fuse("/sys/devices/system/node/online", buf, size, d);
+	prune_init_slice(cg);
+
+	ret = do_get_online_nodes(cg, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+
+	total_len = snprintf(d->buf, d->buflen, "%s\n", list);
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
+
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if ((size_t)total_len > size)
+		total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int sys_devices_system_node_online_getsize(const char *path)
+{
+	__do_free char *cg = NULL, *cpuset_mems = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	pid_t initpid;
+	__do_free __u32 *bitarr = NULL;
+	__u32 last_set_bit = 0;
+	ssize_t total_len = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+	char buf[BUF_RESERVE_SIZE] = {0};
+	int buflen = sizeof(buf);
+	int ret = 0;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return get_sysfile_size(path);
+	prune_init_slice(cg);
+
+	ret = do_get_online_nodes(cg, &bitarr, &last_set_bit);
+	if (ret < 0)
+		return ret;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+
+	total_len = snprintf(buf, buflen, "%s\n", list);
+	if (total_len < 0 || total_len >= buflen)
+		return log_error(0, "Failed to write to cache");
+
+	return total_len;
+}
+
+/*
+ * Get nodes have cpus
+ *
+ * Nodes list from do_get_online_nodes_from_cpuset_cpus is bitwise-anded
+ * with nodes list from /sys/devices/system/node/has_cpu.
+ */
+static int sys_devices_system_node_has_cpu_read(char *buf, size_t size,
+					        off_t offset,
+					        struct fuse_file_info *fi)
+{
+	__do_free char *cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	char *cache = d->buf;
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_has_cpu = NULL;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_has_cpu = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+	__do_free char *has_cpu = NULL;
+
+	if (offset) {
+		size_t left;
+
+		if (!d->cached)
+			return 0;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return read_file_fuse("/sys/devices/system/node/has_cpu", buf, size, d);
+	prune_init_slice(cg);
+
+	ret = do_get_online_nodes_from_cpuset_cpus(cg, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	has_cpu = read_file_at(-EBADF, "/sys/devices/system/node/has_cpu", PROTECT_OPEN);
+	if (!has_cpu)
+		return -1;
+
+	ret = nodemask(has_cpu, &bitarr_has_cpu, &last_set_bit_has_cpu);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_has_cpu ?
+		       last_set_bit : last_set_bit_has_cpu;
+	*bitarr &= *bitarr_has_cpu;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+
+	total_len = snprintf(d->buf, d->buflen, "%s\n", list);
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
+
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if ((size_t)total_len > size)
+		total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int sys_devices_system_node_has_cpu_getsize(const char *path)
+{
+	__do_free char *cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_has_cpu = NULL;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_has_cpu = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+	__do_free char *has_cpu = NULL;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return get_sysfile_size("/sys/devices/system/node/has_cpu");
+	prune_init_slice(cg);
+
+	ret = do_get_online_nodes_from_cpuset_cpus(cg, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	has_cpu = read_file_at(-EBADF, "/sys/devices/system/node/has_cpu", PROTECT_OPEN);
+	if (!has_cpu)
+		return -1;
+
+	ret = nodemask(has_cpu, &bitarr_has_cpu, &last_set_bit_has_cpu);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_has_cpu ?
+		       last_set_bit : last_set_bit_has_cpu;
+	*bitarr &= *bitarr_has_cpu;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+	total_len = ret + 1;
+
+	return total_len;
+}
+
+/*
+ * Get nodes have memorys
+ *
+ * Nodes list from cpuset.mems or cpuset.mems.effective is bitwise-anded
+ * with nodes list from /sys/devices/system/node/has_memory.
+ */
+static int sys_devices_system_node_has_memory_read(char *buf, size_t size,
+					           off_t offset,
+					           struct fuse_file_info *fi)
+{
+	__do_free char *cg = NULL;
+	__do_free char *cpuset_mems = NULL;
+	__do_free char *has_memory = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	char *cache = d->buf;
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_has_memory = NULL;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_has_memory = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+
+	if (offset) {
+		size_t left;
+
+		if (!d->cached)
+			return 0;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return read_file_fuse("/sys/devices/system/node/has_memory", buf, size, d);
+	prune_init_slice(cg);
+
+	cpuset_mems = get_cpuset_mems(cg);
+	if (!cpuset_mems)
+		return 0;
+
+	ret = nodemask(cpuset_mems, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	has_memory = read_file_at(-EBADF, "/sys/devices/system/node/has_memory", PROTECT_OPEN);
+	if (!has_memory)
+		return -1;
+
+	ret = nodemask(has_memory, &bitarr_has_memory, &last_set_bit_has_memory);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_has_memory ?
+		       last_set_bit : last_set_bit_has_memory;
+	*bitarr &= *bitarr_has_memory;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+
+	total_len = snprintf(d->buf, d->buflen, "%s\n", list);
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
+
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if ((size_t)total_len > size)
+		total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int sys_devices_system_node_has_memory_normal_memory_getsize(const char *path)
+{
+	__do_free char *cg = NULL;
+	__do_free char *cpuset_mems = NULL;
+	__do_free char *has_memory = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_has_memory = NULL;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_has_memory = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return get_sysfile_size(path);
+	prune_init_slice(cg);
+
+	cpuset_mems = get_cpuset_mems(cg);
+	if (!cpuset_mems)
+		return 0;
+
+	ret = nodemask(cpuset_mems, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	has_memory = read_file_at(-EBADF, path, PROTECT_OPEN);
+	if (!has_memory)
+		return -1;
+
+	ret = nodemask(has_memory, &bitarr_has_memory, &last_set_bit_has_memory);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_has_memory ?
+		       last_set_bit : last_set_bit_has_memory;
+	*bitarr &= *bitarr_has_memory;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+	total_len = ret + 1;
+
+	return total_len;
+}
+
+/*
+ * Get nodes have normal memorys
+ *
+ * Nodes list from cpuset.mems or cpuset.mems.effective is bitwise-anded
+ * with nodes list from /sys/devices/system/node/has_normal_memory.
+ */
+static int sys_devices_system_node_has_normal_memory_read(char *buf, size_t size,
+					           off_t offset,
+					           struct fuse_file_info *fi)
+{
+	__do_free char *cg = NULL;
+	__do_free char *cpuset_mems = NULL;
+	__do_free char *has_normal_memory = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	char *cache = d->buf;
+	pid_t initpid;
+	ssize_t total_len = 0;
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_has_normal_memory = NULL;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_has_normal_memory = 0;
+	int ret = 0;
+	char list[BUF_RESERVE_SIZE] = {0};
+
+	if (offset) {
+		size_t left;
+
+		if (!d->cached)
+			return 0;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return read_file_fuse("/sys/devices/system/node/has_normal_memory", buf, size, d);
+	prune_init_slice(cg);
+
+	cpuset_mems = get_cpuset_mems(cg);
+	if (!cpuset_mems)
+		return 0;
+
+	ret = nodemask(cpuset_mems, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	has_normal_memory = read_file_at(-EBADF, "/sys/devices/system/node/has_normal_memory", PROTECT_OPEN);
+	if (!has_normal_memory)
+		return -1;
+
+	ret = nodemask(has_normal_memory, &bitarr_has_normal_memory, &last_set_bit_has_normal_memory);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_has_normal_memory ?
+		       last_set_bit : last_set_bit_has_normal_memory;
+	*bitarr &= *bitarr_has_normal_memory;
+
+	ret = bitarr_to_list(list, bitarr, last_set_bit);
+	if (ret < 0 || (size_t)ret >= sizeof(list))
+		return log_error(0, "Failed to write to cache");
+
+	total_len = snprintf(d->buf, d->buflen, "%s\n", list);
+	if (total_len < 0 || total_len >= d->buflen)
+		return log_error(0, "Failed to write to cache");
+
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if ((size_t)total_len > size)
+		total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int do_cpulist_cpumap_read(const char *path, char *cg, char *buf, size_t buflen)
+{
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_cpulist = NULL;
+	__do_free char *cpuset = NULL;
+	__do_free char *cpulist = NULL;
+	ssize_t total_len = 0;
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_cpulist = 0;
+	__u32 ndwords = 0;
+	int path_len = strlen(path);
+	int ret;
+	char file_path[BUF_RESERVE_SIZE] = {0}, cpulistmap[BUF_RESERVE_SIZE] = {0};
+	bool cpumap;
+	__u32 i, pos = 0;
+
+	cpuset = get_cpuset(cg);
+	if (!cpuset)
+		return 0;
+
+	ret = cpumask(cpuset, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	if((strcmp(path + path_len - 6, "cpumap") == 0)) {
+		strncpy(file_path, path, path_len -6);
+		strcpy(file_path + path_len - 6, "cpulist");
+		cpumap = true;
+	}
+	else {
+		strcpy(file_path, path);
+		cpumap = false;
+	}
+
+        if (file_exists(file_path)) {
+                cpulist = read_file_at(-EBADF, file_path, PROTECT_OPEN);
+                if (!cpulist)
+                        return -1;
+
+                if (!isdigit(cpulist[0]))
+                        free_disarm(cpulist);
+        } else {
+		log_error(0, "/sys/devices/system/node/node*/cpulist does not exist");
+        }
+
+	ret = cpumask(cpulist, &bitarr_cpulist, &last_set_bit_cpulist);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_cpulist ?
+		       last_set_bit : last_set_bit_cpulist;
+	ndwords = last_set_bit / 32 + 1;
+	for (i = 0; i < ndwords; i++)
+		*(bitarr + i) &= *(bitarr_cpulist + i);
+
+	if (cpumap) {
+		for (i = 0; i < ndwords; i++) {
+			*(bitarr + ndwords - 1 - i) &= *(bitarr_cpulist + ndwords - 1 - i);
+			if (i)
+				pos += sprintf(cpulistmap + pos, "%08x,", *(bitarr + ndwords - 1 - i));
+			else
+				pos += sprintf(cpulistmap, "%x,", *(bitarr + ndwords - 1 - i));
+		}
+		cpulistmap[strlen(cpulistmap) - 1] = '\0';
+	}
+	else {
+		ret = bitarr_to_list(cpulistmap, bitarr, last_set_bit);
+		if (ret < 0 || (size_t)ret >= sizeof(cpulistmap))
+			return log_error(0, "Failed to write to cache");
+	}
+
+	total_len = snprintf(buf, buflen, "%s\n", cpulistmap);
+	if (total_len < 0 || (size_t)total_len >= buflen)
+		return log_error(0, "Failed to write to cache");
+
+	return total_len;
+}
+
+static int sys_devices_system_node_nodex_cpulist_cpumap_read(const char *path, char *buf, size_t size,
+					                     off_t offset, struct fuse_file_info *fi)
+{
+	__do_free char *cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	char *cache = d->buf;
+	pid_t initpid;
+	ssize_t total_len = 0;
+
+	if (offset) {
+		size_t left;
+
+		if (!d->cached)
+			return 0;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return read_file_fuse(path, buf, size, d);
+	prune_init_slice(cg);
+
+	total_len = do_cpulist_cpumap_read(path, cg, d->buf, d->buflen);
+	d->size = (int)total_len;
+	d->cached = 1;
+
+	if ((size_t)total_len > size)
+		total_len = size;
+
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int sys_devices_system_node_nodex_cpulist_cpumap_getsize(const char *path)
+{
+	__do_free char *cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	pid_t initpid;
+	char buf[BUF_RESERVE_SIZE];
+	int buflen = sizeof(buf);
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return get_sysfile_size(path);
+	prune_init_slice(cg);
+
+	return do_cpulist_cpumap_read(path, cg, buf, buflen);
+}
+
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
 					 fuse_fill_dir_t filler)
 {
@@ -725,6 +1331,40 @@ static int sys_getattr_legacy(const char *path, struct stat *sb)
 		return 0;
 	}
 
+	if (strcmp(path, "/sys/devices/system/node") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/node/online") == 0) {
+		sb->st_size = sys_devices_system_node_online_getsize(path);
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/node/has_cpu") == 0) {
+		sb->st_size = sys_devices_system_node_has_cpu_getsize(path);
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/node/has_memory") == 0) {
+		sb->st_size = sys_devices_system_node_has_memory_normal_memory_getsize(path);
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
+	if (strcmp(path, "/sys/devices/system/node/has_normal_memory") == 0) {
+		sb->st_size = sys_devices_system_node_has_memory_normal_memory_getsize(path);
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
+
 	return -ENOENT;
 }
 
@@ -733,6 +1373,7 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	int ret;
 	struct timespec now;
 	mode_t st_mode;
+	int path_len = strlen(path);
 
 	if (!liblxcfs_functional())
 		return -EIO;
@@ -760,6 +1401,19 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	if (S_ISREG(st_mode) || S_ISLNK(st_mode)) {
                 if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
                         sb->st_size = sys_devices_system_cpu_online_getsize(path);
+                else if (strcmp(path, "/sys/devices/system/node/online") == 0)
+                        sb->st_size = sys_devices_system_node_online_getsize(path);
+                else if (strcmp(path, "/sys/devices/system/node/has_cpu") == 0)
+                        sb->st_size = sys_devices_system_node_has_cpu_getsize(path);
+                else if (strcmp(path, "/sys/devices/system/node/has_memory") == 0)
+                        sb->st_size = sys_devices_system_node_has_memory_normal_memory_getsize(path);
+                else if (strcmp(path, "/sys/devices/system/node/has_normal_memory") == 0)
+                        sb->st_size = sys_devices_system_node_has_memory_normal_memory_getsize(path);
+                else if ((strncmp(path, "/sys/devices/system/node/node",
+                                  STRLITERALLEN("/sys/devices/system/node/node")) == 0) &&
+                         ((strcmp(path + path_len - strlen("cpulist"), "cpulist") == 0) ||
+                          (strcmp(path + path_len - strlen("cpumap"), "cpumap") == 0)))
+                        sb->st_size = sys_devices_system_node_nodex_cpulist_cpumap_getsize(path);
                 else
                         sb->st_size = get_sysfile_size(path);
 		sb->st_mode = st_mode;
@@ -1179,11 +1833,37 @@ static int sys_read_legacy(const char *path, char *buf, size_t size,
 
 		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
 						  buf, size, offset, f);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_ONLINE:
+		if (liblxcfs_functional())
+			return sys_devices_system_node_online_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_ONLINE_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_CPU:
+		if (liblxcfs_functional())
+			return sys_devices_system_node_has_cpu_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_CPU_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_MEMORY:
+		if (liblxcfs_functional())
+			return sys_devices_system_node_has_memory_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_MEMORY_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_NORMAL_MEMORY:
+		if (liblxcfs_functional())
+			return sys_devices_system_node_has_normal_memory_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_NORMAL_MEMORY_PATH,
+						  buf, size, offset, f);
 	case LXC_TYPE_SYS_DEVICES:
 		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:
 		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
+		break;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE:
 		break;
 	}
 
@@ -1204,7 +1884,19 @@ __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
 	switch (f->type) {
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
 		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_ONLINE:
+		return sys_devices_system_node_online_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_CPU:
+		return sys_devices_system_node_has_cpu_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_MEMORY:
+		return sys_devices_system_node_has_memory_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_NORMAL_MEMORY:
+		return sys_devices_system_node_has_normal_memory_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_NODEX_CPULIST:
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_NODEX_CPUMAP:
+		return sys_devices_system_node_nodex_cpulist_cpumap_read(path, buf, size, offset, fi);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE:
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_SUBFILE:
 		return read_file_fuse_with_offset(path, buf, size, offset, f);
 	}
 

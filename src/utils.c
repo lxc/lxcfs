@@ -642,3 +642,46 @@ DIR *opathdir(const char *path)
 
 	return dirp;
 }
+
+/* Convert bitarray to a list */
+int bitarr_to_list(char *list, __u32 *bitarr, __u32 last_set_bit)
+{
+        int pos = 0;
+        int pos1, pos2, pos3, pos4;
+	int ret = 0;
+
+        for (__u32 bit = 0; bit <= last_set_bit; bit++) {
+                if (is_set(bit, bitarr)) {
+                        if (bit && is_set(bit - 1, bitarr))
+                                list[pos - 1] = '-';
+                        ret = snprintf(list + pos, sizeof(list), "%u,", bit);
+                        if (ret < 0 || (size_t)ret >= sizeof(list))
+                                return -1;
+                        pos += ret;
+                }
+        }
+
+        for (pos1 = 0; list[pos1] != '\0';) {
+                if (list[pos1] != '-') {
+                        pos1++;
+                        continue;
+                }
+                for (pos2 = pos1 + 1;; pos2++) {
+                        if (list[pos2] == '-') {
+                                for (pos3 = pos1, pos4 = pos2; list[pos4] != '\0';)
+                                        list[pos3++] = list[pos4++];
+                                list[pos3] = '\0';
+                                break;
+                        }
+                        if (list[pos2] == ',') {
+                                pos1 = pos2;
+                                break;
+                        }
+                }
+                if (list[pos2] == '\0')
+                        break;
+        }
+	list[--pos] = '\0';
+
+        return pos;
+}
