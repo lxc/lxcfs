@@ -122,3 +122,19 @@ char *get_cpuset(const char *cg)
 
 	return value;
 }
+
+/*
+ * Read the cpuset.mems for cg
+ * Return the answer in a newly allocated string which must be freed
+ */
+char *get_cpuset_mems(const char *cg)
+{
+	char *value = NULL;
+	int ret;
+
+	ret = cgroup_ops->get_cpuset_mems(cgroup_ops, cg, &value);
+	if (ret < 0)
+		return NULL;
+
+	return value;
+}
