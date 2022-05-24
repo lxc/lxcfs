@@ -498,7 +498,8 @@ __lxcfs_fuse_ops int sys_write(const char *path, const char *buf, size_t size,
 	if (!liblxcfs_functional())
 		return -EIO;
 
-	if (f->type != LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE)
+	if (f->type != LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE &&
+            f->type != LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_SUBFILE)
 		return -EINVAL;
 
 	fd = open(path, O_WRONLY | O_CLOEXEC);
@@ -742,6 +743,19 @@ __lxcfs_fuse_ops int sys_opendir(const char *path, struct fuse_file_info *fi)
 
 		if (S_ISDIR(st_mode))
 			type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR;
+	} else if (strcmp(path, "/sys/devices/system/node") == 0) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE;
+	} else if (strncmp(path, "/sys/devices/system/node/",
+			   STRLITERALLEN("/sys/devices/system/node/")) == 0) {
+		int ret;
+		mode_t st_mode;
+
+		ret = get_st_mode(path, &st_mode);
+		if (ret)
+			return ret;
+
+		if (S_ISDIR(st_mode))
+			type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_SUBDIR;
 	}
 	if (type == -1)
 		return -ENOENT;
@@ -772,6 +786,10 @@ static int sys_access_legacy(const char *path, int mask)
 		return 0;
 
 	if (strcmp(path, "/sys/devices/system/cpu") == 0 &&
+	    access(path, R_OK) == 0)
+		return 0;
+
+	if (strcmp(path, "/sys/devices/system/node") == 0 &&
 	    access(path, R_OK) == 0)
 		return 0;
 
