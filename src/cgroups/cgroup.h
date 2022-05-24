@@ -154,6 +154,8 @@ struct cgroup_ops {
 	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
 			       char **value);
 	bool (*can_use_cpuview)(struct cgroup_ops *ops);
+	int (*get_cpuset_mems)(struct cgroup_ops *ops, const char *cgroup,
+			       char **value);
 
 	/* io */
 	int (*get_io_service_bytes)(struct cgroup_ops *ops, const char *cgroup,
@@ -211,5 +213,6 @@ static inline int get_cgroup_fd(const char *controller)
 extern char *get_pid_cgroup(pid_t pid, const char *contrl);
 
 extern char *get_cpuset(const char *cg);
+extern char *get_cpuset_mems(const char *cg);
 
 #endif
