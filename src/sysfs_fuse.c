@@ -643,6 +643,16 @@ static int sys_open_legacy(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
+	if (strcmp(path, "/sys/devices/system/node") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
+	if (strcmp(path, "/sys/devices/system/node/online") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_ONLINE;
+	if (strcmp(path, "/sys/devices/system/node/has_cpu") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_CPU;
+	if (strcmp(path, "/sys/devices/system/node/has_memory") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_MEMORY;
+	if (strcmp(path, "/sys/devices/system/node/has_normal_memory") == 0)
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_NORMAL_MEMORY;
 	if (type == -1)
 		return -ENOENT;
 
@@ -671,6 +681,7 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 {
 	__do_free struct file_info *info = NULL;
 	int type = -1;
+	int path_len = strlen(path);
 
 	if (!liblxcfs_functional())
 		return -EIO;
@@ -680,6 +691,22 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
+	} else if (strcmp(path, "/sys/devices/system/node/online") == 0) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_ONLINE;
+	} else if (strcmp(path, "/sys/devices/system/node/has_cpu") == 0) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_CPU;
+	} else if (strcmp(path, "/sys/devices/system/node/has_memory") == 0) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_MEMORY;
+	} else if (strcmp(path, "/sys/devices/system/node/has_normal_memory") == 0) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_HAS_NORMAL_MEMORY;
+	} else if ((strncmp(path, "/sys/devices/system/node/node",
+			    STRLITERALLEN("/sys/devices/system/node/node")) == 0) &&
+		   (strcmp(path + path_len - strlen("cpulist"), "cpulist") == 0)) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_NODEX_CPULIST;
+	} else if ((strncmp(path, "/sys/devices/system/node/node",
+			    STRLITERALLEN("/sys/devices/system/node/node")) == 0) &&
+		   (strcmp(path + path_len - strlen("cpumap"), "cpumap") == 0)) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_NODEX_CPUMAP;
 	} else if (strncmp(path, "/sys/devices/system/cpu/",
 			   STRLITERALLEN("/sys/devices/system/cpu/")) == 0) {
 		int ret;
@@ -691,6 +718,17 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 
 		if (S_ISREG(st_mode))
 			type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE;
+	} else if (strncmp(path, "/sys/devices/system/node/",
+			   STRLITERALLEN("/sys/devices/system/node/")) == 0) {
+		int ret;
+		mode_t st_mode;
+
+		ret = get_st_mode(path, &st_mode);
+		if (ret)
+			return ret;
+
+		if (S_ISREG(st_mode))
+			type = LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_SUBFILE;
 	}
 	if (type == -1)
 		return -ENOENT;
