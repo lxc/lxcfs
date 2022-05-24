@@ -79,4 +79,5 @@ extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
 extern int get_task_personality(pid_t pid, __u32 *personality);
 extern int get_host_personality(__u32 *personality);
 
+extern int bitarr_to_list(char *list, __u32 *bitarr, __u32 last_set_bit);
 #endif /* __LXCFS_UTILS_H */
