@@ -38,6 +38,22 @@
 #include "utils.h"
 
 static off_t get_sysfile_size(const char *which);
+
+static int nodemask(char *possnodes, __u32 **bitarr, __u32 *last_set_bit)
+{
+	__do_free __u32 *possmask = NULL;
+	int ret;
+	__u32 poss_last_set_bit = 0;
+
+	ret = lxc_cpumask(possnodes, &possmask, &poss_last_set_bit);
+	if (ret)
+		return ret;
+
+	*bitarr = move_ptr(possmask);
+	*last_set_bit = poss_last_set_bit;
+	return 0;
+}
+
 static int do_cpuset_read(char *cg, char *cpu_cg, char *buf, size_t buflen)
 {
         __do_free char *cpuset = NULL;
@@ -71,6 +87,111 @@ static int do_cpuset_read(char *cg, char *cpu_cg, char *buf, size_t buflen)
                 return log_error(0, "Failed to write to cache");
 
         return total_len;
+}
+
+/*
+ * Get online nodes from cpuset.cpus or cpuset.cpus.effective
+ *
+ * Traverse nodes listed by /sys/devices/system/node/online. If
+ * cpuX specified by cpuset.cpus or cpuset.cpus.effective is listed
+ * in /sys/devices/system/node/nodeY/cpulist, nodeY is online.
+ */
+static int do_get_online_nodes_from_cpuset_cpus(char *cg, __u32 **bitarr, __u32 *last_set_bit)
+{
+        __do_free char *cpuset_cpus = NULL;
+        __do_free char *node_online = NULL;
+        __do_free char *node_cpulist = NULL;
+        __do_free __u32 *bitarr_cpus = NULL;
+        __do_free __u32 *bitarr_node_online = NULL;
+        __do_free __u32 *bitarr_node_cpulist = NULL;
+        __u32 *arr_u32 = zalloc(sizeof(__u32));
+        __u32 last_set_bit_cpus = 0;
+        __u32 last_set_bit_node_online = 0;
+        __u32 last_set_bit_node_cpulist = 0;
+        __u32 last_set_bit_node_from_cpuset_cpus = 0;
+        char node_cpulist_path[BUF_RESERVE_SIZE] = {};
+        int ret = 0;
+
+        cpuset_cpus = get_cpuset(cg);
+        if (!cpuset_cpus)
+                return 0;
+
+        ret = cpumask(cpuset_cpus, &bitarr_cpus, &last_set_bit_cpus);
+        if (ret)
+                return ret;
+
+        node_online = read_file_at(-EBADF, "/sys/devices/system/node/online", PROTECT_OPEN);
+        if (!node_online)
+                return -1;
+
+        ret = nodemask(node_online, &bitarr_node_online, &last_set_bit_node_online);
+        if (ret)
+                return ret;
+
+        for (__u32 bit = 0; bit <= last_set_bit_node_online; bit++) {
+
+                ret = snprintf(node_cpulist_path, sizeof(node_cpulist_path),
+                               "/sys/devices/system/node/node%u/cpulist", bit);
+                if (ret < 0 || (size_t)ret >= sizeof(node_cpulist_path))
+                        continue;
+
+                node_cpulist = read_file_at(-EBADF, node_cpulist_path, PROTECT_OPEN);
+                if (!node_cpulist)
+                        return -1;
+
+                ret = cpumask(node_cpulist, &bitarr_node_cpulist, &last_set_bit_node_cpulist);
+                if (ret)
+                        return ret;
+
+                for (__u32 bit_cpu = 0; bit_cpu <= last_set_bit_cpus; bit_cpu++) {
+                        if (is_set(bit_cpu, bitarr_cpus) && is_set(bit_cpu, bitarr_node_cpulist)) {
+                                set_bit(bit, arr_u32);
+                                last_set_bit_node_from_cpuset_cpus = bit;
+                                break;
+                        }
+                }
+        }
+        *last_set_bit = last_set_bit_node_from_cpuset_cpus;
+        *bitarr = move_ptr(arr_u32);
+
+        return ret;
+}
+
+/*
+ * Get online nodes
+ *
+ * Online nodes come from:
+ * - cpuset.cpus or cpuset.cpus.effective, indicating which nodes have cpus online
+ * - cpuset.mems or cpuset.mems.effective, indecating which nodes have mems online
+ */
+static int do_get_online_nodes(char *cg, __u32 **bitarr, __u32 *last_set_bit)
+{
+        __do_free char *cpuset_mems = NULL;
+        __do_free __u32 *bitarr_mems = NULL;
+        __do_free __u32 *bitarr_node_from_cpuset_cpus = NULL;
+        __u32 last_set_bit_mems = 0;
+        __u32 last_set_bit_node_from_cpuset_cpus = 0;
+        int ret = 0;
+
+        cpuset_mems = get_cpuset_mems(cg);
+        if (!cpuset_mems)
+                return 0;
+
+        ret = nodemask(cpuset_mems, &bitarr_mems, &last_set_bit_mems);
+        if (ret)
+                return ret;
+
+        ret = do_get_online_nodes_from_cpuset_cpus(cg, &bitarr_node_from_cpuset_cpus,
+						   &last_set_bit_node_from_cpuset_cpus);
+        if (ret)
+                return ret;
+
+        *last_set_bit = last_set_bit_mems > last_set_bit_node_from_cpuset_cpus ?
+                        last_set_bit_mems : last_set_bit_node_from_cpuset_cpus;
+        *bitarr_node_from_cpuset_cpus |= *bitarr_mems;
+        *bitarr = move_ptr(bitarr_node_from_cpuset_cpus);
+
+        return ret;
 }
 
 static int sys_devices_system_cpu_online_read(char *buf, size_t size,
@@ -160,6 +281,179 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 		return -ENOENT;
 
 	while ((dirent = readdir(dirp))) {
+		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
+			return -ENOENT;
+	}
+
+	return 0;
+}
+
+static int filler_sys_devices_system_node(const char *path, void *buf,
+					  fuse_fill_dir_t filler)
+{
+	__do_free char *cg = NULL;
+	__do_closedir DIR *dirp = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	__do_free __u32 *bitarr = NULL;
+	__u32 last_set_bit = 0;
+	int ret;
+	struct dirent *dirent;
+	pid_t initpid;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return 0;
+	prune_init_slice(cg);
+
+	ret = do_get_online_nodes(cg, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	dirp = opendir(path);
+	if (!dirp)
+		return -ENOENT;
+
+	for (__u32 bit = 0; bit <= last_set_bit; bit++) {
+		char node[100];
+
+		if (!is_set(bit, bitarr))
+			continue;
+
+		ret = snprintf(node, sizeof(node), "node%u", bit);
+		if (ret < 0 || (size_t)ret >= sizeof(node))
+			continue;
+
+		if (dir_fillerat(filler, dirp, node, buf, 0) != 0)
+			return -ENOENT;
+	}
+
+	while ((dirent = readdir(dirp))) {
+		char *entry = dirent->d_name;
+
+		if (strlen(entry) <= 4)
+			continue;
+		entry += 4;
+
+		/* Don't emit entries we already filtered above. */
+		if (isdigit(*entry))
+			continue;
+
+		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
+			return -ENOENT;
+	}
+
+	return 0;
+}
+
+static int filler_sys_devices_system_node_nodex(const char *path, void *buf,
+					        fuse_fill_dir_t filler)
+{
+	__do_free __u32 *bitarr = NULL;
+	__do_free __u32 *bitarr_mems = NULL;
+	__do_free __u32 *bitarr_cpulist = NULL;
+	__do_free char *cpulist = NULL;
+	__do_free char *cg = NULL, *cpuset = NULL, *cpuset_mems = NULL;
+	__do_closedir DIR *dirp = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	__u32 last_set_bit = 0;
+	__u32 last_set_bit_mems = 0;
+	__u32 last_set_bit_cpulist = 0;
+	__u32 ndwords = 0;
+	int ret;
+	struct dirent *dirent;
+	pid_t initpid;
+	char cpulist_path[100];
+	bool nomem = false;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return 0;
+	prune_init_slice(cg);
+
+	cpuset = get_cpuset(cg);
+	if (!cpuset)
+		return 0;
+
+	ret = cpumask(cpuset, &bitarr, &last_set_bit);
+	if (ret)
+		return ret;
+
+	cpuset_mems = get_cpuset_mems(cg);
+	if (!cpuset_mems)
+		return 0;
+
+	ret = nodemask(cpuset_mems, &bitarr_mems, &last_set_bit_mems);
+	if (ret)
+		return ret;
+	int nodex = atoi(path + strlen("/sys/devices/system/node/node"));
+	if (!is_set(nodex, bitarr_mems))
+		nomem = true;
+
+	ret = snprintf(cpulist_path, sizeof(cpulist_path), "%s/cpulist", path);
+	if (ret < 0 || (size_t)ret >= sizeof(cpulist_path))
+		log_error(0, "Failed to write to cpulist buf");
+
+        if (file_exists(cpulist_path)) {
+                cpulist = read_file_at(-EBADF, cpulist_path, PROTECT_OPEN);
+                if (!cpulist)
+                        return -1;
+
+                if (!isdigit(cpulist[0]))
+                        free_disarm(cpulist);
+        } else {
+		log_error(0, "/sys/devices/system/node/node*/cpulist does not exist");
+        }
+
+        if (cpulist)
+                ret = cpumask(cpulist, &bitarr_cpulist, &last_set_bit_cpulist);
+	if (ret)
+		return ret;
+
+	last_set_bit = last_set_bit < last_set_bit_cpulist ? last_set_bit : last_set_bit_cpulist;
+	ndwords = last_set_bit / 32 + 1;
+	while (ndwords--)
+		*(bitarr+ndwords) &= *(bitarr_cpulist+ndwords);
+
+	dirp = opendir(path);
+	if (!dirp)
+		return -ENOENT;
+
+	for (__u32 bit = 0; bit <= last_set_bit; bit++) {
+		char cpu[100];
+
+		if (!is_set(bit, bitarr))
+			continue;
+
+		ret = snprintf(cpu, sizeof(cpu), "cpu%u", bit);
+		if (ret < 0 || (size_t)ret >= sizeof(cpu))
+			continue;
+
+		if (dir_fillerat(filler, dirp, cpu, buf, 0) != 0)
+			return -ENOENT;
+	}
+
+	while ((dirent = readdir(dirp))) {
+		char *entry = dirent->d_name;
+
+		if (nomem && (strncmp(entry, "cpu", strlen("cpu")) != 0))
+			continue;
+
+		if (strlen(entry) <= 3)
+			continue;
+		entry += 3;
+
+		/* Don't emit entries we already filtered above. */
+		if (isdigit(*entry))
+			continue;
+
 		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
@@ -333,7 +627,8 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys/devices/system") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dirent_filler(filler, path, "cpu", buf,  0) != 0)
+		    dirent_filler(filler, path, "cpu", buf,  0) != 0 ||
+		    dirent_filler(filler, path, "node", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -342,6 +637,17 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
 		    dirent_filler(filler, path, "online", buf,  0) != 0)
+			return -ENOENT;
+
+		return 0;
+	}
+	if (strcmp(path, "/sys/devices/system/node") == 0) {
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "online", buf,  0) != 0 ||
+		    dirent_filler(filler, path, "has_cpu", buf,  0) != 0 ||
+		    dirent_filler(filler, path, "has_memory", buf,  0) != 0 ||
+		    dirent_filler(filler, path, "has_normal_memory", buf,  0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -389,7 +695,8 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:
 		if (dir_filler(filler, buf, ".", 0) != 0 ||
 		    dir_filler(filler, buf, "..", 0) != 0 ||
-		    dirent_filler(filler, path, "cpu", buf, 0) != 0)
+		    dirent_filler(filler, path, "cpu", buf, 0) != 0 ||
+		    dirent_filler(filler, path, "node", buf, 0) != 0)
 			return -ENOENT;
 		return 0;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
@@ -408,6 +715,18 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 				return -ENOENT;
 		}
 		return 0;
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE:
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0)
+			return -ENOENT;
+
+		return filler_sys_devices_system_node(path, buf, filler);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_NODE_SUBDIR:
+		if (dir_filler(filler, buf, ".", 0) != 0 ||
+		    dir_filler(filler, buf, "..", 0) != 0)
+			return -ENOENT;
+
+		return filler_sys_devices_system_node_nodex(path, buf, filler);
 	}
 
 	return -EINVAL;
