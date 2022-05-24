@@ -221,7 +221,7 @@ static int do_cpuset_read(char *cg, char *buf, size_t buflen)
         } else {
                 total_len = snprintf(buf, buflen, "%s\n", cpuset);
         }
-        if (total_len < 0 || total_len >= buflen)
+        if (total_len < 0 || (size_t)total_len >= buflen)
                 return log_error(0, "Failed to write to cache");
 
         return total_len;
@@ -276,10 +276,9 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	return total_len;
 }
 
-static int sys_devices_system_cpu_online_getsize(const char *path,
-                                                 struct stat *sb)
+static int sys_devices_system_cpu_online_getsize(const char *path)
 {
-        __do_free char *cg = NULL, *cpuset = NULL;
+        __do_free char *cg = NULL;
         struct fuse_context *fc = fuse_get_context();
         pid_t initpid;
         char buf[BUF_RESERVE_SIZE];
@@ -427,7 +426,7 @@ static int sys_getattr_legacy(const char *path, struct stat *sb)
 	}
 
 	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		sb->st_size = sys_devices_system_cpu_online_getsize(path, sb);
+		sb->st_size = sys_devices_system_cpu_online_getsize(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -467,7 +466,7 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 
 	if (S_ISREG(st_mode) || S_ISLNK(st_mode)) {
                 if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
-                        sb->st_size = sys_devices_system_cpu_online_getsize(path, sb);
+                        sb->st_size = sys_devices_system_cpu_online_getsize(path);
                 else
                         sb->st_size = get_sysfile_size(path);
 		sb->st_mode = st_mode;
