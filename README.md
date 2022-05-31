@@ -17,6 +17,11 @@ such as:
 /proc/uptime
 /proc/slabinfo
 /sys/devices/system/cpu/online
+/sys/devices/system/node
+/sys/devices/system/node/online
+/sys/devices/system/node/has_cpu
+/sys/devices/system/node/has_memory
+/sys/devices/system/node/has_normal_memory
 ```
 
 are container aware such that the values displayed (e.g. in `/proc/uptime`)
