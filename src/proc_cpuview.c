@@ -466,7 +466,7 @@ static bool cfs_quota_disabled(const char *cg)
 
 /*
  * Return the maximum number of visible CPUs based on CPU quotas.
- * If there is no quota set, zero is returned.
+ * If there is no quota set, cpu number in cpuset value is returned.
  */
 int max_cpu_count(const char *cg)
 {
@@ -476,10 +476,10 @@ int max_cpu_count(const char *cg)
 	int nr_cpus_in_cpuset = 0;
 
 	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
-		return 0;
+		cfs_quota = 0;
 
 	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
-		return 0;
+		cfs_period = 0;
 
 	cpuset = get_cpuset(cg);
 	if (cpuset)
