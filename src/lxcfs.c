@@ -105,6 +105,22 @@ static int stop_loadavg(void)
 
 static volatile sig_atomic_t need_reload;
 
+static int lxcfs_init_library(void)
+{
+	char *error;
+	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, void * cfg);
+
+	dlerror();
+	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, void * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find lxcfs_fuse_init()", error);
+
+	__lxcfs_fuse_init(NULL, NULL);
+
+	return 0;
+}
+
 /* do_reload - reload the dynamic library.  Done under
  * lock and when we know the user_count was 0 */
 static void do_reload(void)
@@ -147,6 +163,11 @@ static void do_reload(void)
 		lxcfs_debug("Opened %s", lxcfs_lib_path);
 
 good:
+	/* initialize the library */
+	if (lxcfs_init_library() < 0) {
+		log_exit("Failed to initialize liblxcfs.so");
+	}
+
 	if (loadavg_pid > 0)
 		start_loadavg();
 
@@ -1006,16 +1027,10 @@ static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 static void *lxcfs_init(struct fuse_conn_info *conn)
 #endif
 {
-	char *error;
-	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, void * cfg);
+	if (lxcfs_init_library() < 0)
+		return NULL;
 
-	dlerror();
-	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, void * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
-	error = dlerror();
-	if (error)
-		return log_error(NULL, "%s - Failed to find lxcfs_fuse_init()", error);
-
-	return __lxcfs_fuse_init(conn, NULL);
+	return fuse_get_context()->private_data;
 }
 
 const struct fuse_operations lxcfs_ops = {
