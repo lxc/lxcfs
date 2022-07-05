@@ -627,12 +627,12 @@ char *read_file_at(int dfd, const char *fnam, unsigned int o_flags)
 	return move_ptr(buf);
 }
 
-DIR *opathdir(const char *path)
+DIR *opendir_flags(const char *path, int flags)
 {
 	__do_close int dfd = -EBADF;
 	DIR *dirp;
 
-	dfd = open(path, O_DIRECTORY | O_PATH | O_CLOEXEC | O_NOFOLLOW);
+	dfd = open(path, O_DIRECTORY | flags);
 	if (dfd < 0)
 		return NULL;
 

@@ -596,7 +596,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 
 		return filler_sys_devices_system_cpu(path, buf, filler);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR:
-		dirp = opathdir(path);
+		dirp = opendir_flags(path, O_CLOEXEC | O_NOFOLLOW);
 		if (!dirp)
 			return -errno;
 
