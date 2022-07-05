@@ -3,6 +3,9 @@ on:
   - push
   - pull_request
 
+permissions:
+  contents: read
+
 jobs:
   fuse2:
     name: FUSE2
