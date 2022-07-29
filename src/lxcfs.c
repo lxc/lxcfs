@@ -123,7 +123,7 @@ static int lxcfs_init_library(void)
 
 /* do_reload - reload the dynamic library.  Done under
  * lock and when we know the user_count was 0 */
-static void do_reload(void)
+static void do_reload(bool reinit)
 {
 	int ret;
 	char lxcfs_lib_path[PATH_MAX];
@@ -164,7 +164,7 @@ static void do_reload(void)
 
 good:
 	/* initialize the library */
-	if (lxcfs_init_library() < 0) {
+	if (reinit && lxcfs_init_library() < 0) {
 		log_exit("Failed to initialize liblxcfs.so");
 	}
 
@@ -180,7 +180,7 @@ static void up_users(void)
 {
 	users_lock();
 	if (users_count == 0 && need_reload)
-		do_reload();
+		do_reload(true);
 	users_count++;
 	users_unlock();
 }
@@ -1362,7 +1362,7 @@ int main(int argc, char *argv[])
 	fuse_argv[fuse_argc++] = new_argv[0];
 	fuse_argv[fuse_argc] = NULL;
 
-	do_reload();
+	do_reload(false);
 	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
 		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
 		goto out;
