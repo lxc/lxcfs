@@ -943,5 +943,5 @@ void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 	can_use_sys_cpu = true;
 #endif
 	has_versioned_opts = true;
-	return fc->private_data;
+	return fc ? fc->private_data : NULL;
 }
