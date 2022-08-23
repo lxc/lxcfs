@@ -16,6 +16,7 @@ DAEMON=/usr/bin/lxcfs
 NAME=lxcfs
 DESC="FUSE filesystem for LXC"
 PIDFILE=/var/run/lxcfs.pid
+OOM_SCORE_ADJ="-1000"
 
 . /lib/lsb/init-functions
 
@@ -41,6 +42,7 @@ case "$1" in
         echo -n "Starting $DESC: "
         if start-stop-daemon ${START} -- /var/lib/lxcfs >/dev/null 2>&1 ; then
             echo "${NAME}."
+            echo ${OOM_SCORE_ADJ} > /proc/`cat ${PIDFILE}`/oom_score_adj
         else
             if start-stop-daemon --test ${START} >/dev/null 2>&1; then
                 echo "(failed)."
