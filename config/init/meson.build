@@ -2,7 +2,7 @@
 
 if 'systemd' in init_script
     systemd = dependency('systemd')
-    systemd_system_unit_dir = systemd.get_pkgconfig_variable('systemdsystemunitdir')
+    systemd_system_unit_dir = get_option('prefix') + systemd.get_pkgconfig_variable('systemdsystemunitdir')
     systemd_service = custom_target(
         'lxcfs.service',
         input: 'systemd/lxcfs.service.in',
