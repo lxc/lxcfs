@@ -38,160 +38,6 @@
 #include "utils.h"
 
 static off_t get_sysfile_size(const char *which);
-/* Create cpumask from cpulist aka turn:
- *
- *	0,2-3
- *
- * into bit array
- *
- *	1 0 1 1
- */
-static int lxc_cpumask(char *buf, __u32 **bitarr, __u32 *last_set_bit)
-{
-	__do_free __u32 *arr_u32 = NULL;
-	__u32 cur_last_set_bit = 0, nbits = 256;
-	__u32 nr_u32;
-	char *token;
-
-	nr_u32 = BITS_TO_LONGS(nbits);
-	arr_u32 = zalloc(nr_u32 * sizeof(__u32));
-	if (!arr_u32)
-		return ret_errno(ENOMEM);
-
-	lxc_iterate_parts(token, buf, ",") {
-		__u32 last_bit, first_bit;
-		char *range;
-
-		errno = 0;
-		first_bit = strtoul(token, NULL, 0);
-		last_bit = first_bit;
-		range = strchr(token, '-');
-		if (range)
-			last_bit = strtoul(range + 1, NULL, 0);
-
-		if (!(first_bit <= last_bit))
-			return ret_errno(EINVAL);
-
-		if (last_bit >= nbits) {
-			__u32 add_bits = last_bit - nbits + 32;
-			__u32 new_nr_u32;
-			__u32 *p;
-
-			new_nr_u32 = BITS_TO_LONGS(nbits + add_bits);
-			p = realloc(arr_u32, new_nr_u32 * sizeof(uint32_t));
-			if (!p)
-				return ret_errno(ENOMEM);
-			arr_u32 = move_ptr(p);
-
-			memset(arr_u32 + nr_u32, 0,
-			       (new_nr_u32 - nr_u32) * sizeof(uint32_t));
-			nbits += add_bits;
-		}
-
-		while (first_bit <= last_bit)
-			set_bit(first_bit++, arr_u32);
-
-		if (last_bit > cur_last_set_bit)
-			cur_last_set_bit = last_bit;
-	}
-
-	*last_set_bit = cur_last_set_bit;
-	*bitarr = move_ptr(arr_u32);
-	return 0;
-}
-
-static int lxc_cpumask_update(char *buf, __u32 *bitarr, __u32 last_set_bit,
-			      bool clear)
-{
-	bool flipped = false;
-	char *token;
-
-	lxc_iterate_parts(token, buf, ",") {
-		__u32 last_bit, first_bit;
-		char *range;
-
-		errno = 0;
-		first_bit = strtoul(token, NULL, 0);
-		last_bit = first_bit;
-		range = strchr(token, '-');
-		if (range)
-			last_bit = strtoul(range + 1, NULL, 0);
-
-		if (!(first_bit <= last_bit)) {
-			lxcfs_debug("The cup range seems to be inverted: %u-%u", first_bit, last_bit);
-			continue;
-		}
-
-		if (last_bit > last_set_bit)
-			continue;
-
-		while (first_bit <= last_bit) {
-			if (clear && is_set(first_bit, bitarr)) {
-				flipped = true;
-				clear_bit(first_bit, bitarr);
-			} else if (!clear && !is_set(first_bit, bitarr)) {
-				flipped = true;
-				set_bit(first_bit, bitarr);
-			}
-
-			first_bit++;
-		}
-	}
-
-	if (flipped)
-		return 1;
-
-	return 0;
-}
-
-#define __ISOL_CPUS "/sys/devices/system/cpu/isolated"
-#define __OFFLINE_CPUS "/sys/devices/system/cpu/offline"
-static int cpumask(char *posscpus, __u32 **bitarr, __u32 *last_set_bit)
-{
-	__do_free char *isolcpus = NULL, *offlinecpus = NULL;
-	__do_free __u32 *possmask = NULL;
-	int ret;
-	__u32 poss_last_set_bit = 0;
-
-	if (file_exists(__ISOL_CPUS)) {
-		isolcpus = read_file_at(-EBADF, __ISOL_CPUS, PROTECT_OPEN);
-		if (!isolcpus)
-			return -1;
-
-		if (!isdigit(isolcpus[0]))
-			free_disarm(isolcpus);
-	} else {
-		lxcfs_debug("The path \""__ISOL_CPUS"\" to read isolated cpus from does not exist");
-	}
-
-	if (file_exists(__OFFLINE_CPUS)) {
-		offlinecpus = read_file_at(-EBADF, __OFFLINE_CPUS, PROTECT_OPEN);
-		if (!offlinecpus)
-			return -1;
-
-		if (!isdigit(offlinecpus[0]))
-			free_disarm(offlinecpus);
-	} else {
-		lxcfs_debug("The path \""__OFFLINE_CPUS"\" to read offline cpus from does not exist");
-	}
-
-	ret = lxc_cpumask(posscpus, &possmask, &poss_last_set_bit);
-	if (ret)
-		return ret;
-
-	if (isolcpus)
-		ret = lxc_cpumask_update(isolcpus, possmask, poss_last_set_bit, true);
-
-	if (offlinecpus)
-		ret |= lxc_cpumask_update(offlinecpus, possmask, poss_last_set_bit, true);
-	if (ret)
-		return ret;
-
-	*bitarr = move_ptr(possmask);
-	*last_set_bit = poss_last_set_bit;
-	return 0;
-}
-
 static int do_cpuset_read(char *cg, char *buf, size_t buflen)
 {
         __do_free char *cpuset = NULL;
@@ -299,61 +145,14 @@ static int sys_devices_system_cpu_online_getsize(const char *path)
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
 					 fuse_fill_dir_t filler)
 {
-	__do_free __u32 *bitarr = NULL;
-	__do_free char *cg = NULL, *cpuset = NULL;
 	__do_closedir DIR *dirp = NULL;
-	struct fuse_context *fc = fuse_get_context();
-	__u32 last_set_bit = 0;
-	int ret;
 	struct dirent *dirent;
-	pid_t initpid;
-
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cg = get_pid_cgroup(initpid, "cpuset");
-	if (!cg)
-		return 0;
-	prune_init_slice(cg);
-
-	cpuset = get_cpuset(cg);
-	if (!cpuset)
-		return 0;
-
-	ret = cpumask(cpuset, &bitarr, &last_set_bit);
-	if (ret)
-		return ret;
 
 	dirp = opendir(path);
 	if (!dirp)
 		return -ENOENT;
 
-	for (__u32 bit = 0; bit <= last_set_bit; bit++) {
-		char cpu[100];
-
-		if (!is_set(bit, bitarr))
-			continue;
-
-		ret = snprintf(cpu, sizeof(cpu), "cpu%u", bit);
-		if (ret < 0 || (size_t)ret >= sizeof(cpu))
-			continue;
-
-		if (dir_fillerat(filler, dirp, cpu, buf, 0) != 0)
-			return -ENOENT;
-	}
-
 	while ((dirent = readdir(dirp))) {
-		char *entry = dirent->d_name;
-
-		if (strlen(entry) > 3) {
-			entry += 3;
-
-			/* Don't emit entries we already filtered above. */
-			if (isdigit(*entry))
-				continue;
-		}
-
 		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
@@ -590,10 +389,10 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 			return -ENOENT;
 		return 0;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
-		if (dir_filler(filler, buf, ".", 0) != 0 ||
-		    dir_filler(filler, buf, "..", 0) != 0)
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dirent_filler(filler, path, "online", buf,  0) != 0)
 			return -ENOENT;
-
 		return filler_sys_devices_system_cpu(path, buf, filler);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR:
 		dirp = opendir_flags(path, O_CLOEXEC | O_NOFOLLOW);
