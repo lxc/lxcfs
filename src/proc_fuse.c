@@ -973,7 +973,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		char cpu_char[10]; /* That's a lot of cores */
 		char *c;
 		uint64_t all_used, cg_used, new_idle;
-		int ret;
+		int ret, cpu_to_render;
 
 		if (strlen(line) == 0)
 			continue;
@@ -999,6 +999,11 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		curcpu++;
+
+		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
+			cpu_to_render = curcpu;
+		else
+			cpu_to_render = physcpu;
 
 		ret = sscanf(
 			   line,
@@ -1028,7 +1033,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			if (!c)
 				continue;
 
-			l = snprintf(cache, cache_size, "cpu%d%s", curcpu, c);
+			l = snprintf(cache, cache_size, "cpu%d%s", cpu_to_render, c);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
 			if ((size_t)l >= cache_size)
@@ -1053,13 +1058,13 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				new_idle = idle + (all_used - cg_used);
 			} else {
 				lxcfs_debug("cpu%d from %s has unexpected cpu time: %" PRIu64 " in /proc/stat, %" PRIu64 " in cpuacct.usage_all; unable to determine idle time",
-					    curcpu, cg, all_used, cg_used);
+					    cpu_to_render, cg, all_used, cg_used);
 				new_idle = idle;
 			}
 
 			l = snprintf(cache, cache_size,
 				     "cpu%d %" PRIu64 " 0 %" PRIu64 " %" PRIu64 " 0 0 0 0 0 0\n",
-				     curcpu, cg_cpu_usage[physcpu].user,
+				     cpu_to_render, cg_cpu_usage[physcpu].user,
 				     cg_cpu_usage[physcpu].system, new_idle);
 			if (l < 0)
 				return log_error(0, "Failed to write cache");
