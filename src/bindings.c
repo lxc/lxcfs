@@ -424,7 +424,7 @@ __returns_twice pid_t lxcfs_raw_clone(unsigned long flags, int *pidfd)
 	}
 #elif defined(__ia64__)
 	/* On ia64 the stack and stack size are passed as separate arguments. */
-	return syscall(__NR_clone, flags | SIGCHLD, NULL, prctl_arg(0), pidfd);
+	return syscall(__NR_clone, flags | SIGCHLD, NULL, 0, pidfd);
 #else
 	return syscall(__NR_clone, flags | SIGCHLD, NULL, pidfd);
 #endif
