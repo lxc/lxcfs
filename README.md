@@ -104,6 +104,7 @@ docker run -it -m 256m --memory-swap 256m \
       -v /var/lib/lxcfs/proc/swaps:/proc/swaps:rw \
       -v /var/lib/lxcfs/proc/uptime:/proc/uptime:rw \
       -v /var/lib/lxcfs/proc/slabinfo:/proc/slabinfo:rw \
+      -v /var/lib/lxcfs/sys/devices/system/cpu:/sys/devices/system/cpu:rw \
       ubuntu:18.04 /bin/bash
  ```
 
