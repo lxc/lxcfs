@@ -76,4 +76,7 @@ static inline bool file_exists(const char *f)
 #define PROTECT_OPEN (PROTECT_OPEN_WITH_TRAILING_SYMLINKS | O_NOFOLLOW)
 extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
 
+extern int get_task_personality(pid_t pid, __u32 *personality);
+extern int get_host_personality(__u32 *personality);
+
 #endif /* __LXCFS_UTILS_H */

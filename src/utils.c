@@ -665,3 +665,29 @@ DIR *opendir_flags(const char *path, int flags)
 
 	return dirp;
 }
+
+int get_task_personality(pid_t pid, __u32 *personality)
+{
+	__do_close int fd = -EBADF;
+	int ret = -1;
+	char path[STRLITERALLEN("/proc//personality") + INTTYPE_TO_STRLEN(pid_t) + 1];
+	/* seq_printf(m, "%08x\n", task->personality); */
+	char buf[8 + 1];
+
+	ret = strnprintf(path, sizeof(path), "/proc/%d/personality", pid);
+	if (ret < 0)
+		return -1;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+
+	ret = read_nointr(fd, buf, sizeof(buf) - 1);
+	if (ret >= 0) {
+		buf[ret] = '\0';
+		if (safe_uint32(buf, personality, 16) < 0)
+			return log_error(-1, "Failed to convert personality %s", buf);
+	}
+
+	return ret;
+}
