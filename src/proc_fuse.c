@@ -24,6 +24,7 @@
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/param.h>
+#include <sys/personality.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
@@ -1500,6 +1501,46 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
+static int proc_read_with_personality(int (*do_proc_read)(char *, size_t, off_t,
+			     struct fuse_file_info *), char *buf, size_t size, off_t offset,
+			     struct fuse_file_info *fi)
+{
+	struct fuse_context *fc = fuse_get_context();
+	__u32 host_personality = liblxcfs_personality(), caller_personality;
+	bool change_personality;
+	int ret, read_ret;
+
+	if (get_task_personality(fc->pid, &caller_personality) < 0)
+		return log_error(0, "Failed to get caller process (pid: %d) personality", fc->pid);
+
+	/* do we need to change thread personality? */
+	change_personality = host_personality != caller_personality;
+
+	if (change_personality) {
+		ret = personality(caller_personality);
+		if (ret == -1)
+			return log_error(0, "Call to personality(%d) failed: %s\n",
+				caller_personality, strerror(errno));
+
+		lxcfs_debug("task (tid: %d) personality was changed %d -> %d\n",
+				(int)syscall(SYS_gettid), ret, caller_personality);
+	}
+
+	read_ret = do_proc_read(buf, size, offset, fi);
+
+	if (change_personality) {
+		ret = personality(host_personality);
+		if (ret == -1)
+			return log_error(0, "Call to personality(%d) failed: %s\n",
+				host_personality, strerror(errno));
+
+		lxcfs_debug("task (tid: %d) personality was restored %d -> %d\n",
+				(int)syscall(SYS_gettid), ret, host_personality);
+	}
+
+	return read_ret;
+}
+
 __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 			       off_t offset, struct fuse_file_info *fi)
 {
@@ -1514,7 +1555,7 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_CPUINFO:
 		if (liblxcfs_functional())
-			return proc_cpuinfo_read(buf, size, offset, fi);
+			return proc_read_with_personality(&proc_cpuinfo_read, buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_CPUINFO_PATH,
 						  buf, size, offset, f);
