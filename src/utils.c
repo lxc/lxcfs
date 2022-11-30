@@ -529,6 +529,29 @@ int safe_uint64(const char *numstr, uint64_t *converted, int base)
 	return 0;
 }
 
+int safe_uint32(const char *numstr, uint32_t *converted, int base)
+{
+	char *err = NULL;
+	unsigned long uli;
+
+	while (isspace(*numstr))
+		numstr++;
+
+	if (*numstr == '-')
+		return -EINVAL;
+
+	errno = 0;
+	uli = strtoul(numstr, &err, base);
+	if (errno == ERANGE && uli == UINT32_MAX)
+		return -ERANGE;
+
+	if (err == numstr || *err != '\0')
+		return -EINVAL;
+
+	*converted = (uint32_t)uli;
+	return 0;
+}
+
 static int char_left_gc(const char *buffer, size_t len)
 {
 	size_t i;
