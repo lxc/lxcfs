@@ -77,6 +77,15 @@
 				    ? 20          \
 				    : sizeof(int[-2 * (sizeof(type) > 8)])))
 
+#define strnprintf(buf, buf_size, ...)                                                    \
+	({                                                                                \
+		int __ret_strnprintf;                                                     \
+		__ret_strnprintf = snprintf(buf, buf_size, ##__VA_ARGS__);                \
+		if (__ret_strnprintf < 0 || (size_t)__ret_strnprintf >= (size_t)buf_size) \
+			__ret_strnprintf = ret_errno(EIO);				  \
+		__ret_strnprintf;                                                         \
+	})
+
 #define move_ptr(ptr)                                 \
 	({                                            \
 		__typeof__(ptr) __internal_ptr__ = (ptr); \
