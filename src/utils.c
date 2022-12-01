@@ -529,6 +529,29 @@ int safe_uint64(const char *numstr, uint64_t *converted, int base)
 	return 0;
 }
 
+int safe_uint32(const char *numstr, uint32_t *converted, int base)
+{
+	char *err = NULL;
+	unsigned long uli;
+
+	while (isspace(*numstr))
+		numstr++;
+
+	if (*numstr == '-')
+		return -EINVAL;
+
+	errno = 0;
+	uli = strtoul(numstr, &err, base);
+	if (errno == ERANGE && uli == UINT32_MAX)
+		return -ERANGE;
+
+	if (err == numstr || *err != '\0')
+		return -EINVAL;
+
+	*converted = (uint32_t)uli;
+	return 0;
+}
+
 static int char_left_gc(const char *buffer, size_t len)
 {
 	size_t i;
@@ -641,4 +664,30 @@ DIR *opendir_flags(const char *path, int flags)
 		move_fd(dfd); /* Transfer ownership to fdopendir(). */
 
 	return dirp;
+}
+
+int get_task_personality(pid_t pid, __u32 *personality)
+{
+	__do_close int fd = -EBADF;
+	int ret = -1;
+	char path[STRLITERALLEN("/proc//personality") + INTTYPE_TO_STRLEN(pid_t) + 1];
+	/* seq_printf(m, "%08x\n", task->personality); */
+	char buf[8 + 1];
+
+	ret = strnprintf(path, sizeof(path), "/proc/%d/personality", pid);
+	if (ret < 0)
+		return -1;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+
+	ret = read_nointr(fd, buf, sizeof(buf) - 1);
+	if (ret >= 0) {
+		buf[ret] = '\0';
+		if (safe_uint32(buf, personality, 16) < 0)
+			return log_error(-1, "Failed to convert personality %s", buf);
+	}
+
+	return ret;
 }

@@ -45,6 +45,7 @@ static bool can_use_swap;
 static bool can_use_sys_cpu;
 static bool has_versioned_opts;
 static bool memory_is_cgroupv2;
+static __u32 host_personality;
 
 static volatile sig_atomic_t reload_successful;
 
@@ -71,6 +72,11 @@ bool liblxcfs_has_versioned_opts(void)
 bool liblxcfs_memory_is_cgroupv2(void)
 {
 	return memory_is_cgroupv2;
+}
+
+__u32 liblxcfs_personality(void)
+{
+	return host_personality;
 }
 
 /* Define pivot_root() if missing from the C library */
@@ -916,6 +922,11 @@ static void __attribute__((constructor)) lxcfs_init(void)
 
 	if (install_signal_handler(SIGUSR2, sigusr2_toggle_virtualization)) {
 		lxcfs_info("%s - Failed to install SIGUSR2 signal handler", strerror(errno));
+		goto broken_upgrade;
+	}
+
+	if (get_task_personality(getpid(), &host_personality) < 0) {
+		lxcfs_info("Failed to retrieve host personality");
 		goto broken_upgrade;
 	}
 

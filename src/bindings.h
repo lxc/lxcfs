@@ -107,6 +107,7 @@ extern bool liblxcfs_can_use_swap(void);
 extern bool liblxcfs_memory_is_cgroupv2(void);
 extern bool liblxcfs_can_use_sys_cpu(void);
 extern bool liblxcfs_has_versioned_opts(void);
+extern __u32 liblxcfs_personality(void);
 
 static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 {
