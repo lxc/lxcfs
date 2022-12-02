@@ -171,6 +171,7 @@ static struct cg_proc_stat *add_proc_stat_node(struct cg_proc_stat *new_node)
 	}
 
 out_rwlock_unlock:
+	pthread_mutex_lock(&rv->lock);
 	pthread_rwlock_unlock(&head->lock);
 	return move_ptr(rv);
 }
@@ -224,6 +225,7 @@ static bool cgroup_supports(const char *controller, const char *cgroup,
 	return faccessat(cfd, path, F_OK, 0) == 0;
 }
 
+/* should be called with wr-locked list */
 static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 {
 	struct cg_proc_stat *first = NULL;
@@ -231,6 +233,31 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 	for (struct cg_proc_stat *prev = NULL; node; ) {
 		if (!cgroup_supports("cpu", node->cg, "cpu.shares")) {
 			struct cg_proc_stat *cur = node;
+
+			/*
+			 * We need to ensure that no one referenced this node,
+			 * because we are going to remove it from the list and free memory.
+			 *
+			 * If we can't grab the lock then just keep this node for now.
+			 */
+			if (pthread_mutex_trylock(&cur->lock))
+				goto next;
+
+			/*
+			 * Yes, we can put lock back just after taking it, as we ensured
+			 * that we are only one user of it right now.
+			 *
+			 * It follows from three facts:
+			 * - we are under pthread_rwlock_wrlock(hash_table_bucket)
+			 * - pthread_mutex_lock is taken by find_proc_stat_node()
+			 * with pthread_rwlock_rdlock(hash_table_bucket) held.
+			 * - pthread_mutex_lock is taken by add_proc_stat_node()
+			 * with pthread_rwlock_wrlock(hash_table_bucket) held.
+			 *
+			 * It means that nobody can get a pointer to (cur) node in a parallel
+			 * thread and all old users of (cur) node have released pthread_mutex_lock(cur).
+			 */
+			pthread_mutex_unlock(&cur->lock);
 
 			if (prev)
 				prev->next = node->next;
@@ -242,6 +269,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 
 			free_proc_stat_node(cur);
 		} else {
+next:
 			if (!first)
 				first = node;
 			prev = node;
@@ -289,8 +317,10 @@ static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head,
 	node = head->next;
 
 	do {
-		if (strcmp(cg, node->cg) == 0)
+		if (strcmp(cg, node->cg) == 0) {
+			pthread_mutex_lock(&node->lock);
 			goto out;
+		}
 	} while ((node = node->next));
 
 	node = NULL;
@@ -317,8 +347,6 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 		node = add_proc_stat_node(node);
 		lxcfs_debug("New stat node (%d) for %s\n", cpu_count, cg);
 	}
-
-	pthread_mutex_lock(&node->lock);
 
 	/*
 	 * If additional CPUs on the host have been enabled, CPU usage counter
