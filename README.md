@@ -71,6 +71,12 @@ versions:
     meson compile -C build/
     sudo meson install -C build/
 
+To build with sanitizers you have to specify `-Db_sanitize=...` option to `meson setup`.
+For example, to enable ASAN and UBSAN:
+
+    meson setup -Dinit-script=systemd --prefix=/usr build/ -Db_sanitize=address,undefined
+    meson compile -C build/
+
 ## Usage
 The recommended command to run lxcfs is:
 
