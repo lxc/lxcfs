@@ -36,11 +36,9 @@ jobs:
           export PATH="$(pwd)/cov-analysis-linux64/bin:${PATH}"
 
           meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
-          meson compile -C build
-          cd build
 
           # Build
-          cov-build --dir cov-int make -j4
+          cov-build --dir cov-int ninja -C build
           tar czvf lxcfs.tgz cov-int
 
           # Submit the results
