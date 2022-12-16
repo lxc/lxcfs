@@ -1347,7 +1347,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (append_comma_separate(&new_fuse_opts, "direct_io")) {
-		lxcfs_error("Failed to copy fuse argument \"nonempty\"");
+		lxcfs_error("Failed to copy fuse argument \"direct_io\"");
 		goto out;
 	}
 #endif
