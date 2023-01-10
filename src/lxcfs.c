@@ -771,6 +771,13 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
 
+        if (path == NULL) {
+                up_users();
+                ret = do_cg_releasedir(path, fi);
+                down_users();
+                return ret;
+        }
+	
 	if (strcmp(path, "/") == 0)
 		return 0;
 
@@ -1032,6 +1039,7 @@ static void *lxcfs_init(struct fuse_conn_info *conn)
 
 #if HAVE_FUSE3
 	cfg->direct_io = 1;
+	cfg->nullpath_ok = 0;
 #endif
 
 	return fuse_get_context()->private_data;
