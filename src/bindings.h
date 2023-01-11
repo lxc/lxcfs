@@ -30,6 +30,8 @@
 /* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
 #define LXCFS_NUMSTRLEN64 21
 
+/* The definitions here are well-ordered. New values should go directly
+ * above LXC_TYPE_MAX only. */
 enum lxcfs_virt_t {
 	LXC_TYPE_CGDIR,
 	LXC_TYPE_CGFILE,
@@ -67,7 +69,14 @@ enum lxcfs_virt_t {
 
 	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE,
 #define LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH "/sys/devices/system/cpu/online"
+	LXC_TYPE_MAX,
 };
+
+/* Macros below used to check the class from the file types above */
+#define LXCFS_TYPE_CGROUP(type) (type >= LXC_TYPE_CGDIR && type <= LXC_TYPE_CGFILE)
+#define LXCFS_TYPE_PROC(type) (type >= LXC_TYPE_PROC_MEMINFO && type <= LXC_TYPE_PROC_SLABINFO)
+#define LXCFS_TYPE_SYS(type) (type >= LXC_TYPE_SYS && type <= LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE)
+#define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
 struct file_info {
 	char *controller;
