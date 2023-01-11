@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <sched.h>
@@ -63,6 +64,22 @@ static inline void users_lock(void)
 static inline void users_unlock(void)
 {
 	unlock_mutex(&user_count_mutex);
+}
+
+/* Returns file info type of custom type declaration carried
+ * in fuse_file_info */
+static inline enum lxcfs_virt_t file_info_type(struct fuse_file_info *fi)
+{
+	struct file_info *f;
+
+	f = INTTYPE_TO_PTR(fi->fh);
+	if (!f)
+		return -1;
+
+	if (!LXCFS_TYPE_OK(f->type))
+		return -1;
+
+	return f->type;
 }
 
 static pthread_t loadavg_pid = 0;
@@ -770,26 +787,33 @@ static int lxcfs_access(const char *path, int mode)
 static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
+	enum lxcfs_virt_t type;
 
-	if (strcmp(path, "/") == 0)
-		return 0;
+	type = file_info_type(fi);
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_releasedir(path, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strcmp(path, "/proc") == 0)
-		return 0;
-
-	if (strncmp(path, "/sys", 4) == 0) {
+	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_releasedir(path, fi);
 		down_users();
 		return ret;
 	}
+
+	if (path) {
+		if (strcmp(path, "/") == 0)
+			return 0;
+		if (strcmp(path, "/proc") == 0)
+			return 0;
+	}
+
+	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
+			path, type, fi->fh);
 
 	return -EINVAL;
 }
@@ -895,27 +919,33 @@ static int lxcfs_flush(const char *path, struct fuse_file_info *fi)
 static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
+	enum lxcfs_virt_t type;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	type = file_info_type(fi);
+
+	if (LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_release(path, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/proc", 5) == 0) {
+	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
 		ret = do_proc_release(path, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/sys", 4) == 0) {
+	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_release(path, fi);
 		down_users();
 		return ret;
 	}
+
+	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
+			path, type, fi->fh);
 
 	return -EINVAL;
 }
