@@ -307,6 +307,7 @@ static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head,
 {
 	struct cg_proc_stat *node;
 
+	prune_proc_stat_history();
 	pthread_rwlock_rdlock(&head->lock);
 
 	if (!head->next) {
@@ -327,7 +328,6 @@ static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head,
 
 out:
 	pthread_rwlock_unlock(&head->lock);
-	prune_proc_stat_history();
 	return node;
 }
 
