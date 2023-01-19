@@ -23,7 +23,12 @@ def parse_config_h(filename):
 
 def render(filename, defines):
     text = open(filename).read()
-    template = jinja2.Template(text, trim_blocks=True, undefined=jinja2.StrictUndefined)
+    template = jinja2.Template(
+        text,
+        trim_blocks=True,
+        keep_trailing_newline=True,
+        undefined=jinja2.StrictUndefined,
+    )
     return template.render(defines)
 
 if __name__ == '__main__':
