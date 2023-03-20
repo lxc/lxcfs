@@ -618,14 +618,14 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Total", &stats.total_ticks);
 		stats.total_ticks = stats.total_ticks / 1000000;
 
-		memset(lbuf, 0, 256);
+		memset(lbuf, 0, sizeof(lbuf));
 		if (stats.read || stats.write || stats.read_merged || stats.write_merged ||
 		    stats.read_sectors || stats.write_sectors || stats.read_ticks ||
-		    stats.write_ticks || stats.ios_pgr || stats.total_ticks || stats.rq_ticks ||
-		    stats.discard_merged || stats.discard_sectors || stats.discard_ticks)
-			snprintf(
+		    stats.write_ticks || stats.ios_pgr || stats.total_ticks || stats.rq_ticks || stats.discard ||
+		    stats.discard_merged || stats.discard_sectors || stats.discard_ticks) {
+			ret = strnprintf(
 				lbuf,
-				256,
+				sizeof(lbuf),
 				"%u       %u" /* major, minor */
 				" %s"         /* dev_name */
 				" %" PRIu64   /* read */
@@ -639,6 +639,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 				" %" PRIu64   /* ios_pgr */
 				" %" PRIu64   /* total_ticks */
 				" %" PRIu64   /* rq_ticks */
+				" %" PRIu64   /* discard */
 				" %" PRIu64   /* discard_merged */
 				" %" PRIu64   /* discard_sectors */
 				" %" PRIu64   /* discard_ticks */
@@ -657,11 +658,18 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 				stats.ios_pgr,
 				stats.total_ticks,
 				stats.rq_ticks,
+				stats.discard,
 				stats.discard_merged,
 				stats.discard_sectors,
 				stats.discard_ticks);
-		else
+			if (ret < 0) {
+				lxcfs_error("Insufficient buffer for %u:%u %s diskstats",
+					    stats.major, stats.minor, stats.dev_name);
+				continue;
+			}
+		} else {
 			continue;
+		}
 
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0)
