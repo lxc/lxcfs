@@ -496,20 +496,20 @@ static bool cfs_quota_disabled(const char *cg)
  * Return the maximum number of visible CPUs based on CPU quotas.
  * If there is no quota set, cpu number in cpuset value is returned.
  */
-int max_cpu_count(const char *cg)
+int max_cpu_count(const char *cpuset_cg, const char *cpu_cg)
 {
 	__do_free char *cpuset = NULL;
 	int rv, nprocs;
 	int64_t cfs_quota, cfs_period;
 	int nr_cpus_in_cpuset = 0;
 
-	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+	if (!read_cpu_cfs_param(cpu_cg, "quota", &cfs_quota))
 		cfs_quota = 0;
 
-	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
+	if (!read_cpu_cfs_param(cpu_cg, "period", &cfs_period))
 		cfs_period = 0;
 
-	cpuset = get_cpuset(cg);
+	cpuset = get_cpuset(cpuset_cg);
 	if (cpuset)
 		nr_cpus_in_cpuset = cpu_number_in_cpuset(cpuset);
 
@@ -540,7 +540,7 @@ int max_cpu_count(const char *cg)
 	return rv;
 }
 
-int cpuview_proc_stat(const char *cg, const char *cpuset,
+int cpuview_proc_stat(const char *cg, const char *cpu_cg, const char *cpuset,
 		      struct cpuacct_usage *cg_cpu_usage, int cg_cpu_usage_size,
 		      FILE *f, char *buf, size_t buf_size)
 {
@@ -628,7 +628,7 @@ int cpuview_proc_stat(const char *cg, const char *cpuset,
 	}
 
 	/* Cannot use more CPUs than is available in cpuset. */
-	max_cpus = max_cpu_count(cg);
+	max_cpus = max_cpu_count(cg, cpu_cg);
 	if (max_cpus > cpu_cnt || !max_cpus)
 		max_cpus = cpu_cnt;
 
@@ -936,7 +936,7 @@ static inline bool cpuline_in_cpuset(const char *line, const char *cpuset)
 int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL, *cpu_cg = NULL;
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
@@ -973,7 +973,10 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	if (!cg)
 		return read_file_fuse("proc/cpuinfo", buf, size, d);
 	prune_init_slice(cg);
-
+	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	if (!cpu_cg)
+		return read_file_fuse("proc/cpuinfo", buf, size, d);
+	prune_init_slice(cpu_cg);
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
 		return 0;
@@ -983,7 +986,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	else
 		use_view = false;
 	if (use_view)
-		max_cpus = max_cpu_count(cg);
+		max_cpus = max_cpu_count(cg, cpu_cg);
 
 	f = fopen_cached("/proc/cpuinfo", "re", &fopen_cache);
 	if (!f)

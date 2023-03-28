@@ -38,7 +38,7 @@
 #include "utils.h"
 
 static off_t get_sysfile_size(const char *which);
-static int do_cpuset_read(char *cg, char *buf, size_t buflen)
+static int do_cpuset_read(char *cg, char *cpu_cg, char *buf, size_t buflen)
 {
         __do_free char *cpuset = NULL;
         struct fuse_context *fc = fuse_get_context();
@@ -57,7 +57,7 @@ static int do_cpuset_read(char *cg, char *buf, size_t buflen)
                 use_view = false;
 
         if (use_view)
-                max_cpus = max_cpu_count(cg);
+                max_cpus = max_cpu_count(cg, cpu_cg);
 
         if (use_view) {
                 if (max_cpus > 1)
@@ -77,7 +77,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 					      off_t offset,
 					      struct fuse_file_info *fi)
 {
-	__do_free char *cg = NULL;
+	__do_free char *cg = NULL, *cpu_cg = NULL;
 	struct fuse_context *fc = fuse_get_context();
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
@@ -108,8 +108,11 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	if (!cg)
 		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
 	prune_init_slice(cg);
-
-        total_len = do_cpuset_read(cg, d->buf, d->buflen);
+	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	if (!cpu_cg)
+		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+	prune_init_slice(cpu_cg);
+	total_len = do_cpuset_read(cg, cpu_cg, d->buf, d->buflen);
 
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -124,7 +127,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 
 static int sys_devices_system_cpu_online_getsize(const char *path)
 {
-        __do_free char *cg = NULL;
+        __do_free char *cg = NULL, *cpu_cg = NULL;
         struct fuse_context *fc = fuse_get_context();
         pid_t initpid;
         char buf[BUF_RESERVE_SIZE];
@@ -137,9 +140,13 @@ static int sys_devices_system_cpu_online_getsize(const char *path)
         cg = get_pid_cgroup(initpid, "cpuset");
         if (!cg)
                 return get_sysfile_size(path);
+        cpu_cg = get_pid_cgroup(initpid, "cpu");
+        if (!cpu_cg)
+                return get_sysfile_size(path);
         prune_init_slice(cg);
+        prune_init_slice(cpu_cg);
 
-        return do_cpuset_read(cg, buf, buflen);
+        return do_cpuset_read(cg, cpu_cg, buf, buflen);
 }
 
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
