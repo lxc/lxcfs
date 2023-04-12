@@ -92,6 +92,10 @@ enum lxcfs_virt_t {
  */
 #define LXCFS_INTR_SIGNAL SIGTTOU
 
+extern int mutex_lock_interruptible(pthread_mutex_t *l);
+extern int rwlock_rdlock_interruptible(pthread_rwlock_t *l);
+extern int rwlock_wrlock_interruptible(pthread_rwlock_t *l);
+
 struct file_info {
 	char *controller;
 	char *cgroup;

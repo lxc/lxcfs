@@ -149,6 +149,25 @@ static inline void store_unlock(void)
 	mutex_unlock(&pidns_store_mutex);
 }
 
+#define define_interruptible_lock(type, lockname, lockfn)           \
+        int lockname##_interruptible(type *l)                       \
+        {                                                           \
+                int ret = ETIMEDOUT;                                \
+                while (!fuse_interrupted() && (ret == ETIMEDOUT)) { \
+                        struct timespec deadline;                   \
+                        clock_gettime(CLOCK_REALTIME, &deadline);   \
+                        deadline.tv_sec += 1;                       \
+                        ret = lockfn(l, &deadline);                 \
+                }                                                   \
+                return -ret;                                        \
+        }
+
+define_interruptible_lock(pthread_mutex_t, mutex_lock, pthread_mutex_timedlock)
+define_interruptible_lock(pthread_rwlock_t, rwlock_rdlock, pthread_rwlock_timedrdlock)
+define_interruptible_lock(pthread_rwlock_t, rwlock_wrlock, pthread_rwlock_timedwrlock)
+
+#undef define_interruptible_lock
+
 /* /proc/       =    6
  *                +
  * <pid-as-str> =   INTTYPE_TO_STRLEN(pid_t)
