@@ -19,25 +19,50 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
-echo "==> Setting up memory/cpuset cgroup in lxcfs_test_proc"
-[ ! -d /sys/fs/cgroup/memory ] && exit 0
-[ ! -d /sys/fs/cgroup/cpuset ] && exit 0
+IS_CGROUP_V2=0
+grep -qF 'cgroup cgroup' /proc/1/mountinfo || IS_CGROUP_V2=1
 
-initcpuset=`awk -F: '/cpuset/ { print $3 }' /proc/1/cgroup`
-initmemory=`awk -F: '/memory/ { print $3 }' /proc/1/cgroup`
+if [ "$IS_CGROUP_V2" = "1" ]; then
+    echo "==> Setting up cgroup in lxcfs_test_proc"
+    [ ! -d /sys/fs/cgroup ] && exit 0
 
-cpupath=/sys/fs/cgroup/cpuset/${initcpuset}
-mempath=/sys/fs/cgroup/memory/${initmemory}
+    default_hierarchy="/"
 
-rmdir ${cpupath}/lxcfs_test_proc 2>/dev/null || true
-rmdir ${mempath}/lxcfs_test_proc 2>/dev/null || true
-mkdir ${cpupath}/lxcfs_test_proc
-mkdir ${mempath}/lxcfs_test_proc
+    hierarchy_path=/sys/fs/cgroup/${default_hierarchy}
+    cpupath=${hierarchy_path}
+    mempath=${hierarchy_path}
 
-echo 1 > ${cpupath}/lxcfs_test_proc/tasks
-echo 1 > ${mempath}/lxcfs_test_proc/tasks
+    rmdir ${hierarchy_path}/lxcfs_test_proc 2>/dev/null || true
+    mkdir ${hierarchy_path}/lxcfs_test_proc
 
-echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/memory.limit_in_bytes
+    echo 1 > ${hierarchy_path}/lxcfs_test_proc/cgroup.procs
+
+    echo '+cpu +memory' > ${hierarchy_path}/cgroup.subtree_control
+
+    memory_limit_file=memory.max
+else
+    echo "==> Setting up memory/cpuset cgroup in lxcfs_test_proc"
+    [ ! -d /sys/fs/cgroup/memory ] && exit 0
+    [ ! -d /sys/fs/cgroup/cpuset ] && exit 0
+
+    initcpuset=$(awk -F: '/cpuset/ { print $3 }' /proc/1/cgroup)
+    initmemory=$(awk -F: '/memory/ { print $3 }' /proc/1/cgroup)
+
+    cpupath=/sys/fs/cgroup/cpuset/${initcpuset}
+    mempath=/sys/fs/cgroup/memory/${initmemory}
+
+    rmdir ${cpupath}/lxcfs_test_proc 2>/dev/null || true
+    rmdir ${mempath}/lxcfs_test_proc 2>/dev/null || true
+    mkdir ${cpupath}/lxcfs_test_proc
+    mkdir ${mempath}/lxcfs_test_proc
+
+    echo 1 > ${cpupath}/lxcfs_test_proc/tasks
+    echo 1 > ${mempath}/lxcfs_test_proc/tasks
+
+    memory_limit_file=memory.limit_in_bytes
+fi
+
+echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/${memory_limit_file}
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test uptime
