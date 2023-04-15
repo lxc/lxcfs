@@ -16,8 +16,8 @@ jobs:
           - gcc
           - clang
         os:
-          - ubuntu-18.04
           - ubuntu-20.04
+          - ubuntu-22.04
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -60,6 +60,7 @@ jobs:
           - clang
         os:
           - ubuntu-20.04
+          - ubuntu-22.04
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code

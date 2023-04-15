@@ -20,6 +20,17 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
+IS_CGROUP_V2=0
+grep -qF 'cgroup cgroup' /proc/1/mountinfo || IS_CGROUP_V2=1
+
+#
+# LXCFS cgroupfs emulation doesn't make any sense with cgroup2
+#
+if [ "$IS_CGROUP_V2" = "1" ]; then
+    PASS=1
+    exit 0
+fi
+
 echo "==> Setting up memory, freeze and cpuset cgroups"
 for c in memory freezer cpuset; do
 	[ ! -d /sys/fs/cgroup/${c} ] && exit 0
