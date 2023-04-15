@@ -894,7 +894,7 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 static int proc_stat_read(char *buf, size_t size, off_t offset,
 			  struct fuse_file_info *fi)
 {
-	__do_free char *cg = NULL, *cpuset = NULL, *line = NULL;
+	__do_free char *cg = NULL, *cpu_cg = NULL, *cpuset = NULL, *line = NULL;
 	__do_free void *fopen_cache = NULL;
 	__do_free struct cpuacct_usage *cg_cpu_usage = NULL;
 	__do_fclose FILE *f = NULL;
@@ -947,7 +947,10 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	if (!cg)
 		return read_file_fuse("/proc/stat", buf, size, d);
 	prune_init_slice(cg);
-
+	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	if (!cpu_cg)
+		return read_file_fuse("/proc/stat", buf, size, d);
+	prune_init_slice(cpu_cg);
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
 		return 0;
@@ -967,7 +970,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 */
 	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) == 0) {
 		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs) {
-			total_len = cpuview_proc_stat(cg, cpuset, cg_cpu_usage,
+			total_len = cpuview_proc_stat(cg, cpu_cg, cpuset, cg_cpu_usage,
 						      cg_cpu_usage_size, f,
 						      d->buf, d->buflen);
 			goto out;
