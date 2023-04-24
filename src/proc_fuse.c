@@ -78,7 +78,7 @@ static off_t get_procfile_size(const char *path)
 
 	while ((sz = getline(&line, &len, f)) != -1)
 		answer += sz;
-
+        fclose(f);
 	return answer;
 }
 
