@@ -1117,17 +1117,18 @@ static void usage(void)
 	lxcfs_info("Usage: lxcfs <directory>\n");
 	lxcfs_info("lxcfs is a FUSE-based proc, sys and cgroup virtualizing filesystem\n");
 	lxcfs_info("Options :");
-	lxcfs_info("  -d, --debug          Run lxcfs with debugging enabled");
-	lxcfs_info("  -f, --foreground     Run lxcfs in the foreground");
-	lxcfs_info("  -n, --help           Print help");
-	lxcfs_info("  -l, --enable-loadavg Enable loadavg virtualization");
-	lxcfs_info("  -o                   Options to pass directly through fuse");
-	lxcfs_info("  -p, --pidfile=FILE   Path to use for storing lxcfs pid");
-	lxcfs_info("                       Default pidfile is %s/lxcfs.pid", RUNTIME_PATH);
-	lxcfs_info("  -u, --disable-swap   Disable swap virtualization");
-	lxcfs_info("  -v, --version        Print lxcfs version");
-	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
-	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
+	lxcfs_info("  -d, --debug               Run lxcfs with debugging enabled");
+	lxcfs_info("  -f, --foreground          Run lxcfs in the foreground");
+	lxcfs_info("  -n, --help                Print help");
+	lxcfs_info("  -l, --enable-loadavg      Enable loadavg virtualization");
+	lxcfs_info("  -o                        Options to pass directly through fuse");
+	lxcfs_info("  -p, --pidfile=FILE        Path to use for storing lxcfs pid");
+	lxcfs_info("                            Default pidfile is %s/lxcfs.pid", RUNTIME_PATH);
+	lxcfs_info("  -u, --disable-swap        Disable swap virtualization");
+	lxcfs_info("  -v, --version             Print lxcfs version");
+	lxcfs_info("  --enable-cfs              Enable CPU virtualization via CPU shares");
+	lxcfs_info("  --enable-pidfd            pidfd for process tracking");
+	lxcfs_info("  --enable-host-diskstats   Use host's /proc/diskstats instead of cgroup");
 	exit(EXIT_FAILURE);
 }
 
@@ -1176,6 +1177,7 @@ static const struct option long_options[] = {
 
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
+	{"enable-host-diskstats",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{								},
@@ -1247,6 +1249,7 @@ int main(int argc, char *argv[])
 	opts->swap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
+	opts->use_host_diskstats = false;
 	opts->version = 1;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
@@ -1256,6 +1259,8 @@ int main(int argc, char *argv[])
 				opts->use_pidfd = true;
 			else if (strcmp(long_options[idx].name, "enable-cfs") == 0)
 				opts->use_cfs = true;
+			else if (strcmp(long_options[idx].name, "enable-host-diskstats") == 0)
+				opts->use_host_diskstats = true;
 			else
 				usage();
 			break;

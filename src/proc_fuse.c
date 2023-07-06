@@ -28,6 +28,7 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
+#include <sys/sysmacros.h>
 #include <sys/vfs.h>
 
 #include "proc_fuse.h"
@@ -42,6 +43,25 @@
 #include "proc_loadavg.h"
 #include "proc_cpuview.h"
 #include "utils.h"
+
+static pthread_mutex_t container_dev_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void lock_mutex(pthread_mutex_t *l)
+{
+	int ret;
+
+	ret = pthread_mutex_lock(l);
+	if (ret)
+		log_exit("%s - returned: %d\n", strerror(ret), ret);
+}
+
+static void unlock_mutex(pthread_mutex_t *l)
+{
+	int ret;
+
+	ret = pthread_mutex_unlock(l);
+	if (ret)
+		log_exit("%s - returned: %d\n", strerror(ret), ret);
+}
 
 struct memory_stat {
 	uint64_t hierarchical_memory_limit;
@@ -473,6 +493,147 @@ static void get_blkio_io_value(char *str, unsigned major, unsigned minor,
 	}
 }
 
+struct devinfo {
+	char *name;
+	unsigned int major;
+	unsigned int minor;
+	struct devinfo *next;
+};
+
+int getns(pid_t pid, const char *ns_type)
+{
+	char fpath[100];
+	memset(fpath, 0, sizeof(fpath));
+	snprintf(fpath, 99, "/proc/%d/ns/%s", pid, ns_type);
+	return open(fpath, O_RDONLY);
+}
+
+struct devinfo* container_dev_read(pid_t pid) {
+	int nsfd;
+	DIR *dir;
+	struct dirent *ptr;
+	struct stat dev_stat;
+	struct devinfo *head = NULL, *end;
+	char fpath[261], dev_name[256];
+	pid_t child_pid;
+	int mypipe[2];
+	int dev_num;
+	FILE *stream;
+
+	if (pipe(mypipe) < 0) {
+		perror("Error creating pipe");
+		return head;
+	}
+
+	child_pid = fork();
+	if (child_pid < 0) {
+		close(mypipe[0]);
+		close(mypipe[1]);
+		perror("Error forking child");
+		return head;
+	}
+	if (child_pid == 0) {
+		/* Disallow signal reception in child process */
+		sigset_t oldset;
+		sigset_t newset;
+		sigemptyset(&newset);
+		sigaddset(&newset, SIGTERM);
+		sigaddset(&newset, SIGINT);
+		sigaddset(&newset, SIGHUP);
+		sigaddset(&newset, SIGQUIT);
+		sigprocmask(SIG_BLOCK,&newset,&oldset);
+
+		close(mypipe[0]);
+		stream = fdopen(mypipe[1], "w");
+		if (stream == NULL) {
+			lxcfs_error("Error opening pipe for writing: %s\n", strerror(errno));
+			goto child_out;
+		}
+		nsfd = getns(pid, "mnt");
+		if (nsfd < 0) {
+			lxcfs_error("Error getting mnt ns: %s\n", strerror(errno));
+			goto child_out;
+		}
+		if (setns(nsfd, 0) < 0) {
+			lxcfs_error("Error setting mnt ns: %s\n", strerror(errno));
+			goto child_out;
+		}
+		dir = opendir("/dev");
+		if (dir == NULL) {
+			lxcfs_error("Error opening dir /dev: %s\n", strerror(errno));
+			goto child_out;
+		}
+		while ((ptr = readdir(dir)) != NULL) {
+			if (ptr->d_type != DT_BLK && ptr->d_type != DT_CHR) {
+				continue;
+			}
+			memset(fpath, 0, sizeof(fpath));
+			snprintf(fpath, 261, "/dev/%s", ptr->d_name);
+			stat(fpath, &dev_stat);
+			fprintf(stream, "%s %ld ", ptr->d_name, dev_stat.st_rdev);
+			fflush(stream);
+		}
+		closedir(dir);
+		stat("/", &dev_stat);
+		dev_num = dev_stat.st_dev;
+		fprintf(stream, "sda %d end 0 ", dev_num);
+		fflush(stream);
+child_out:
+		fclose(stream);
+		_exit(EXIT_SUCCESS);
+	}
+
+	close(mypipe[1]);
+	stream = fdopen(mypipe[0], "r");
+	if (stream == NULL) {
+		lxcfs_error("Error opening pipe for reading: %s\n", strerror(errno));
+		goto err;
+	}
+	wait_for_pid(child_pid);
+	child_pid = 0;
+	memset(dev_name, 0, sizeof(dev_name));
+	while (fscanf(stream, "%255s%d", dev_name, &dev_num) == 2) {
+			if (dev_num == 0) {
+				break;
+			}
+			if (head == NULL) {
+				do {
+					head = (struct devinfo*)malloc(sizeof(struct devinfo));
+				} while (!head);
+				end = head;
+			} else {
+				do {
+					end->next  = (struct devinfo*)malloc(sizeof(struct devinfo));
+				} while (!end->next);
+				end = end->next;
+			}
+			end->next = NULL;
+			end->name = must_copy_string(dev_name);
+			end->major = major(dev_num);
+			end->minor = minor(dev_num);
+			memset(dev_name, 0, sizeof(dev_name));
+	}
+err:
+	if (stream)
+		fclose(stream);
+	if (child_pid > 0)
+		wait_for_pid(child_pid);
+	return head;
+}
+
+void free_devinfo_list(struct devinfo *ptr)
+{
+	struct devinfo *tmp;
+	while (ptr != NULL) {
+		tmp = ptr;
+		ptr = ptr->next;
+		free(tmp->name);
+		tmp->name = NULL;
+		free(tmp);
+		tmp = NULL;
+	}
+}
+
 struct lxcfs_diskstats {
 	unsigned int major;		/*  1 - major number */
 	unsigned int minor;		/*  2 - minor mumber */
@@ -504,7 +665,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	struct devinfo *container_devinfo = NULL, *ptr = NULL;
 	struct lxcfs_diskstats stats = {};
 	/* helper fields */
 	uint64_t read_service_time, write_service_time, discard_service_time, read_wait_time,
@@ -540,34 +703,40 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/diskstats", buf, size, d);
 	prune_init_slice(cg);
 
-	ret = cgroup_ops->get_io_serviced(cgroup_ops, cg, &io_serviced_str);
-	if (ret < 0) {
-		if (ret == -EOPNOTSUPP)
-			return read_file_fuse("/proc/diskstats", buf, size, d);
-	}
+	if (opts && opts->use_host_diskstats) {
+		lock_mutex(&container_dev_mutex);
+		container_devinfo = container_dev_read(initpid);
+		unlock_mutex(&container_dev_mutex);
+	} else {
+		ret = cgroup_ops->get_io_serviced(cgroup_ops, cg, &io_serviced_str);
+		if (ret < 0) {
+			if (ret == -EOPNOTSUPP)
+					return read_file_fuse("/proc/diskstats", buf, size, d);
+		}
 
-	ret = cgroup_ops->get_io_merged(cgroup_ops, cg, &io_merged_str);
-	if (ret < 0) {
-		if (ret == -EOPNOTSUPP)
-			return read_file_fuse("/proc/diskstats", buf, size, d);
-	}
+		ret = cgroup_ops->get_io_merged(cgroup_ops, cg, &io_merged_str);
+		if (ret < 0) {
+			if (ret == -EOPNOTSUPP)
+					return read_file_fuse("/proc/diskstats", buf, size, d);
+		}
 
-	ret = cgroup_ops->get_io_service_bytes(cgroup_ops, cg, &io_service_bytes_str);
-	if (ret < 0) {
-		if (ret == -EOPNOTSUPP)
-			return read_file_fuse("/proc/diskstats", buf, size, d);
-	}
+		ret = cgroup_ops->get_io_service_bytes(cgroup_ops, cg, &io_service_bytes_str);
+		if (ret < 0) {
+			if (ret == -EOPNOTSUPP)
+					return read_file_fuse("/proc/diskstats", buf, size, d);
+		}
 
-	ret = cgroup_ops->get_io_wait_time(cgroup_ops, cg, &io_wait_time_str);
-	if (ret < 0) {
-		if (ret == -EOPNOTSUPP)
-			return read_file_fuse("/proc/diskstats", buf, size, d);
-	}
+		ret = cgroup_ops->get_io_wait_time(cgroup_ops, cg, &io_wait_time_str);
+		if (ret < 0) {
+			if (ret == -EOPNOTSUPP)
+					return read_file_fuse("/proc/diskstats", buf, size, d);
+		}
 
-	ret = cgroup_ops->get_io_service_time(cgroup_ops, cg, &io_service_time_str);
-	if (ret < 0) {
-		if (ret == -EOPNOTSUPP)
-			return read_file_fuse("/proc/diskstats", buf, size, d);
+		ret = cgroup_ops->get_io_service_time(cgroup_ops, cg, &io_service_time_str);
+		if (ret < 0) {
+			if (ret == -EOPNOTSUPP)
+					return read_file_fuse("/proc/diskstats", buf, size, d);
+		}
 	}
 
 	f = fopen_cached("/proc/diskstats", "re", &fopen_cache);
@@ -582,41 +751,77 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		if (i != 3)
 			continue;
 
-		get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Read", &stats.read);
-		get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Write", &stats.write);
-		get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Discard", &stats.discard);
+		if (opts && opts->use_host_diskstats) {
+			bool match = false;
+			for (ptr = container_devinfo; ptr != NULL; ptr = ptr->next) {
+				if (stats.major == ptr->major && stats.minor == ptr->minor) {
+					snprintf(stats.dev_name, sizeof(stats.dev_name), "%s", ptr->name);
+					stats.dev_name[71] = '\0';
+					match = true;
+				}
+			}
+			if (!match) {
+				continue;
+			}
 
-		get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Read", &stats.read_merged);
-		get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Write", &stats.write_merged);
-		get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Discard", &stats.discard_merged);
+			char tmp_dev_name[72];
+			sscanf(line, "%u %u %71s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
+				   &stats.major,
+				   &stats.minor,
+				   tmp_dev_name,
+				   &stats.read,
+				   &stats.read_merged,
+				   &stats.read_sectors,
+				   &stats.read_ticks,
+				   &stats.write,
+				   &stats.write_merged,
+				   &stats.write_sectors,
+				   &stats.write_ticks,
+				   &stats.ios_pgr,
+				   &stats.total_ticks,
+				   &stats.rq_ticks,
+				   &stats.discard,
+				   &stats.discard_merged,
+				   &stats.discard_sectors,
+				   &stats.discard_ticks);
+		}
+		else {
+			get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Read", &stats.read);
+			get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Write", &stats.write);
+			get_blkio_io_value(io_serviced_str, stats.major, stats.minor, "Discard", &stats.discard);
 
-		get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Read", &stats.read_sectors);
-		stats.read_sectors = stats.read_sectors / 512;
-		get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Write", &stats.write_sectors);
-		stats.write_sectors = stats.write_sectors / 512;
-		get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Discard", &stats.discard_sectors);
-		stats.discard_sectors = stats.discard_sectors / 512;
+			get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Read", &stats.read_merged);
+			get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Write", &stats.write_merged);
+			get_blkio_io_value(io_merged_str, stats.major, stats.minor, "Discard", &stats.discard_merged);
 
-		get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Read", &read_service_time);
-		read_service_time = read_service_time / 1000000;
-		get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Read", &read_wait_time);
-		read_wait_time = read_wait_time / 1000000;
-		stats.read_ticks = read_service_time + read_wait_time;
+			get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Read", &stats.read_sectors);
+			stats.read_sectors = stats.read_sectors / 512;
+			get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Write", &stats.write_sectors);
+			stats.write_sectors = stats.write_sectors / 512;
+			get_blkio_io_value(io_service_bytes_str, stats.major, stats.minor, "Discard", &stats.discard_sectors);
+			stats.discard_sectors = stats.discard_sectors / 512;
 
-		get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Write", &write_service_time);
-		write_service_time = write_service_time / 1000000;
-		get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Write", &write_wait_time);
-		write_wait_time = write_wait_time / 1000000;
-		stats.write_ticks = write_service_time + write_wait_time;
+			get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Read", &read_service_time);
+			read_service_time = read_service_time / 1000000;
+			get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Read", &read_wait_time);
+			read_wait_time = read_wait_time / 1000000;
+			stats.read_ticks = read_service_time + read_wait_time;
 
-		get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Discard", &discard_service_time);
-		discard_service_time = discard_service_time / 1000000;
-		get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Discard", &discard_wait_time);
-		discard_wait_time = discard_wait_time / 1000000;
-		stats.discard_ticks = discard_service_time + discard_wait_time;
+			get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Write", &write_service_time);
+			write_service_time = write_service_time / 1000000;
+			get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Write", &write_wait_time);
+			write_wait_time = write_wait_time / 1000000;
+			stats.write_ticks = write_service_time + write_wait_time;
 
-		get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Total", &stats.total_ticks);
-		stats.total_ticks = stats.total_ticks / 1000000;
+			get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Discard", &discard_service_time);
+			discard_service_time = discard_service_time / 1000000;
+			get_blkio_io_value(io_wait_time_str, stats.major, stats.minor, "Discard", &discard_wait_time);
+			discard_wait_time = discard_wait_time / 1000000;
+			stats.discard_ticks = discard_service_time + discard_wait_time;
+
+			get_blkio_io_value(io_service_time_str, stats.major, stats.minor, "Total", &stats.total_ticks);
+			stats.total_ticks = stats.total_ticks / 1000000;
+		}
 
 		memset(lbuf, 0, sizeof(lbuf));
 		if (stats.read || stats.write || stats.read_merged || stats.write_merged ||
@@ -672,10 +877,14 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 		}
 
 		l = snprintf(cache, cache_size, "%s", lbuf);
-		if (l < 0)
+		if (l < 0) {
+			free_devinfo_list(container_devinfo);
 			return log_error(0, "Failed to write cache");
-		if ((size_t)l >= cache_size)
+		}
+		if ((size_t)l >= cache_size) {
+			free_devinfo_list(container_devinfo);
 			return log_error(0, "Write to cache was truncated");
+		}
 
 		cache += l;
 		cache_size -= l;
@@ -687,6 +896,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	if (total_len > size)
 		total_len = size;
 	memcpy(buf, d->buf, total_len);
+	free_devinfo_list(container_devinfo);
 
 	return total_len;
 }
