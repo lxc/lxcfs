@@ -904,6 +904,7 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0, total_len = 0;
 	int curcpu = -1; /* cpu numbering starts at 0 */
 	int physcpu = 0;
+	int max_cpu = 0;
 	uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0,
 		 softirq = 0, steal = 0, guest = 0, guest_nice = 0;
 	uint64_t user_sum = 0, nice_sum = 0, system_sum = 0, idle_sum = 0,
@@ -979,6 +980,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		lxcfs_v("proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 	}
 
+	max_cpu = max_cpu_count(cg);
+
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
 		char cpu_char[10]; /* That's a lot of cores */
@@ -1010,6 +1013,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		curcpu++;
+
+		if (max_cpu > 0 && (curcpu + 1 > max_cpu))
+			continue;
 
 		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
 			cpu_to_render = curcpu;
