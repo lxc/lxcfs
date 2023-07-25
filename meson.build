@@ -4,7 +4,7 @@
 project(
     'lxcfs',
     'c',
-    version: '5.0.3',
+    version: '5.0.4',
     license: 'LGPLv2+',
     default_options: [
         'b_colorout=always',
