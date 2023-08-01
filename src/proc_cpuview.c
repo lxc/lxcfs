@@ -286,7 +286,8 @@ static void prune_proc_stat_history(void)
 	time_t now = time(NULL);
 
 	for (int i = 0; i < CPUVIEW_HASH_SIZE; i++) {
-		pthread_rwlock_wrlock(&proc_stat_history[i]->lock);
+		if (rwlock_wrlock_interruptible(&proc_stat_history[i]->lock))
+			continue;
 
 		if ((proc_stat_history[i]->lastcheck + PROC_STAT_PRUNE_INTERVAL) > now) {
 			pthread_rwlock_unlock(&proc_stat_history[i]->lock);
@@ -308,7 +309,8 @@ static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head,
 	struct cg_proc_stat *node;
 
 	prune_proc_stat_history();
-	pthread_rwlock_rdlock(&head->lock);
+	if (rwlock_rdlock_interruptible(&head->lock))
+		return NULL;
 
 	if (!head->next) {
 		pthread_rwlock_unlock(&head->lock);
@@ -319,7 +321,13 @@ static struct cg_proc_stat *find_proc_stat_node(struct cg_proc_stat_head *head,
 
 	do {
 		if (strcmp(cg, node->cg) == 0) {
-			pthread_mutex_lock(&node->lock);
+			/*
+			 * If we are failed to take a lock OR
+			 * fuse request was interrupted then
+			 * just return NULL and exit gracefully.
+			 */
+			if (mutex_lock_interruptible(&node->lock))
+				node = NULL;
 			goto out;
 		}
 	} while ((node = node->next));
@@ -340,6 +348,10 @@ static struct cg_proc_stat *find_or_create_proc_stat_node(struct cpuacct_usage *
 
 	node = find_proc_stat_node(head, cg);
 	if (!node) {
+		/* safe place to exit */
+		if (fuse_interrupted())
+			return NULL;
+
 		node = new_proc_stat_node(usage, cpu_count, cg);
 		if (!node)
 			return NULL;

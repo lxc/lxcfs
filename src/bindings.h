@@ -78,6 +78,24 @@ enum lxcfs_virt_t {
 #define LXCFS_TYPE_SYS(type) (type >= LXC_TYPE_SYS && type <= LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE)
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
+/*
+ * This signal will be used to signal fuse request processing thread that
+ * request was interrupted (FUSE_INTERRUPT came from the kernel).
+ *
+ * It's not imporant which signal num is used, but it should not intersect with
+ * any signals those are already handled and used somewhere.
+ * Since, SIGUSR1 and SIGUSR2 are already utilized by lxcfs, let it be SIGTTOU.
+ *
+ * See also:
+ * ("interrupt support")
+ * https://github.com/libfuse/libfuse/commit/288ed4ebcea335c77793ee3d207c7466d55c4f71
+ */
+#define LXCFS_INTR_SIGNAL SIGTTOU
+
+extern int mutex_lock_interruptible(pthread_mutex_t *l);
+extern int rwlock_rdlock_interruptible(pthread_rwlock_t *l);
+extern int rwlock_wrlock_interruptible(pthread_rwlock_t *l);
+
 struct file_info {
 	char *controller;
 	char *cgroup;

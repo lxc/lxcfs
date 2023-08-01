@@ -1052,6 +1052,42 @@ int lxcfs_chmod(const char *path, mode_t mode)
 }
 
 #if HAVE_FUSE3
+static void fuse_intr_sighandler(int sig)
+{
+	(void) sig;
+	/* Nothing to do */
+}
+
+static int fuse_init_intr_signal(int signum)
+{
+	struct sigaction old_sa;
+	struct sigaction sa;
+
+	if (sigaction(signum, NULL, &old_sa) == -1)
+		return log_error(-1, "cannot get old signal handler\n");
+
+	if (old_sa.sa_handler != SIG_DFL)
+		return log_error(-1, "%d has non-default handler\n", signum);
+
+	memset(&sa, 0, sizeof(struct sigaction));
+
+	/*
+	 * We *must* enable SA_RESTART, otherwise we may accidentally
+	 * break some code which is not ready to signals/fuse interrupt.
+	 */
+	sa.sa_flags = SA_RESTART;
+
+	sa.sa_handler = fuse_intr_sighandler;
+	sigemptyset(&sa.sa_mask);
+
+	if (sigaction(signum, &sa, NULL) == -1)
+		return log_error(-1, "cannot set interrupt signal handler\n");
+
+	return 0;
+}
+#endif
+
+#if HAVE_FUSE3
 static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 #else
 static void *lxcfs_init(struct fuse_conn_info *conn)
@@ -1062,6 +1098,8 @@ static void *lxcfs_init(struct fuse_conn_info *conn)
 
 #if HAVE_FUSE3
 	cfg->direct_io = 1;
+	cfg->intr = 1;
+	cfg->intr_signal = LXCFS_INTR_SIGNAL;
 #endif
 
 	return fuse_get_context()->private_data;
@@ -1401,6 +1439,13 @@ int main(int argc, char *argv[])
 		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
 		goto out;
 	}
+
+#if HAVE_FUSE3
+	if (fuse_init_intr_signal(LXCFS_INTR_SIGNAL)) {
+		lxcfs_error("Failed to install fuse interrupt signal handler");
+		goto out;
+	}
+#endif
 
 	if (!pidfile) {
 		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", RUNTIME_PATH);
