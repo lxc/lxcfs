@@ -74,6 +74,11 @@ struct load_node {
 
 struct load_head {
 	/*
+	 * To prevent ABBA deadlocks, let's always take this locks in
+	 * the order as they specified in this structure.
+	 */
+
+	/*
 	 * The lock is about insert load_node and refresh load_node.To the first
 	 * load_node of each hash bucket, insert and refresh in this hash bucket is
 	 * mutually exclusive.
@@ -108,8 +113,8 @@ static struct load_node *locate_node(char *cg, int locate)
 	struct load_node *f = NULL;
 	int i = 0;
 
-	pthread_rwlock_rdlock(&load_hash[locate].rilock);
 	pthread_rwlock_rdlock(&load_hash[locate].rdlock);
+	pthread_rwlock_rdlock(&load_hash[locate].rilock);
 	if (load_hash[locate].next == NULL) {
 		pthread_rwlock_unlock(&load_hash[locate].rilock);
 		return f;
@@ -121,11 +126,37 @@ static struct load_node *locate_node(char *cg, int locate)
 	return f;
 }
 
+/*
+ * Inserts a new load_node into the load_hash table,
+ * if an appropriate node exists then just free (*n) and
+ * rewrite (n) value to an existing load_node pointer.
+ *
+ * We should enter this function without any locks held.
+ * This function leaves &load_hash[hash].rdlock taken.
+ */
 static void insert_node(struct load_node **n, int locate)
 {
 	struct load_node *f;
 
 	pthread_mutex_lock(&load_hash[locate].lock);
+
+	/*
+	 * We have to recheck if the node we are looking for
+	 * has appeared in the hash table. In this case we just free
+	 * newly created load_node and give an existing load_node to use.
+	 */
+	f = locate_node((*n)->cg, locate);
+	if (f) {
+		free_disarm((*n)->cg);
+		free_disarm((*n));
+		*n = f;
+
+		pthread_mutex_unlock(&load_hash[locate].lock);
+		return;
+	}
+
+	/* &load_hash[hash].rdlock is taken for read at this point */
+
 	pthread_rwlock_wrlock(&load_hash[locate].rilock);
 	f = load_hash[locate].next;
 	load_hash[locate].next = *n;
@@ -219,7 +250,9 @@ int proc_loadavg_read(char *buf, size_t size, off_t offset,
 		n->total_pid = 1;
 		n->last_pid = initpid;
 		n->cfd = cfd;
+		pthread_rwlock_unlock(&load_hash[hash].rdlock);
 		insert_node(&n, hash);
+		/* &load_hash[hash].rdlock is taken for reading at this point */
 	}
 	a = n->avenrun[0] + (FIXED_1 / 200);
 	b = n->avenrun[1] + (FIXED_1 / 200);
@@ -567,8 +600,8 @@ static void load_free(void)
 
 	for (int i = 0; i < LOAD_SIZE; i++) {
 		pthread_mutex_lock(&load_hash[i].lock);
-		pthread_rwlock_wrlock(&load_hash[i].rilock);
 		pthread_rwlock_wrlock(&load_hash[i].rdlock);
+		pthread_rwlock_wrlock(&load_hash[i].rilock);
 		if (load_hash[i].next == NULL) {
 			pthread_mutex_unlock(&load_hash[i].lock);
 			pthread_mutex_destroy(&load_hash[i].lock);
