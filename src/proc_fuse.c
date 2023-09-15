@@ -82,6 +82,45 @@ static off_t get_procfile_size(const char *path)
 	return answer;
 }
 
+static off_t get_procfile_size_with_personality(const char *path)
+{
+	struct fuse_context *fc = fuse_get_context();
+	__u32 host_personality = liblxcfs_personality(), caller_personality;
+	bool change_personality;
+	int ret;
+	off_t procfile_size_ret;
+
+	if (get_task_personality(fc->pid, &caller_personality) < 0)
+		return log_error(0, "Failed to get caller process (pid: %d) personality", fc->pid);
+
+	/* do we need to change thread personality? */
+	change_personality = host_personality != caller_personality;
+
+	if (change_personality) {
+		ret = personality(caller_personality);
+		if (ret == -1)
+			return log_error(0, "Call to personality(%d) failed: %s\n",
+					caller_personality, strerror(errno));
+
+		lxcfs_debug("task (tid: %d) personality was changed %d -> %d\n",
+				(int)syscall(SYS_gettid), ret, caller_personality);
+	}
+
+	procfile_size_ret = get_procfile_size(path);
+
+	if (change_personality) {
+		ret = personality(host_personality);
+		if (ret == -1)
+			return log_error(0, "Call to personality(%d) failed: %s\n",
+					host_personality, strerror(errno));
+
+		lxcfs_debug("task (tid: %d) personality was restored %d -> %d\n",
+				(int)syscall(SYS_gettid), ret, host_personality);
+	}
+
+	return procfile_size_ret;
+}
+
 __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 {
 	struct timespec now;
@@ -106,7 +145,10 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 	    strcmp(path, "/proc/swaps")		== 0 ||
 	    strcmp(path, "/proc/loadavg")	== 0 ||
 	    strcmp(path, "/proc/slabinfo")	== 0) {
-		sb->st_size = get_procfile_size(path);
+		if (liblxcfs_functional())
+			sb->st_size = get_procfile_size_with_personality(path);
+		else
+			sb->st_size = get_procfile_size(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -164,7 +206,10 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 
 	info->type = type;
 
-	info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
+	if (liblxcfs_functional())
+		info->buflen = get_procfile_size_with_personality(path) + BUF_RESERVE_SIZE;
+	else
+		info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
 
 	info->buf = zalloc(info->buflen);
 	if (!info->buf)
