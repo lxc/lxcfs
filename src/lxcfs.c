@@ -1396,6 +1396,8 @@ int main(int argc, char *argv[])
 	fuse_argv[fuse_argc++] = new_argv[0];
 	fuse_argv[fuse_argc] = NULL;
 
+	lxcfs_info("Starting LXCFS at %s", argv[0]);
+
 	do_reload(false);
 	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
 		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
