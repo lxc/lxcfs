@@ -26,7 +26,6 @@
 #include "../memory_utils.h"
 #include "cgroup.h"
 #include "cgroup_utils.h"
-#include "cgroup2_devices.h"
 
 extern struct cgroup_ops *cgfsng_ops_init(void);
 

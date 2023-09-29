@@ -34,7 +34,6 @@
 #include "../memory_utils.h"
 #include "../utils.h"
 #include "cgroup.h"
-#include "cgroup2_devices.h"
 #include "cgroup_utils.h"
 
 /* Given a pointer to a null-terminated array of pointers, realloc to add one
@@ -962,9 +961,6 @@ static int cg_unified_init(struct cgroup_ops *ops)
 	 */
 
 	new = add_hierarchy(&ops->hierarchies, delegatable, mountpoint, base_cgroup, CGROUP2_SUPER_MAGIC);
-
-	if (bpf_devices_cgroup_supported())
-		new->bpf_device_controller = 1;
 
 	ops->cgroup_layout = CGROUP_LAYOUT_UNIFIED;
 	ops->unified = new;
