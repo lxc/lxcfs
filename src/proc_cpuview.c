@@ -265,7 +265,7 @@ static struct cg_proc_stat *prune_proc_stat_list(struct cg_proc_stat *node)
 				first = node->next;
 
 			node = node->next;
-			lxcfs_debug("Removing stat node for %s\n", cur);
+			lxcfs_debug("Removing stat node for %s\n", cur->cg);
 
 			free_proc_stat_node(cur);
 		} else {
