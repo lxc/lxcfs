@@ -16,6 +16,7 @@
 #include "macro.h"
 
 __visible extern pthread_t load_daemon(int load_use);
+__visible extern int load_daemon_v2(pthread_t *thread, int load_use);
 __visible extern int stop_load_daemon(pthread_t pid);
 
 extern int proc_loadavg_read(char *buf, size_t size, off_t offset, struct fuse_file_info *fi);

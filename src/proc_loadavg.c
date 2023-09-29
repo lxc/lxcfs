@@ -628,7 +628,7 @@ static void load_free(void)
 	}
 }
 
-/* Return a positive number on success, return 0 on failure.*/
+/* Return a positive number on success, return 0 on failure. */
 pthread_t load_daemon(int load_use)
 {
 	int ret;
@@ -644,9 +644,29 @@ pthread_t load_daemon(int load_use)
 		return (pthread_t)log_error(0, "Create pthread fails in load_daemon!");
 	}
 
-	/* use loadavg, here loadavg = 1*/
+	/* use loadavg, here loadavg = 1 */
 	loadavg = load_use;
 	return pid;
+}
+
+/* Return 0 on success, return -1 on failure. */
+int load_daemon_v2(pthread_t *thread, int load_use)
+{
+	int ret;
+
+	ret = init_load();
+	if (ret == -1)
+		return log_error(-1, "Initialize hash_table fails in load_daemon!");
+
+	ret = pthread_create(thread, NULL, load_begin, NULL);
+	if (ret != 0) {
+		load_free();
+		return log_error(-1, "%s - Create pthread fails in load_daemon!", strerror(ret));
+	}
+
+	/* use loadavg, here loadavg = 1 */
+	loadavg = load_use;
+	return 0;
 }
 
 /* Returns 0 on success. */

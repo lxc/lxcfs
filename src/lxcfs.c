@@ -89,12 +89,36 @@ static int start_loadavg(void)
 {
 	char *error;
 	pthread_t (*__load_daemon)(int);
+	int (*__load_daemon_v2)(pthread_t *, int);
 
+	/* try a new load_daemon_v2() API */
+	dlerror();
+	__load_daemon_v2 = (int (*)(pthread_t *, int))dlsym(dlopen_handle, "load_daemon_v2");
+	error = dlerror();
+	if (error)
+		/* try with an old symbol name */
+		goto old_api;
+
+	lxcfs_debug("start_loadavg: using load_daemon_v2");
+
+	if (__load_daemon_v2(&loadavg_pid, 1)) {
+		/* we have to NULLify loadavg_pid as in case of error it's contents are undefined */
+		loadavg_pid = 0;
+		return log_error(-1, "Failed to start loadavg daemon");
+	}
+
+	/* we are done */
+	return 0;
+
+old_api:
+	/* go with an old load_daemon() API */
 	dlerror();
 	__load_daemon = (pthread_t(*)(int))dlsym(dlopen_handle, "load_daemon");
 	error = dlerror();
 	if (error)
 		return log_error(-1, "%s - Failed to start loadavg daemon", error);
+
+	lxcfs_debug("start_loadavg: using load_daemon");
 
 	loadavg_pid = __load_daemon(1);
 	if (!loadavg_pid)
