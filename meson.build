@@ -202,8 +202,6 @@ liblxcfs_sources = files(
     'src/cgroups/cgfsng.c',
     'src/cgroups/cgroup.c',
     'src/cgroups/cgroup.h',
-    'src/cgroups/cgroup2_devices.c',
-    'src/cgroups/cgroup2_devices.h',
     'src/cgroups/cgroup_utils.c',
     'src/cgroups/cgroup_utils.h',
     'src/cgroup_fuse.c',
