@@ -459,11 +459,13 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (wants_swap) {
-		/* The total amount of swap is always reported to be the
+		/* For cgroups v1, the total amount of swap is always reported to be the
 		   lesser of the RAM+SWAP limit or the SWAP device size.
 		   This is because the kernel can swap as much as it
 		   wants and not only up to swtotal. */
-		swtotal = memlimit / 1024 + swtotal;
+		if (!liblxcfs_memory_is_cgroupv2())
+			swtotal = memlimit / 1024 + swtotal;
+
 		if (hostswtotal < swtotal) {
 			swtotal = hostswtotal;
 		}
@@ -1359,11 +1361,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-				/* The total amount of swap is always reported to be the
+				/* In cgroups v1, the total amount of swap is always reported to be the
 				   lesser of the RAM+SWAP limit or the SWAP device size.
 				   This is because the kernel can swap as much as it
 				   wants and not only up to swtotal. */
-
 				if (!liblxcfs_memory_is_cgroupv2())
 					swtotal += memlimit;
 

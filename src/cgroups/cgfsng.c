@@ -631,34 +631,25 @@ static int cgfsng_get_memory_slabinfo_fd(struct cgroup_ops *ops, const char *cgr
 	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
-static bool cgfsng_can_use_swap(struct cgroup_ops *ops)
+static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 {
-	bool has_swap = false;
+	__do_free char *cgroup_rel = NULL, *junk_value = NULL;
+	const char *file;
 	struct hierarchy *h;
 
 	h = ops->get_hierarchy(ops, "memory");
 	if (!h)
 		return false;
 
-	if (is_unified_hierarchy(h)) {
-		if (faccessat(h->fd, "memory.swap.max", F_OK, 0))
-			return false;
-
-		if (faccessat(h->fd, "memory.swap.current", F_OK, 0))
-			return false;
-
-		has_swap = true;
-	} else {
-		if (faccessat(h->fd, "memory.memsw.limit_in_bytes", F_OK, 0))
-			return false;
-
-		if (faccessat(h->fd, "memory.memsw.usage_in_bytes", F_OK, 0))
-			return false;
-
-		has_swap = true;
-	}
-
-	return has_swap;
+	cgroup_rel = must_make_path_relative(cgroup, NULL);
+	file = is_unified_hierarchy(h) ? "memory.swap.current" : "memory.memsw.usage_in_bytes";
+	/* For v2, we need to look at the lower levels of the hierarchy because
+	 * no 'memory.swap.current' file exists at the root. We must search
+	 * upwards in the hierarchy in case memory accounting is disabled via
+	 * cgroup.subtree_control for the given cgroup itself.
+	 */
+	int ret = cgroup_walkup_to_root(ops->cgroup2_root_fd, h->fd, cgroup_rel, file, &junk_value);
+	return ret == 0;
 }
 
 static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,

@@ -866,6 +866,7 @@ static void __attribute__((constructor)) lxcfs_init(void)
 {
 	__do_close int init_ns = -EBADF, root_fd = -EBADF,
 				  pidfd = -EBADF;
+	__do_free char *cgroup = NULL;
 	int i = 0;
 	pid_t pid;
 	struct hierarchy *hierarchy;
@@ -920,7 +921,8 @@ static void __attribute__((constructor)) lxcfs_init(void)
 		lxcfs_info("Kernel supports pidfds");
 	}
 
-	can_use_swap = cgroup_ops->can_use_swap(cgroup_ops);
+	cgroup = get_pid_cgroup(pid, "memory");
+	can_use_swap = cgroup && cgroup_ops->can_use_swap(cgroup_ops, cgroup);
 	if (can_use_swap)
 		lxcfs_info("Kernel supports swap accounting");
 	else
