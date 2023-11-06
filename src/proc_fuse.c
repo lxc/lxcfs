@@ -375,7 +375,7 @@ static void get_swap_info(const char *cgroup, uint64_t memlimit,
 				*swtotal = 0;
 			else
 				*swtotal = (memswlimit - memlimit) / 1024;
-			if (memusage > memswusage || swtotal == 0)
+			if (memusage > memswusage || *swtotal == 0)
 				*swusage = 0;
 			else
 				*swusage = (memswusage - memusage) / 1024;
