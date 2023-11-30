@@ -23,10 +23,6 @@
 #include "proc_loadavg.h"
 #include "sysfs_fuse.h"
 
-/* directory under which we mount the controllers - /run/lxcfs/controllers */
-#define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
-#define ROOTDIR RUNTIME_PATH "/lxcfs/root"
-
 /* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
 #define LXCFS_NUMSTRLEN64 21
 

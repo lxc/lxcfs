@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
+#include <linux/limits.h>
 #include <linux/magic.h>
 #include <linux/sched.h>
 #include <pthread.h>
@@ -40,14 +41,31 @@
 #include "syscall_numbers.h"
 #include "utils.h"
 
+/* directory under which we mount the controllers - /run/lxcfs/controllers */
+#define BASEDIR "/lxcfs/controllers"
+#define ROOTDIR "/lxcfs/root"
+
 static bool can_use_pidfd;
 static bool can_use_swap;
 static bool can_use_sys_cpu;
 static bool has_versioned_opts;
 static bool memory_is_cgroupv2;
 static __u32 host_personality;
+static char runtime_path[PATH_MAX] = DEFAULT_RUNTIME_PATH;
+
 
 static volatile sig_atomic_t reload_successful;
+
+
+static char *get_base_dir(void)
+{
+	return must_make_path(runtime_path, BASEDIR, NULL);
+}
+
+static char *get_root_dir(void)
+{
+	return must_make_path(runtime_path, ROOTDIR, NULL);
+}
 
 bool liblxcfs_functional(void)
 {
@@ -580,8 +598,9 @@ pid_t lookup_initpid_in_store(pid_t pid)
 
 static bool umount_if_mounted(void)
 {
-	if (umount2(BASEDIR, MNT_DETACH) < 0 && errno != EINVAL) {
-		lxcfs_error("Failed to unmount %s: %s.\n", BASEDIR, strerror(errno));
+	__do_free char *base_dir = get_base_dir();
+	if (umount2(base_dir, MNT_DETACH) < 0 && errno != EINVAL) {
+		lxcfs_error("Failed to unmount %s: %s.\n", base_dir, strerror(errno));
 		return false;
 	}
 	return true;
@@ -639,13 +658,14 @@ static bool is_on_ramfs(void)
 static int pivot_enter(void)
 {
 	__do_close int oldroot = -EBADF, newroot = -EBADF;
+	__do_free char *root_dir = get_root_dir();
 
 	oldroot = open("/", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (oldroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open old root for fchdir");
 
-	newroot = open(ROOTDIR, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+	newroot = open(root_dir, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
 	if (newroot < 0)
 		return log_error_errno(-1, errno,
 				       "Failed to open new root for fchdir");
@@ -654,7 +674,7 @@ static int pivot_enter(void)
 	if (fchdir(newroot) < 0)
 		return log_error_errno(-1,
 				       errno, "Failed to change directory to new rootfs: %s",
-				       ROOTDIR);
+				       root_dir);
 
 	/* pivot_root into our new root fs */
 	if (pivot_root(".", ".") < 0)
@@ -681,8 +701,10 @@ static int pivot_enter(void)
 
 static int chroot_enter(void)
 {
-	if (mount(ROOTDIR, "/", NULL, MS_REC | MS_BIND, NULL)) {
-		lxcfs_error("Failed to recursively bind-mount %s into /.", ROOTDIR);
+	__do_free char *root_dir = get_root_dir();
+
+	if (mount(root_dir, "/", NULL, MS_REC | MS_BIND, NULL)) {
+		lxcfs_error("Failed to recursively bind-mount %s into /.", root_dir);
 		return -1;
 	}
 
@@ -725,23 +747,28 @@ static int permute_and_enter(void)
 /* Prepare our new clean root. */
 static int permute_prepare(void)
 {
-	if (mkdir(ROOTDIR, 0700) < 0 && errno != EEXIST) {
+	__do_free char *base_dir = get_base_dir();
+	__do_free char *root_dir = get_root_dir();
+	__do_free char *new_runtime = must_make_path(root_dir, runtime_path, NULL);
+	__do_free char *new_base_dir = must_make_path(root_dir, base_dir, NULL);
+
+	if (mkdir(root_dir, 0700) < 0 && errno != EEXIST) {
 		lxcfs_error("%s\n", "Failed to create directory for new root.");
 		return -1;
 	}
 
-	if (mount("/", ROOTDIR, NULL, MS_BIND, 0) < 0) {
+	if (mount("/", root_dir, NULL, MS_BIND, 0) < 0) {
 		lxcfs_error("Failed to bind-mount / for new root: %s.\n", strerror(errno));
 		return -1;
 	}
 
-	if (mount(RUNTIME_PATH, ROOTDIR RUNTIME_PATH, NULL, MS_BIND, 0) < 0) {
+	if (mount(runtime_path, new_runtime, NULL, MS_BIND, 0) < 0) {
 		lxcfs_error("Failed to bind-mount /run into new root: %s.\n", strerror(errno));
 		return -1;
 	}
 
-	if (mount(BASEDIR, ROOTDIR BASEDIR, NULL, MS_REC | MS_MOVE, 0) < 0) {
-		printf("Failed to move " BASEDIR " into new root: %s.\n", strerror(errno));
+	if (mount(base_dir, new_base_dir, NULL, MS_REC | MS_MOVE, 0) < 0) {
+		printf("Failed to move %s into new root: %s.\n", base_dir, strerror(errno));
 		return -1;
 	}
 
@@ -764,7 +791,9 @@ static bool permute_root(void)
 
 static bool cgfs_prepare_mounts(void)
 {
-	if (!mkdir_p(BASEDIR, 0700)) {
+	__do_free char *base_dir = get_base_dir();
+
+	if (!mkdir_p(base_dir, 0700)) {
 		lxcfs_error("%s\n", "Failed to create lxcfs cgroup mountpoint.");
 		return false;
 	}
@@ -790,7 +819,7 @@ static bool cgfs_prepare_mounts(void)
 		return false;
 	}
 
-	if (mount("tmpfs", BASEDIR, "tmpfs", 0, "size=100000,mode=700") < 0) {
+	if (mount("tmpfs", base_dir, "tmpfs", 0, "size=100000,mode=700") < 0) {
 		lxcfs_error("%s\n", "Failed to mount tmpfs over lxcfs cgroup mountpoint.");
 		return false;
 	}
@@ -800,14 +829,17 @@ static bool cgfs_prepare_mounts(void)
 
 static bool cgfs_mount_hierarchies(void)
 {
-	if (!mkdir_p(BASEDIR DEFAULT_CGROUP_MOUNTPOINT, 0755))
+	__do_free char *base_dir = get_base_dir();
+	__do_free char *base_dir_cgroup_mount = must_make_path(base_dir, DEFAULT_CGROUP_MOUNTPOINT, NULL);
+
+	if (!mkdir_p(base_dir_cgroup_mount, 0700))
 		return false;
 
-	if (!cgroup_ops->mount(cgroup_ops, BASEDIR))
+	if (!cgroup_ops->mount(cgroup_ops, base_dir))
 		return false;
 
 	for (struct hierarchy **h = cgroup_ops->hierarchies; h && *h; h++) {
-		__do_free char *path = must_make_path(BASEDIR, (*h)->mountpoint, NULL);
+		__do_free char *path = must_make_path(base_dir, (*h)->mountpoint, NULL);
 		(*h)->fd = open(path, O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
 		if ((*h)->fd < 0)
 			return false;

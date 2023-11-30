@@ -49,7 +49,7 @@ if [ -x ${lxcfs} ]; then
 	LXCFSPID=$!
 else
 	UNSHARE=0
-	LXCFSPID=$(cat "{{RUNTIME_PATH}}/lxcfs.pid")
+	LXCFSPID=$(cat "{{DEFAULT_RUNTIME_PATH}}/lxcfs.pid")
 	echo "=> Re-using host lxcfs"
 	rmdir $LXCFSDIR
 	export LXCFSDIR=/var/lib/lxcfs
