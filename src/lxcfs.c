@@ -1185,7 +1185,7 @@ static void usage(void)
 	lxcfs_info("  -l, --enable-loadavg Enable loadavg virtualization");
 	lxcfs_info("  -o                   Options to pass directly through fuse");
 	lxcfs_info("  -p, --pidfile=FILE   Path to use for storing lxcfs pid");
-	lxcfs_info("                       Default pidfile is %s/lxcfs.pid", RUNTIME_PATH);
+	lxcfs_info("                       Default pidfile is %s/lxcfs.pid", DEFAULT_RUNTIME_PATH);
 	lxcfs_info("  -u, --disable-swap   Disable swap virtualization");
 	lxcfs_info("  -v, --version        Print lxcfs version");
 	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
@@ -1282,7 +1282,7 @@ int main(int argc, char *argv[])
 	int pidfile_fd = -EBADF;
 	int ret = EXIT_FAILURE;
 	char *pidfile = NULL, *token = NULL;
-	char pidfile_buf[STRLITERALLEN(RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
+	char pidfile_buf[STRLITERALLEN(DEFAULT_RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
 	bool debug = false, foreground = false;
 #if !HAVE_FUSE3
 	bool nonempty = false;
@@ -1474,7 +1474,7 @@ int main(int argc, char *argv[])
 #endif
 
 	if (!pidfile) {
-		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", RUNTIME_PATH);
+		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", DEFAULT_RUNTIME_PATH);
 		pidfile = pidfile_buf;
 	}
 
