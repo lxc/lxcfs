@@ -112,6 +112,8 @@ struct lxcfs_opts {
 	 * and the use of bool instead of explicited __u32 and __u64 we can't.
 	 */
 	__u32 version;
+        // As of opts version 2.
+        char runtime_path[PATH_MAX];
 };
 
 typedef enum lxcfs_opt_t {

@@ -762,8 +762,13 @@ static int permute_prepare(void)
 		return -1;
 	}
 
+	if (!mkdir_p(new_runtime, 0700)) {
+		lxcfs_error("Failed to create dir %s\n", new_runtime);
+		return -1;
+	}
+
 	if (mount(runtime_path, new_runtime, NULL, MS_BIND, 0) < 0) {
-		lxcfs_error("Failed to bind-mount /run into new root: %s.\n", strerror(errno));
+		lxcfs_error("Failed to bind-mount %s into new root: %s.\n", runtime_path, strerror(errno));
 		return -1;
 	}
 
@@ -894,7 +899,19 @@ please_compiler:
 	return;
 }
 
-static void __attribute__((constructor)) lxcfs_init(void)
+bool set_runtime_path(const char* new_path)
+{
+	if (new_path && strlen(new_path) < PATH_MAX) {
+		strcpy(runtime_path, new_path);
+		lxcfs_info("Using runtime path %s", runtime_path);
+		return true;
+	} else {
+		lxcfs_error("%s\n", "Failed to overwrite the runtime path");
+		return false;
+	}
+}
+
+void lxcfslib_init(void)
 {
 	__do_close int init_ns = -EBADF, root_fd = -EBADF,
 				  pidfd = -EBADF;
@@ -903,7 +920,7 @@ static void __attribute__((constructor)) lxcfs_init(void)
 	pid_t pid;
 	struct hierarchy *hierarchy;
 
-	lxcfs_info("Running constructor %s to reload liblxcfs", __func__);
+	lxcfs_info("Running %s to reload liblxcfs", __func__);
 
 	cgroup_ops = cgroup_init();
 	if (!cgroup_ops) {
@@ -1003,9 +1020,20 @@ static void __attribute__((destructor)) lxcfs_exit(void)
 void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = fc ? fc->private_data : NULL;
+
 #if HAVE_FUSE_RETURNS_DT_TYPE
 	can_use_sys_cpu = true;
 #endif
 	has_versioned_opts = true;
-	return fc ? fc->private_data : NULL;
+
+	// We can read runtime_path as of opts version 2.
+	if (opts && opts->version >= 2) {
+		set_runtime_path(opts->runtime_path);
+	}
+
+	/* initialize the library */
+	lxcfslib_init();
+
+	return opts;
 }
