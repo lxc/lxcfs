@@ -32,7 +32,11 @@
 #include "macro.h"
 #include "memory_utils.h"
 
+#define PID_FILE "/lxcfs.pid"
+
 void *dlopen_handle;
+static char runtime_path[PATH_MAX] = DEFAULT_RUNTIME_PATH;
+
 
 /* Functions to keep track of number of threads using the library */
 
@@ -146,7 +150,7 @@ static int stop_loadavg(void)
 
 static volatile sig_atomic_t need_reload;
 
-static int lxcfs_init_library(void)
+static int do_lxcfs_fuse_init(void)
 {
 	char *error;
 	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, void * cfg);
@@ -199,13 +203,12 @@ static void do_reload(bool reinit)
 
         dlopen_handle = dlopen(lxcfs_lib_path, RTLD_LAZY);
 	if (!dlopen_handle)
-		log_exit("%s - Failed to open liblxcfs.so", dlerror());
+		log_exit("%s - Failed to open liblxcfs.so at %s", dlerror(), lxcfs_lib_path);
 	else
 		lxcfs_debug("Opened %s", lxcfs_lib_path);
 
 good:
-	/* initialize the library */
-	if (reinit && lxcfs_init_library() < 0) {
+	if (reinit && do_lxcfs_fuse_init() < 0) {
 		log_exit("Failed to initialize liblxcfs.so");
 	}
 
@@ -1119,7 +1122,7 @@ static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 static void *lxcfs_init(struct fuse_conn_info *conn)
 #endif
 {
-	if (lxcfs_init_library() < 0)
+	if (do_lxcfs_fuse_init() < 0)
 		return NULL;
 
 #if HAVE_FUSE3
@@ -1193,6 +1196,8 @@ static void usage(void)
 	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
 	lxcfs_info("  --enable-cgroup      Enable cgroup emulation code");
+	lxcfs_info("  --runtime-dir=DIR    Path to use as the runtime directory.");
+	lxcfs_info("                       Default is %s", DEFAULT_RUNTIME_PATH);
 	exit(EXIT_FAILURE);
 }
 
@@ -1244,6 +1249,7 @@ static const struct option long_options[] = {
 	{"enable-cgroup",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
+	{"runtime-dir",		required_argument,	0,	  0	},
 	{								},
 };
 
@@ -1286,7 +1292,7 @@ int main(int argc, char *argv[])
 	int pidfile_fd = -EBADF;
 	int ret = EXIT_FAILURE;
 	char *pidfile = NULL, *token = NULL;
-	char pidfile_buf[STRLITERALLEN(DEFAULT_RUNTIME_PATH) + STRLITERALLEN("/lxcfs.pid") + 1] = {};
+	char pidfile_buf[PATH_MAX + sizeof(PID_FILE)] = {};
 	bool debug = false, foreground = false;
 #if !HAVE_FUSE3
 	bool nonempty = false;
@@ -1303,6 +1309,7 @@ int main(int argc, char *argv[])
 	char *new_fuse_opts = NULL;
 	char *const *new_argv;
 	struct lxcfs_opts *opts;
+	char *runtime_path_arg = NULL;
 
 	opts = malloc(sizeof(struct lxcfs_opts));
 	if (opts == NULL) {
@@ -1313,7 +1320,7 @@ int main(int argc, char *argv[])
 	opts->swap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
-	opts->version = 1;
+	opts->version = 2;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
@@ -1324,6 +1331,8 @@ int main(int argc, char *argv[])
 				opts->use_cfs = true;
 			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
 				cgroup_is_enabled = true;
+			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)
+				runtime_path_arg = optarg;
 			else
 				usage();
 			break;
@@ -1375,6 +1384,12 @@ int main(int argc, char *argv[])
 		lxcfs_error("Missing mountpoint");
 		goto out;
 	}
+
+	if (runtime_path_arg) {
+		strcpy(runtime_path, runtime_path_arg);
+		lxcfs_info("runtime path set to %s", runtime_path);
+	}
+	strcpy(opts->runtime_path, runtime_path);
 
 	fuse_argv[fuse_argc++] = argv[0];
 	if (debug)
@@ -1467,6 +1482,7 @@ int main(int argc, char *argv[])
 	lxcfs_info("Starting LXCFS at %s", argv[0]);
 
 	do_reload(false);
+
 	if (install_signal_handler(SIGUSR1, sigusr1_reload)) {
 		lxcfs_error("%s - Failed to install SIGUSR1 signal handler", strerror(errno));
 		goto out;
@@ -1480,7 +1496,7 @@ int main(int argc, char *argv[])
 #endif
 
 	if (!pidfile) {
-		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s/lxcfs.pid", DEFAULT_RUNTIME_PATH);
+		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s%s", runtime_path, PID_FILE);
 		pidfile = pidfile_buf;
 	}
 
