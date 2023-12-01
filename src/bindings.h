@@ -183,4 +183,7 @@ static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 
 __visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data);
 
+// Needs to be called on library load/reload.
+__visible extern void lxcfslib_init(const char* runtime_path);
+
 #endif /* __LXCFS_BINDINGS_H */
