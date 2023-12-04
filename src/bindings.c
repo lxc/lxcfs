@@ -760,6 +760,11 @@ static int permute_prepare(void)
 		return -1;
 	}
 
+        if (!mkdir_p(new_runtime, 0755)) {
+		lxcfs_error("Failed to create dir %s\n", new_runtime);
+		return -1;
+        }
+
 	if (mount(runtime_path, new_runtime, NULL, MS_BIND, 0) < 0) {
 		lxcfs_error("Failed to bind-mount %s into new root: %s.\n", runtime_path, strerror(errno));
 		return -1;

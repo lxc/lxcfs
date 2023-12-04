@@ -192,7 +192,6 @@ static bool do_set_runtime_path(const char *path)
                 return false;
         }
 
-        lxcfs_info("set runtime path %s", path);
 	return __set_runtime_path(path);
 }
 
