@@ -39,6 +39,8 @@
 		#if _MIPS_SIM == _MIPS_SIM_ABI64	/* n64 */
 			#define __NR_pivot_root 5151
 		#endif
+	#elif defined __loongarch64
+		#define __NR_pivot_root 41
 	#else
 		#define -1
 		#warning "__NR_pivot_root not defined for your architecture"
@@ -72,6 +74,8 @@
 		#if _MIPS_SIM == _MIPS_SIM_ABI64	/* n64 */
 			#define __NR_bpf 5315
 		#endif
+	#elif defined __loongarch64
+		#define __NR_bpf 280
 	#else
 		#define -1
 		#warning "__NR_bpf not defined for your architecture"
