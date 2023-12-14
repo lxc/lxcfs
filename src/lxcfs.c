@@ -1181,7 +1181,7 @@ static void usage(void)
 	lxcfs_info("Options :");
 	lxcfs_info("  -d, --debug          Run lxcfs with debugging enabled");
 	lxcfs_info("  -f, --foreground     Run lxcfs in the foreground");
-	lxcfs_info("  -n, --help           Print help");
+	lxcfs_info("  -h, --help           Print help");
 	lxcfs_info("  -l, --enable-loadavg Enable loadavg virtualization");
 	lxcfs_info("  -o                   Options to pass directly through fuse");
 	lxcfs_info("  -p, --pidfile=FILE   Path to use for storing lxcfs pid");
