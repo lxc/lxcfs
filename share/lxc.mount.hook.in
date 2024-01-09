@@ -25,7 +25,7 @@ fi
 
 # /sys/devices/system/cpu
 if [ -d {{LXCFSTARGETDIR}}/sys/devices/system/cpu ] ; then
-    if [ -f {{LXCFSTARGETDIR}}/sys/devices/system/cpu/uevent ]; then
+    if [ -f {{LXCFSTARGETDIR}}/sys/devices/system/cpu/uevent && -e "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu" ]; then
         mount -n --bind {{LXCFSTARGETDIR}}/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
     else
         for entry in {{LXCFSTARGETDIR}}/sys/devices/system/cpu/*; do
