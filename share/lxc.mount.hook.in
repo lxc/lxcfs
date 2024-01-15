@@ -24,7 +24,7 @@ if [ -d {{LXCFSTARGETDIR}}/proc/ ]; then
 fi
 
 # /sys/devices/system/cpu
-if [ -d {{LXCFSTARGETDIR}}/sys/devices/system/cpu ] ; then
+if [ -d {{LXCFSTARGETDIR}}/sys/devices/system/cpu ] && [ -d "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu" ]; then
     if [ -f {{LXCFSTARGETDIR}}/sys/devices/system/cpu/uevent ]; then
         mount -n --bind {{LXCFSTARGETDIR}}/sys/devices/system/cpu "${LXC_ROOTFS_MOUNT}/sys/devices/system/cpu"
     else
