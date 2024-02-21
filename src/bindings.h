@@ -23,10 +23,6 @@
 #include "proc_loadavg.h"
 #include "sysfs_fuse.h"
 
-/* directory under which we mount the controllers - /run/lxcfs/controllers */
-#define BASEDIR RUNTIME_PATH "/lxcfs/controllers"
-#define ROOTDIR RUNTIME_PATH "/lxcfs/root"
-
 /* Maximum number for 64 bit integer is a string with 21 digits: 2^64 - 1 = 21 */
 #define LXCFS_NUMSTRLEN64 21
 
@@ -186,5 +182,10 @@ static inline pid_t lxcfs_clone(int (*fn)(void *), void *arg, int flags)
 }
 
 __visible extern void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data);
+
+// Overrides the runtime path from DEFAULT_RUNTIME_PATH - /var/run
+__visible extern bool set_runtime_path(const char* runtime_path);
+// Needs to be called on library load/reload.
+__visible extern void lxcfslib_init(void);
 
 #endif /* __LXCFS_BINDINGS_H */
