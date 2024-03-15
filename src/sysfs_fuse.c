@@ -307,11 +307,7 @@ __lxcfs_fuse_ops int sys_write(const char *path, const char *buf, size_t size,
 	if (f->type != LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE)
 		return -EINVAL;
 
-	fd = open(path, O_WRONLY | O_CLOEXEC);
-	if (fd == -1)
-		return -errno;
-
-	return pwrite(fd, buf, size, offset);
+	return -EACCES;
 }
 
 static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t filler,
