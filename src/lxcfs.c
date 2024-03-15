@@ -661,6 +661,8 @@ static int do_sys_releasedir(const char *path, struct fuse_file_info *fi)
 	return __sys_releasedir(path, fi);
 }
 
+static bool cgroup_is_enabled = false;
+
 #if HAVE_FUSE3
 static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_info *fi)
 #else
@@ -681,7 +683,7 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 		return 0;
 	}
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_getattr(path, sb);
 		down_users();
@@ -712,7 +714,7 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	if (strcmp(path, "/") == 0)
 		return 0;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_opendir(path, fi);
 		down_users();
@@ -747,13 +749,13 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		    dir_filler(filler, buf, "..", 0) != 0 ||
 		    dir_filler(filler, buf, "proc", 0) != 0 ||
 		    dir_filler(filler, buf, "sys", 0) != 0 ||
-		    dir_filler(filler, buf, "cgroup", 0) != 0)
+		    (cgroup_is_enabled && dir_filler(filler, buf, "cgroup", 0) != 0))
 			return -ENOMEM;
 
 		return 0;
 	}
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_readdir(path, buf, filler, offset, fi);
 		down_users();
@@ -784,7 +786,7 @@ static int lxcfs_access(const char *path, int mode)
 	if (strcmp(path, "/") == 0 && (mode & W_OK) == 0)
 		return 0;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_access(path, mode);
 		down_users();
@@ -846,7 +848,7 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_open(path, fi);
 		down_users();
@@ -875,7 +877,7 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_read(path, buf, size, offset, fi);
 		down_users();
@@ -904,7 +906,7 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_write(path, buf, size, offset, fi);
 		down_users();
@@ -983,7 +985,7 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_mkdir(path, mode);
 		down_users();
@@ -1001,7 +1003,7 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_chown(path, uid, gid);
 		down_users();
@@ -1028,7 +1030,7 @@ int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
 int lxcfs_truncate(const char *path, off_t newsize)
 #endif
 {
-	if (strncmp(path, "/cgroup", 7) == 0)
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0)
 		return 0;
 
 	if (strncmp(path, "/sys", 4) == 0)
@@ -1041,7 +1043,7 @@ int lxcfs_rmdir(const char *path)
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_rmdir(path);
 		down_users();
@@ -1059,7 +1061,7 @@ int lxcfs_chmod(const char *path, mode_t mode)
 {
 	int ret;
 
-	if (strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
 		up_users();
 		ret = do_cg_chmod(path, mode);
 		down_users();
@@ -1190,6 +1192,7 @@ static void usage(void)
 	lxcfs_info("  -v, --version        Print lxcfs version");
 	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
+	lxcfs_info("  --enable-cgroup      Enable cgroup emulation code");
 	exit(EXIT_FAILURE);
 }
 
@@ -1238,6 +1241,7 @@ static const struct option long_options[] = {
 
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
+	{"enable-cgroup",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{								},
@@ -1318,6 +1322,8 @@ int main(int argc, char *argv[])
 				opts->use_pidfd = true;
 			else if (strcmp(long_options[idx].name, "enable-cfs") == 0)
 				opts->use_cfs = true;
+			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
+				cgroup_is_enabled = true;
 			else
 				usage();
 			break;
