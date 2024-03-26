@@ -20,12 +20,6 @@ jobs:
           - ubuntu-22.04
     runs-on: ${{ matrix.os }}
     steps:
-      # TODO(mihalicyn): Remove once the following is fixed:
-      # https://github.com/actions/runner-images/issues/9491
-      - name: Reduce ASLR entropy as a temporary workaround
-        run: |
-          sudo sysctl -w vm.mmap_rnd_bits=28
-
       - name: Checkout code
         uses: actions/checkout@v2
 
@@ -69,12 +63,6 @@ jobs:
           - ubuntu-22.04
     runs-on: ${{ matrix.os }}
     steps:
-      # TODO(mihalicyn): Remove once the following is fixed:
-      # https://github.com/actions/runner-images/issues/9491
-      - name: Reduce ASLR entropy as a temporary workaround
-        run: |
-          sudo sysctl -w vm.mmap_rnd_bits=28
-
       - name: Checkout code
         uses: actions/checkout@v2
 
