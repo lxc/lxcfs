@@ -80,6 +80,21 @@ bool is_cgroup_fd(int fd)
 	return false;
 }
 
+bool is_cgroup2_fd(int fd)
+{
+	int ret;
+	struct statfs fs;
+
+	ret = fstatfs(fd, &fs);
+	if (ret)
+		return false;
+
+	if (is_fs_type(&fs, CGROUP2_SUPER_MAGIC))
+		return true;
+
+	return false;
+}
+
 void *must_realloc(void *orig, size_t sz)
 {
 	void *ret;
@@ -766,11 +781,14 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 		return 0;
 	}
 
+	if (!is_cgroup2_fd(dir_fd))
+		return -EINVAL;
+
 	/*
 	 * Legacy cgroup hierarchies should always show a valid value in the
 	 * file of the cgroup. So no need to do this upwards walking crap.
 	 */
-	if (cgroup2_root_fd < 0)
+	if (cgroup2_root_fd < 0 || !is_cgroup2_fd(cgroup2_root_fd))
 		return -EINVAL;
 	else if (same_file(cgroup2_root_fd, dir_fd))
 		return 1;
@@ -790,6 +808,9 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 		dir_fd = openat(inner_fd, "..", O_DIRECTORY | O_PATH | O_CLOEXEC);
 		if (dir_fd < 0)
 			return -errno;
+
+		if (!is_cgroup2_fd(dir_fd))
+			return log_error_errno(-ELOOP, ELOOP, "Found non-cgroup2 directory during cgroup2 tree walkup. Terminating walk");
 
 		/*
 		 * We're at the root of the cgroup2 tree so stop walking
