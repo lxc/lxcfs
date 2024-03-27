@@ -239,21 +239,37 @@ __lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static uint64_t get_memlimit(const char *cgroup, bool swap)
+/**
+ * Gets a non-hierarchical memory controller limit, or UINT64_MAX if no limit is
+ * in place. If `swap` is true, reads 'swap' (v2) or 'memsw' (v1); otherwise
+ * reads the memory (RAM) limits.
+ *
+ * @returns 0 on success (and sets `*limit`), < 0 on error
+ */
+static int get_memlimit(const char *cgroup, bool swap, uint64_t *limit)
 {
 	__do_free char *memlimit_str = NULL;
-	uint64_t memlimit = 0;
+	uint64_t memlimit = UINT64_MAX;
 	int ret;
 
 	if (swap)
 		ret = cgroup_ops->get_memory_swap_max(cgroup_ops, cgroup, &memlimit_str);
 	else
 		ret = cgroup_ops->get_memory_max(cgroup_ops, cgroup, &memlimit_str);
-	if (ret > 0 && memlimit_str[0] && safe_uint64(memlimit_str, &memlimit, 10) < 0)
-		lxcfs_error("Failed to convert memory%s.max=%s for cgroup %s",
-			    swap ? ".swap" : "", memlimit_str, cgroup);
 
-	return memlimit;
+	if (ret < 0)
+		return ret;
+
+	if (memlimit_str[0]) {
+		ret = safe_uint64(memlimit_str, &memlimit, 10);
+		if (ret < 0) {
+			lxcfs_error("Failed to convert memory%s.max=%s for cgroup %s",
+				    swap ? ".swap" : "", memlimit_str, cgroup);
+			return ret;
+		}
+	}
+	*limit = memlimit;
+	return 0;
 }
 
 /*
@@ -318,31 +334,44 @@ static char *gnu_dirname(char *path)
 	return path;
 }
 
-static uint64_t get_min_memlimit(const char *cgroup, bool swap)
+/**
+ * Gets a hierarchical memory controller limit, or UINT64_MAX if no limit is
+ * in place. If `swap` is true, reads 'swap' (v2) or 'memsw' (v1); otherwise
+ * reads the memory (RAM) limits.
+ *
+ * @returns 0 on success (and sets `*limit`), < 0 on error
+ */
+static int get_min_memlimit(const char *cgroup, bool swap, uint64_t *limit)
 {
 	__do_free char *copy = NULL;
-	uint64_t memlimit = 0, retlimit = 0;
+	uint64_t memlimit = UINT64_MAX, retlimit = UINT64_MAX;
+	int ret;
 
 	copy = strdup(cgroup);
 	if (!copy)
 		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
 
-	retlimit = get_memlimit(copy, swap);
+	ret = get_memlimit(copy, swap, &retlimit);
+	if (ret < 0)
+		return ret;
 
 	/*
 	 * If the cgroup doesn't start with / (probably won't happen), dirname()
 	 * will terminate with "" instead of "/"
 	 */
-	while (*copy && strcmp(copy, "/") != 0) {
+	while (retlimit != 0 && *copy && strcmp(copy, "/") != 0) {
 		char *it = copy;
 
 		it = gnu_dirname(it);
-		memlimit = get_memlimit(it, swap);
-		if (memlimit > 0 && memlimit < retlimit)
+		ret = get_memlimit(it, swap, &memlimit);
+		if (ret < 0)
+			return ret;
+		if (memlimit < retlimit)
 			retlimit = memlimit;
-	};
+	}
 
-	return retlimit;
+	*limit = retlimit;
+	return 0;
 }
 
 static inline bool startswith(const char *line, const char *pref)
@@ -361,30 +390,30 @@ static void get_swap_info(const char *cgroup, uint64_t memlimit,
 	*swtotal = *swusage = 0;
 	*memswpriority = 1;
 
-	memswlimit = get_min_memlimit(cgroup, true);
-	if (memswlimit > 0) {
-		ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
-		if (ret < 0 || safe_uint64(memswusage_str, &memswusage, 10) != 0)
-			return;
+	ret = get_min_memlimit(cgroup, true, &memswlimit);
+	if (ret < 0)
+		return;
+	ret = cgroup_ops->get_memory_swap_current(cgroup_ops, cgroup, &memswusage_str);
+	if (ret < 0 || safe_uint64(memswusage_str, &memswusage, 10) < 0)
+		return;
 
-		if (liblxcfs_memory_is_cgroupv2()) {
-			*swtotal = memswlimit / 1024;
-			*swusage = memswusage / 1024;
-		} else {
-			if (memlimit > memswlimit)
-				*swtotal = 0;
-			else
-				*swtotal = (memswlimit - memlimit) / 1024;
-			if (memusage > memswusage || swtotal == 0)
-				*swusage = 0;
-			else
-				*swusage = (memswusage - memusage) / 1024;
-		}
-
-		ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
-		if (ret >= 0)
-			safe_uint64(memswpriority_str, memswpriority, 10);
+	if (liblxcfs_memory_is_cgroupv2()) {
+		*swtotal = memswlimit / 1024;
+		*swusage = memswusage / 1024;
+	} else {
+		if (memlimit > memswlimit)
+			*swtotal = 0;
+		else
+			*swtotal = (memswlimit - memlimit) / 1024;
+		if (memusage > memswusage || *swtotal == 0)
+			*swusage = 0;
+		else
+			*swusage = (memswusage - memusage) / 1024;
 	}
+
+	ret = cgroup_ops->get_memory_swappiness(cgroup_ops, cgroup, &memswpriority_str);
+	if (ret >= 0)
+		safe_uint64(memswpriority_str, memswpriority, 10);
 }
 
 static int proc_swaps_read(char *buf, size_t size, off_t offset,
@@ -432,12 +461,12 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/swaps", buf, size, d);
 	prune_init_slice(cgroup);
 
-	memlimit = get_min_memlimit(cgroup, false);
-
+	ret = get_min_memlimit(cgroup, false, &memlimit);
+	if (ret < 0)
+		return 0;
 	ret = cgroup_ops->get_memory_current(cgroup_ops, cgroup, &memusage_str);
 	if (ret < 0)
 		return 0;
-
 	if (safe_uint64(memusage_str, &memusage, 10) < 0)
 		lxcfs_error("Failed to convert memusage %s", memusage_str);
 
@@ -459,11 +488,13 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (wants_swap) {
-		/* The total amount of swap is always reported to be the
+		/* For cgroups v1, the total amount of swap is always reported to be the
 		   lesser of the RAM+SWAP limit or the SWAP device size.
 		   This is because the kernel can swap as much as it
 		   wants and not only up to swtotal. */
-		swtotal = memlimit / 1024 + swtotal;
+		if (!liblxcfs_memory_is_cgroupv2())
+			swtotal = memlimit / 1024 + swtotal;
+
 		if (hostswtotal < swtotal) {
 			swtotal = hostswtotal;
 		}
@@ -1318,8 +1349,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	if (!cgroup_parse_memory_stat(cgroup, &mstat))
 		return read_file_fuse("/proc/meminfo", buf, size, d);
 
-	memlimit = get_min_memlimit(cgroup, false);
-
+	ret = get_min_memlimit(cgroup, false, &memlimit);
+	if (ret < 0)
+		return read_file_fuse("/proc/meminfo", buf, size, d);
 	/*
 	 * Following values are allowed to fail, because swapaccount might be
 	 * turned off for current kernel.
@@ -1359,11 +1391,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 				sscanf(line + STRLITERALLEN("SwapTotal:"), "%" PRIu64, &hostswtotal);
 
-				/* The total amount of swap is always reported to be the
+				/* In cgroups v1, the total amount of swap is always reported to be the
 				   lesser of the RAM+SWAP limit or the SWAP device size.
 				   This is because the kernel can swap as much as it
 				   wants and not only up to swtotal. */
-
 				if (!liblxcfs_memory_is_cgroupv2())
 					swtotal += memlimit;
 

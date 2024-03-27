@@ -148,7 +148,7 @@ struct cgroup_ops {
 				   char **value);
 	int (*get_memory_slabinfo_fd)(struct cgroup_ops *ops,
 				      const char *cgroup);
-	bool (*can_use_swap)(struct cgroup_ops *ops);
+	bool (*can_use_swap)(struct cgroup_ops *ops, const char *cgroup);
 
 	/* cpuset */
 	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
