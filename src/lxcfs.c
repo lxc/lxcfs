@@ -297,6 +297,7 @@ static int do_##type##_##fsop(LIB_FS_##fsop##_OP_ARGS_TYPE)	\
 DEF_LIB_FS_OP(cg   , getattr)
 DEF_LIB_FS_OP(proc , getattr)
 DEF_LIB_FS_OP(sys  , getattr)
+DEF_LIB_FS_OP(lxcfsctl, getattr)
 
 #define LIB_FS_read_OP_ARGS_TYPE	const char *path, char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
@@ -304,12 +305,14 @@ DEF_LIB_FS_OP(sys  , getattr)
 DEF_LIB_FS_OP(cg   , read)
 DEF_LIB_FS_OP(proc , read)
 DEF_LIB_FS_OP(sys  , read)
+DEF_LIB_FS_OP(lxcfsctl, read)
 
 #define LIB_FS_write_OP_ARGS_TYPE	const char *path, const char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_write_OP_ARGS		path, buf, size, offset, fi
 DEF_LIB_FS_OP(cg   , write)
 DEF_LIB_FS_OP(sys  , write)
+DEF_LIB_FS_OP(lxcfsctl, write)
 
 #define LIB_FS_mkdir_OP_ARGS_TYPE	const char *path, mode_t mode
 #define LIB_FS_mkdir_OP_ARGS		path, mode
@@ -333,38 +336,45 @@ DEF_LIB_FS_OP(cg, chmod)
 DEF_LIB_FS_OP(cg   , readdir)
 DEF_LIB_FS_OP(proc , readdir)
 DEF_LIB_FS_OP(sys  , readdir)
+DEF_LIB_FS_OP(lxcfsctl, readdir)
 
 #define LIB_FS_readlink_OP_ARGS_TYPE	const char *path, char *buf, size_t size
 #define LIB_FS_readlink_OP_ARGS		path, buf, size
 DEF_LIB_FS_OP(sys  , readlink)
+DEF_LIB_FS_OP(lxcfsctl, readlink)
 
 #define LIB_FS_open_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_open_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , open)
 DEF_LIB_FS_OP(proc , open)
 DEF_LIB_FS_OP(sys  , open)
+DEF_LIB_FS_OP(lxcfsctl, open)
 
 #define LIB_FS_access_OP_ARGS_TYPE	const char *path, int mode
 #define LIB_FS_access_OP_ARGS		path, mode
 DEF_LIB_FS_OP(cg   , access)
 DEF_LIB_FS_OP(proc , access)
 DEF_LIB_FS_OP(sys  , access)
+DEF_LIB_FS_OP(lxcfsctl, access)
 
 #define LIB_FS_opendir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_opendir_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , opendir)
 DEF_LIB_FS_OP(sys  , opendir)
+DEF_LIB_FS_OP(lxcfsctl, opendir)
 
 #define LIB_FS_release_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_release_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , release)
 DEF_LIB_FS_OP(proc , release)
 DEF_LIB_FS_OP(sys  , release)
+DEF_LIB_FS_OP(lxcfsctl, release)
 
 #define LIB_FS_releasedir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_releasedir_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , releasedir)
 DEF_LIB_FS_OP(sys  , releasedir)
+DEF_LIB_FS_OP(lxcfsctl, releasedir)
 
 static bool cgroup_is_enabled = false;
 
@@ -409,6 +419,13 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_getattr(path, sb);
+		down_users();
+		return ret;
+	}
+
 	return -ENOENT;
 }
 
@@ -436,6 +453,13 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_opendir(path, fi);
+		down_users();
+		return ret;
+	}
+
 	return -ENOENT;
 }
 
@@ -455,6 +479,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	if (strcmp(path, "/") == 0) {
 		if (dir_filler(filler, buf, ".", 0) != 0 ||
 		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dir_filler(filler, buf, "lxcfs", 0) != 0 ||
 		    dir_filler(filler, buf, "proc", 0) != 0 ||
 		    dir_filler(filler, buf, "sys", 0) != 0 ||
 		    (cgroup_is_enabled && dir_filler(filler, buf, "cgroup", 0) != 0))
@@ -480,6 +505,13 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_readdir(path, buf, filler, offset, fi);
+		down_users();
+		return ret;
+	}
+
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_readdir(path, buf, filler, offset, fi);
 		down_users();
 		return ret;
 	}
@@ -515,6 +547,13 @@ static int lxcfs_access(const char *path, int mode)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_access(path, mode);
+		down_users();
+		return ret;
+	}
+
 	return -EACCES;
 }
 
@@ -535,6 +574,13 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_releasedir(path, fi);
+		down_users();
+		return ret;
+	}
+
+	if (LXCFS_TYPE_LXCFS(type)) {
+		up_users();
+		ret = do_lxcfsctl_releasedir(path, fi);
 		down_users();
 		return ret;
 	}
@@ -577,6 +623,13 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_open(path, fi);
+		down_users();
+		return ret;
+	}
+
 	return -EACCES;
 }
 
@@ -609,6 +662,13 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_read(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
 	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
 		path, type, fi->fh);
 
@@ -637,6 +697,13 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_write(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
 	return -EINVAL;
 }
 
@@ -647,6 +714,13 @@ int lxcfs_readlink(const char *path, char *buf, size_t size)
 	if (strncmp(path, "/sys", 4) == 0) {
 		up_users();
 		ret = do_sys_readlink(path, buf, size);
+		down_users();
+		return ret;
+	}
+
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_readlink(path, buf, size);
 		down_users();
 		return ret;
 	}
@@ -683,6 +757,13 @@ static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_release(path, fi);
+		down_users();
+		return ret;
+	}
+
+	if (LXCFS_TYPE_LXCFS(type)) {
+		up_users();
+		ret = do_lxcfsctl_release(path, fi);
 		down_users();
 		return ret;
 	}
@@ -733,6 +814,9 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 	if (strncmp(path, "/sys", 4) == 0)
 		return -EPERM;
 
+	if (strncmp(path, "/lxcfs", 6) == 0)
+		return -EPERM;
+
 	return -ENOENT;
 }
 
@@ -751,6 +835,9 @@ int lxcfs_truncate(const char *path, off_t newsize)
 		return 0;
 
 	if (strncmp(path, "/sys", 4) == 0)
+		return 0;
+
+	if (strncmp(path, "/lxcfs", 6) == 0)
 		return 0;
 
 	return -EPERM;
@@ -789,6 +876,9 @@ int lxcfs_chmod(const char *path, mode_t mode)
 		return -EPERM;
 
 	if (strncmp(path, "/sys", 4) == 0)
+		return -EPERM;
+
+	if (strncmp(path, "/lxcfs", 6) == 0)
 		return -EPERM;
 
 	return -ENOENT;

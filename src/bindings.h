@@ -67,6 +67,10 @@ enum lxcfs_virt_t {
 
 	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE,
 #define LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH "/sys/devices/system/cpu/online"
+
+	LXC_TYPE_LXCFS,
+
+
 	LXC_TYPE_MAX,
 };
 
@@ -74,6 +78,7 @@ enum lxcfs_virt_t {
 #define LXCFS_TYPE_CGROUP(type) (type >= LXC_TYPE_CGDIR && type <= LXC_TYPE_CGFILE)
 #define LXCFS_TYPE_PROC(type) (type >= LXC_TYPE_PROC_MEMINFO && type <= LXC_TYPE_PROC_SLABINFO)
 #define LXCFS_TYPE_SYS(type) (type >= LXC_TYPE_SYS && type <= LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE)
+#define LXCFS_TYPE_LXCFS(type) (type >= LXC_TYPE_LXCFS && type < LXC_TYPE_MAX)
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
 /*
