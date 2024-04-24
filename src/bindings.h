@@ -149,11 +149,18 @@ struct file_info {
  *	 cached initpid.
  */
 struct pidns_store {
+	/* increase version if the structure was changed */
+	__u16 version;
+
+	/* hash table key */
 	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
-	pid_t initpid; /* the pid of nit in that ns */
+
+	/* next entry in hash table's bucket */
+	struct pidns_store *next;
+
+	pid_t initpid; /* the pid of init in that ns */
 	int init_pidfd;
 	int64_t ctime; /* the time at which /proc/$initpid was created */
-	struct pidns_store *next;
 	int64_t lastcheck;
 };
 

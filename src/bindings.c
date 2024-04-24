@@ -344,6 +344,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 
 	ino_hash = HASH(pidns_inode);
 	*entry = (struct pidns_store){
+		.version	= 0,
 		.ino		= pidns_inode,
 		.initpid	= pid,
 		.ctime		= st.st_ctime,
