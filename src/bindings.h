@@ -7,6 +7,7 @@
 
 #include <linux/limits.h>
 #include <linux/types.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -131,6 +132,42 @@ struct file_info {
 	int buflen;
 	int size; /* actual data size */
 	int cached;
+};
+
+/*
+ * A table caching which pid is init for a pid namespace.
+ * When looking up which pid is init for $qpid, we first
+ * 1. Stat /proc/$qpid/ns/pid.
+ * 2. Check whether the ino_t is in our store.
+ *   a. if not, fork a child in qpid's ns to send us
+ *	 ucred.pid = 1, and read the initpid.  Cache
+ *	 initpid and creation time for /proc/initpid
+ *	 in a new store entry.
+ *   b. if so, verify that /proc/initpid still matches
+ *	 what we have saved.  If not, clear the store
+ *	 entry and go back to a.  If so, return the
+ *	 cached initpid.
+ */
+struct pidns_store {
+	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
+	pid_t initpid; /* the pid of nit in that ns */
+	int init_pidfd;
+	int64_t ctime; /* the time at which /proc/$initpid was created */
+	struct pidns_store *next;
+	int64_t lastcheck;
+};
+
+/* lol - look at how they are allocated in the kernel */
+#define PIDNS_HASH_SIZE 4096
+#define HASH(x) ((x) % PIDNS_HASH_SIZE)
+
+/* structure that contains data that should survive reload */
+struct lxcfs_persistent_data {
+	/* increase version if the structure was changed */
+	__u16 version;
+
+	struct pidns_store **pidns_hash_table;
+	pthread_mutex_t pidns_store_mutex;
 };
 
 struct lxcfs_opts {
