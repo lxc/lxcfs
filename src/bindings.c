@@ -248,6 +248,12 @@ static void remove_initpid(struct pidns_store *entry)
 	}
 }
 
+static bool keep_pidns_entry(struct pidns_store *entry)
+{
+	return (entry->version >= 1) && entry->keep_on_reload &&
+	       initpid_still_valid(entry);
+}
+
 #define PURGE_SECS 5
 /* Must be called under store_lock */
 static void prune_initpid_store(void)
@@ -274,10 +280,11 @@ static void prune_initpid_store(void)
 
 	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
 		for (struct pidns_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
-			if (entry->lastcheck < threshold) {
-				struct pidns_store *cur = entry;
+			struct pidns_store *cur = entry;
 
-				lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
+			if ((entry->lastcheck < threshold) &&
+			    !keep_pidns_entry(cur)) {
+				lxcfs_debug("Removed cache entry for pid %d from init pid cache", cur->initpid);
 
 				if (prev)
 					prev->next = entry->next;
@@ -287,6 +294,8 @@ static void prune_initpid_store(void)
 				close_prot_errno_disarm(cur->init_pidfd);
 				free_disarm(cur);
 			} else {
+				lxcfs_debug("Kept cache entry for pid %d in init pid cache", cur->initpid);
+
 				prev = entry;
 				entry = entry->next;
 			}
@@ -301,15 +310,25 @@ static void clear_initpid_store(void)
 
 	store_lock();
 	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
-		for (struct pidns_store *entry = pidns_hash_table[i]; entry;) {
+		for (struct pidns_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
 			struct pidns_store *cur = entry;
 
-			lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
+			if (keep_pidns_entry(cur)) {
+				lxcfs_debug("Kept cache entry for pid %d in init pid cache", cur->initpid);
 
-			pidns_hash_table[i] = entry->next;
-			entry = entry->next;
-			close_prot_errno_disarm(cur->init_pidfd);
-			free_disarm(cur);
+				prev = entry;
+				entry = entry->next;
+			} else {
+				lxcfs_debug("Removed cache entry for pid %d from init pid cache", cur->initpid);
+
+				if (prev)
+					prev->next = entry->next;
+				else
+					pidns_hash_table[i] = entry->next;
+				entry = entry->next;
+				close_prot_errno_disarm(cur->init_pidfd);
+				free_disarm(cur);
+			}
 		}
 	}
 	store_unlock();
@@ -344,13 +363,14 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 
 	ino_hash = HASH(pidns_inode);
 	*entry = (struct pidns_store){
-		.version	= 0,
+		.version	= 1,
 		.ino		= pidns_inode,
 		.initpid	= pid,
 		.ctime		= st.st_ctime,
 		.next		= pidns_hash_table[ino_hash],
 		.lastcheck	= time(NULL),
 		.init_pidfd	= move_fd(pidfd),
+		.keep_on_reload	= false,
 	};
 	pidns_hash_table[ino_hash] = move_ptr(entry);
 

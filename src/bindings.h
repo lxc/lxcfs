@@ -162,6 +162,9 @@ struct pidns_store {
 	int init_pidfd;
 	int64_t ctime; /* the time at which /proc/$initpid was created */
 	int64_t lastcheck;
+
+	/* Do not free on liblxcfs reload (contains useful persistent data) */
+	bool keep_on_reload;
 };
 
 /* lol - look at how they are allocated in the kernel */
