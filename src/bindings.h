@@ -134,6 +134,12 @@ struct file_info {
 	int cached;
 };
 
+enum lxcfs_feature_op {
+	LXCFS_FEATURE_CHECK,
+	LXCFS_FEATURE_SET,
+	LXCFS_FEATURE_CLEAR,
+};
+
 /*
  * A table caching which pid is init for a pid namespace.
  * When looking up which pid is init for $qpid, we first
@@ -165,6 +171,9 @@ struct pidns_store {
 
 	/* Do not free on liblxcfs reload (contains useful persistent data) */
 	bool keep_on_reload;
+
+	/* bit mask for per-instance configuration options (on/off) */
+	__u64 features;
 };
 
 /* lol - look at how they are allocated in the kernel */
@@ -208,6 +217,7 @@ typedef int (*pidns_store_iter_func_t) (struct pidns_store *cur, void *data);
 
 extern int iter_initpid_store(pidns_store_iter_func_t f, void *data);
 extern pid_t lookup_initpid_in_store(pid_t qpid);
+extern bool check_set_lxcfs_feature(pid_t pid, enum lxcfs_feature_op op, __u64 feature);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);

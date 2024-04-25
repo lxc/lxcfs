@@ -386,7 +386,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 
 	ino_hash = HASH(pidns_inode);
 	*entry = (struct pidns_store){
-		.version	= 1,
+		.version	= 2,
 		.ino		= pidns_inode,
 		.initpid	= pid,
 		.ctime		= st.st_ctime,
@@ -665,6 +665,55 @@ pid_t lookup_initpid_in_store(pid_t pid)
 	store_unlock();
 
 	return hashed_pid;
+}
+
+bool check_set_lxcfs_feature(pid_t pid, enum lxcfs_feature_op op, __u64 feature)
+{
+	bool ret = false;
+	struct pidns_store *entry;
+	ino_t pidns_ino;
+
+	pidns_ino = get_pidns_ino(pid);
+	if (!pidns_ino)
+		return ret;
+
+	store_lock();
+
+	entry = lookup_verify_pidns_entry(pidns_ino);
+	if (!entry)
+		goto out;
+
+	if (entry->version < 2)
+		goto out;
+
+	switch (op) {
+	case LXCFS_FEATURE_CHECK:
+		ret = entry->features & feature;
+
+		break;
+	case LXCFS_FEATURE_SET:
+		entry->features |= feature;
+
+		/*
+		 * As we have enabled feature, this entry
+		 * must be kept across lxcfs live reloads.
+		 */
+		entry->keep_on_reload = true;
+
+		ret = true;
+
+		break;
+	case LXCFS_FEATURE_CLEAR:
+		entry->features &= ~feature;
+		ret = true;
+
+		break;
+	}
+
+out:
+	store_unlock();
+
+	return ret;
 }
 
 /*
