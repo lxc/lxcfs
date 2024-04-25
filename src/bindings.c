@@ -216,6 +216,12 @@ static bool initpid_still_valid(struct pidns_store *entry)
 	return ret == 1;
 }
 
+static void free_initpid(struct pidns_store *entry)
+{
+	close_prot_errno_disarm(entry->init_pidfd);
+	free_disarm(entry);
+}
+
 /* Must be called under store_lock */
 static void remove_initpid(struct pidns_store *entry)
 {
@@ -231,8 +237,7 @@ static void remove_initpid(struct pidns_store *entry)
 	ino_hash = HASH(entry->ino);
 	if (pidns_hash_table[ino_hash] == entry) {
 		pidns_hash_table[ino_hash] = entry->next;
-		close_prot_errno_disarm(entry->init_pidfd);
-		free_disarm(entry);
+		free_initpid(entry);
 		return;
 	}
 
@@ -240,8 +245,7 @@ static void remove_initpid(struct pidns_store *entry)
 	while (it) {
 		if (it->next == entry) {
 			it->next = entry->next;
-			close_prot_errno_disarm(entry->init_pidfd);
-			free_disarm(entry);
+			free_initpid(entry);
 			return;
 		}
 		it = it->next;
@@ -291,8 +295,7 @@ static void prune_initpid_store(void)
 				else
 					pidns_hash_table[i] = entry->next;
 				entry = entry->next;
-				close_prot_errno_disarm(cur->init_pidfd);
-				free_disarm(cur);
+				free_initpid(cur);
 			} else {
 				lxcfs_debug("Kept cache entry for pid %d in init pid cache", cur->initpid);
 
@@ -326,8 +329,7 @@ static void clear_initpid_store(void)
 				else
 					pidns_hash_table[i] = entry->next;
 				entry = entry->next;
-				close_prot_errno_disarm(cur->init_pidfd);
-				free_disarm(cur);
+				free_initpid(cur);
 			}
 		}
 	}
