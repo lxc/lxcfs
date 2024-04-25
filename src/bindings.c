@@ -379,14 +379,7 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 	lxcfs_debug("Added cache entry %d for pid %d to init pid cache", ino_hash, pid);
 }
 
-/*
- * Given the stat(2) info for a nsfd pid inode, lookup the init_pid_store
- * entry for the inode number and creation time.  Verify that the init pid
- * is still valid.  If not, remove it.  Return the entry if valid, NULL
- * otherwise.
- * Must be called under store_lock
- */
-static pid_t lookup_verify_initpid(ino_t pidns_inode)
+static struct pidns_store *lookup_verify_pidns_entry(ino_t pidns_inode)
 {
 	struct pidns_store *entry;
 
@@ -399,16 +392,33 @@ static pid_t lookup_verify_initpid(ino_t pidns_inode)
 		if (entry->ino == pidns_inode) {
 			if (initpid_still_valid(entry)) {
 				entry->lastcheck = time(NULL);
-				return entry->initpid;
+				return entry;
 			}
 
 			remove_initpid(entry);
-			return ret_errno(ESRCH);
+			return NULL;
 		}
 		entry = entry->next;
 	}
 
-	return ret_errno(ESRCH);
+	return NULL;
+}
+
+/*
+ * Given the stat(2) info for a nsfd pid inode, lookup the init_pid_store
+ * entry for the inode number and creation time.  Verify that the init pid
+ * is still valid.  If not, remove it.  Return the entry if valid, NULL
+ * otherwise.
+ * Must be called under store_lock
+ */
+static pid_t lookup_verify_initpid(ino_t pidns_inode)
+{
+	struct pidns_store *entry = lookup_verify_pidns_entry(pidns_inode);
+
+	if (!entry)
+		return ret_errno(ESRCH);
+
+	return entry->initpid;
 }
 
 static bool send_creds_ok(int sock_fd)
