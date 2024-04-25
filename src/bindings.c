@@ -586,19 +586,30 @@ out:
 	return pid_ret;
 }
 
-pid_t lookup_initpid_in_store(pid_t pid)
+static ino_t get_pidns_ino(pid_t pid)
 {
-	pid_t hashed_pid = 0;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	struct stat st;
 
 	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
 	if (stat(path, &st))
+		return 0;
+
+	return st.st_ino;
+}
+
+pid_t lookup_initpid_in_store(pid_t pid)
+{
+	pid_t hashed_pid = 0;
+	ino_t pidns_ino;
+
+	pidns_ino = get_pidns_ino(pid);
+	if (!pidns_ino)
 		return ret_errno(ESRCH);
 
 	store_lock();
 
-	hashed_pid = lookup_verify_initpid(st.st_ino);
+	hashed_pid = lookup_verify_initpid(pidns_ino);
 	if (hashed_pid < 0) {
 		pid_t already_hashed_pid;
 
@@ -610,17 +621,17 @@ pid_t lookup_initpid_in_store(pid_t pid)
 		store_lock();
 
 		/* recheck that entry wasn't added while lock was released */
-		already_hashed_pid = lookup_verify_initpid(st.st_ino);
+		already_hashed_pid = lookup_verify_initpid(pidns_ino);
 
 		/* no existing entry found. Just add a new one. */
 		if (already_hashed_pid < 0) {
 			if (hashed_pid > 0)
-				save_initpid(st.st_ino, hashed_pid);
+				save_initpid(pidns_ino, hashed_pid);
 
 		/* entry found it must have the same pid */
 		} else if (already_hashed_pid != hashed_pid) {
 			lxcfs_error("Different init pids (%d, %d) for the same cache entry %lu\n",
-				    already_hashed_pid, hashed_pid, HASH(st.st_ino));
+				    already_hashed_pid, hashed_pid, HASH(pidns_ino));
 			hashed_pid = -1;
 		}
 	}
