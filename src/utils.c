@@ -685,9 +685,31 @@ int get_task_personality(pid_t pid, __u32 *personality)
 	ret = read_nointr(fd, buf, sizeof(buf) - 1);
 	if (ret >= 0) {
 		buf[ret] = '\0';
-		if (safe_uint32(buf, personality, 16) < 0)
+		if (personality != NULL && safe_uint32(buf, personality, 16) < 0)
 			return log_error(-1, "Failed to convert personality %s", buf);
 	}
 
 	return ret;
+}
+
+/*
+	This function checks whether system security policy (i.e. Yama LSM) allows personality access, by trying on
+	init own one.
+	This is required as it may be restricted by a ptrace access mode check (see PROC(5)), and
+	`get_task_personality` function relies on this.
+*/
+bool can_access_personality(void)
+{
+	static int could_access_init_personality = -1;
+
+	/* init personality has never been accessed (cache is empty) */
+	if (could_access_init_personality == -1) {
+		if (get_task_personality(1, NULL) < 0) {
+			could_access_init_personality = 0;
+		} else {
+			could_access_init_personality = 1;
+		}
+	}
+
+	return could_access_init_personality != 0;
 }
