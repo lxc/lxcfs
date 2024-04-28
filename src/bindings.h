@@ -131,12 +131,19 @@ struct file_info {
 			void *private_data;
 		};
 	};
+
 	int type;
 	char *buf; /* unused */
 	int buflen;
 	int size; /* actual data size */
 	int cached;
 };
+
+typedef struct feature {
+	char *name;
+} feature_t;
+
+extern feature_t per_instance_features[];
 
 enum lxcfs_feature_op {
 	LXCFS_FEATURE_CHECK,

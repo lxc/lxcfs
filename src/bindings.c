@@ -45,6 +45,10 @@
 #define BASEDIR "/lxcfs/controllers"
 #define ROOTDIR "/lxcfs/root"
 
+feature_t per_instance_features[63] = {
+	{ }
+};
+
 static bool can_use_pidfd;
 static bool can_use_swap;
 static bool can_use_zswap;
