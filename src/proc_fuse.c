@@ -1017,6 +1017,9 @@ static int proc_uptime_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
+	if (check_set_lxcfs_feature(fc->pid, LXCFS_FEATURE_CHECK, LXCFS_FEATURES_DISABLE_UPTIME))
+		return read_file_fuse("/proc/uptime", buf, size, d);
+
 	reaperage = get_reaper_age(fc->pid);
 	/*
 	 * To understand why this is done, please read the comment to the

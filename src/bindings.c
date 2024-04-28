@@ -46,6 +46,7 @@
 #define ROOTDIR "/lxcfs/root"
 
 feature_t per_instance_features[63] = {
+	{ .name = "disable_uptime", },
 	{ }
 };
 

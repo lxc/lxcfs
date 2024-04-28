@@ -183,6 +183,7 @@ struct pidns_store {
 	/* Do not free on liblxcfs reload (contains useful persistent data) */
 	bool keep_on_reload;
 
+#define	LXCFS_FEATURES_DISABLE_UPTIME	(1 << 0)
 	/* bit mask for per-instance configuration options (on/off) */
 	__u64 features;
 };
