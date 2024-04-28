@@ -691,3 +691,44 @@ int get_task_personality(pid_t pid, __u32 *personality)
 
 	return ret;
 }
+
+/*
+	This function checks whether system security policy (i.e. Yama LSM) allows ptrace usages.
+	This is required as accessing task personalities (see `get_task_personality` above) may be restricted by a ptrace
+	access mode check (see PROC(5)).
+*/
+bool is_ptrace_allowed(void)
+{
+	static int yama_ptrace_scope = -1;
+
+	__u32 buf_u32;
+	__do_close int fd = -EBADF;
+	int ret = -1;
+	char buf[INTTYPE_TO_STRLEN(uint32_t)];
+
+	/* Yama ptrace scope is not yet known (cache is empty) */
+	if (yama_ptrace_scope == -1) {
+		/* assume default policy if we can't retrieve info below */
+		yama_ptrace_scope = YAMA_SCOPE_RELATIONAL;
+
+		fd = open(SYS_FS_KERNEL_YAMA_PTRACE_SCOPE, O_RDONLY | O_CLOEXEC);
+		if (fd >= 0) {
+			ret = read_nointr(fd, buf, sizeof(buf) - 1);
+			if (ret >= 0) {
+				buf[ret] = '\0';
+				if (safe_uint32(buf, &buf_u32, 16) < 0)
+					return log_error(true, "Failed to convert Yama ptrace scope %s\n", buf);
+
+				yama_ptrace_scope = buf_u32;
+			} else {
+				lxcfs_error("Failed to read Yama ptrace scope: %s.\n", strerror(errno));
+			}
+		} else if (errno == -ENOENT) {
+			/* in this very case, Yama may not be enabled at all */
+			yama_ptrace_scope = YAMA_SCOPE_DISABLED;
+		}
+	}
+
+	/* consider ptrace is allowed when Yama scope is lower than "no-attach" mode */
+	return (yama_ptrace_scope < YAMA_SCOPE_NO_ATTACH);
+}

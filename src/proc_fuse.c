@@ -145,8 +145,11 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 	    strcmp(path, "/proc/swaps")		== 0 ||
 	    strcmp(path, "/proc/loadavg")	== 0 ||
 	    strcmp(path, "/proc/slabinfo")	== 0) {
-		if (liblxcfs_functional())
+		if (liblxcfs_functional()) {
+			if (!is_ptrace_allowed())
+				return log_error(-EACCES, RESTRICTED_YAMA_PTRACE_POLICY);
 			sb->st_size = get_procfile_size_with_personality(path);
+		}
 		else
 			sb->st_size = get_procfile_size(path);
 		sb->st_mode = S_IFREG | 00444;
@@ -206,8 +209,11 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 
 	info->type = type;
 
-	if (liblxcfs_functional())
+	if (liblxcfs_functional()) {
+		if (!is_ptrace_allowed())
+			return log_error(-EACCES, RESTRICTED_YAMA_PTRACE_POLICY);
 		info->buflen = get_procfile_size_with_personality(path) + BUF_RESERVE_SIZE;
+	}
 	else
 		info->buflen = get_procfile_size(path) + BUF_RESERVE_SIZE;
 
@@ -1646,8 +1652,11 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_MEMINFO_PATH,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_CPUINFO:
-		if (liblxcfs_functional())
+		if (liblxcfs_functional()) {
+			if (!is_ptrace_allowed())
+				return log_error(-EACCES, RESTRICTED_YAMA_PTRACE_POLICY);
 			return proc_read_with_personality(&proc_cpuinfo_read, buf, size, offset, fi);
+		}
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_CPUINFO_PATH,
 						  buf, size, offset, f);

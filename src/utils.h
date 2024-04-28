@@ -25,6 +25,12 @@
 #define SEND_CREDS_NOTSK 1
 #define SEND_CREDS_FAIL 2
 
+#define SYS_FS_KERNEL_YAMA_PTRACE_SCOPE "/sys/kernel/yama/ptrace_scope"
+#define YAMA_SCOPE_DISABLED 0
+#define YAMA_SCOPE_RELATIONAL 1
+#define YAMA_SCOPE_NO_ATTACH 3
+#define RESTRICTED_YAMA_PTRACE_POLICY "Due to restricted Yama ptrace policy, reading proc files from containers is not permitted"
+
 struct file_info;
 
 __attribute__((__format__(__printf__, 4, 5))) extern char *must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...);
@@ -77,6 +83,7 @@ static inline bool file_exists(const char *f)
 extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
 
 extern int get_task_personality(pid_t pid, __u32 *personality);
+extern bool is_ptrace_allowed(void);
 extern int get_host_personality(__u32 *personality);
 
 #endif /* __LXCFS_UTILS_H */
