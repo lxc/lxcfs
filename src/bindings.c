@@ -336,6 +336,27 @@ static void clear_initpid_store(void)
 	store_unlock();
 }
 
+int iter_initpid_store(pidns_store_iter_func_t f, void *data)
+{
+	int ret;
+
+	if (!pidns_hash_table)
+		return 0;
+
+	store_lock();
+	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
+		for (struct pidns_store *entry = pidns_hash_table[i]; entry; entry = entry->next) {
+			ret = f(entry, data);
+			if (ret)
+				goto out;
+		}
+	}
+
+out:
+	store_unlock();
+	return ret;
+}
+
 /* Must be called under store_lock */
 static void save_initpid(ino_t pidns_inode, pid_t pid)
 {

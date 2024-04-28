@@ -204,7 +204,9 @@ typedef enum lxcfs_opt_t {
 	LXCFS_OPTS_MAX		= LXCFS_PSI_POLL_ON,
 } lxcfs_opt_t;
 
+typedef int (*pidns_store_iter_func_t) (struct pidns_store *cur, void *data);
 
+extern int iter_initpid_store(pidns_store_iter_func_t f, void *data);
 extern pid_t lookup_initpid_in_store(pid_t qpid);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
