@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/capability.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -740,3 +741,49 @@ size_t strlcat(char *d, const char *s, size_t n)
 	return l + strlcpy(d + l, s, n - l);
 }
 #endif
+
+/* inspired by the Linux kernel's selftests/bpf :-) */
+bool proc_has_capability(pid_t pid, __u64 caps)
+{
+	struct __user_cap_data_struct data[_LINUX_CAPABILITY_U32S_3];
+	struct __user_cap_header_struct hdr = {
+		.version = _LINUX_CAPABILITY_VERSION_3,
+	};
+	__u32 cap0 = caps;
+	__u32 cap1 = caps >> 32;
+	int err;
+
+	err = capget(&hdr, data);
+	if (err)
+		return false;
+
+	return ((data[0].effective & cap0) == cap0 &&
+		(data[1].effective & cap1) == cap1);
+}
+
+#define LXCFS_PROC_USER_NS_LEN                                    \
+	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + \
+	 STRLITERALLEN("/ns/user") + 1)
+
+static ino_t get_userns_ino(pid_t pid)
+{
+	char path[LXCFS_PROC_USER_NS_LEN];
+	struct stat st;
+
+	snprintf(path, sizeof(path), "/proc/%d/ns/user", pid);
+	if (stat(path, &st))
+		return 0;
+
+	return st.st_ino;
+}
+
+bool proc_has_capability_in(pid_t nspid, pid_t pid, cap_value_t cap)
+{
+	ino_t nspid_userns_ino, pid_userns_ino;
+
+	nspid_userns_ino = get_userns_ino(nspid);
+	pid_userns_ino = get_userns_ino(pid);
+
+	return (nspid_userns_ino == pid_userns_ino) &&
+	       proc_has_capability(pid, 1ULL << cap);
+}
