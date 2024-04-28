@@ -113,7 +113,7 @@ bool is_shared_pidns(pid_t pid)
 		return false;
 
 	fd = in_same_namespace(pid, getpid(), "pid");
-	if (fd == EINVAL)
+	if (fd == -EINVAL)
 		return true;
 
 	return false;
