@@ -7,6 +7,7 @@
 
 #include <signal.h>
 #include <stdbool.h>
+#include <sys/capability.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -89,5 +90,8 @@ extern size_t strlcpy(char *, const char *, size_t);
 #if !HAVE_STRLCAT
 extern size_t strlcat(char *d, const char *s, size_t n);
 #endif
+
+extern bool proc_has_capability(pid_t pid, __u64 caps);
+extern bool proc_has_capability_in(pid_t nspid, pid_t pid, cap_value_t cap);
 
 #endif /* __LXCFS_UTILS_H */
