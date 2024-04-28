@@ -100,15 +100,29 @@ extern int rwlock_rdlock_interruptible(pthread_rwlock_t *l);
 extern int rwlock_wrlock_interruptible(pthread_rwlock_t *l);
 
 struct file_info {
-	char *controller;
-	char *cgroup;
-	char *file;
+	union {
+		struct {
+			char *controller;
+			char *cgroup;
+			char *file;
+		};
+		struct {
+			void *private_data;
+		};
+	};
+
 	int type;
 	char *buf; /* unused */
 	int buflen;
-	int size; /*actual data size */
+	int size; /* actual data size */
 	int cached;
 };
+
+typedef struct feature {
+	char *name;
+} feature_t;
+
+extern feature_t per_instance_features[];
 
 enum lxcfs_feature_op {
 	LXCFS_FEATURE_CHECK,
