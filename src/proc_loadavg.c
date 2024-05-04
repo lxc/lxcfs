@@ -138,7 +138,10 @@ static void insert_node(struct load_node **n, int locate)
 {
 	struct load_node *f;
 
-	pthread_mutex_lock(&load_hash[locate].lock);
+
+	if(mutex_lock_interruptible(&load_hash[locate].lock)){
+		return NULL;
+	}
 
 	/*
 	 * We have to recheck if the node we are looking for
@@ -511,8 +514,8 @@ static void *load_begin(void *arg)
 
 		time1 = clock();
 		for (int i = 0; i < LOAD_SIZE; i++) {
-			pthread_mutex_lock(&load_hash[i].lock);
-			if (load_hash[i].next == NULL) {
+
+			if (load_hash[i].next == NULL || mutex_lock_interruptible(&load_hash[i].lock)) {
 				pthread_mutex_unlock(&load_hash[i].lock);
 				continue;
 			}
@@ -597,11 +600,13 @@ out3:
 static void load_free(void)
 {
 	struct load_node *f, *p;
+	int ret;
 
 	for (int i = 0; i < LOAD_SIZE; i++) {
-		pthread_mutex_lock(&load_hash[i].lock);
-		pthread_rwlock_wrlock(&load_hash[i].rdlock);
-		pthread_rwlock_wrlock(&load_hash[i].rilock);
+		mutex_lock_interruptible(&load_hash[i].lock);
+		rwlock_wrlock_interruptible(&load_hash[i].rdlock);
+		rwlock_wrlock_interruptible(&load_hash[i].rilock);
+
 		if (load_hash[i].next == NULL) {
 			pthread_mutex_unlock(&load_hash[i].lock);
 			pthread_mutex_destroy(&load_hash[i].lock);
