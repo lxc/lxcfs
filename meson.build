@@ -57,7 +57,7 @@ lxcmandir = join_paths(datadir, 'man')
 conf.set_quoted('BINDIR', bindir)
 conf.set_quoted('LIBDIR', libdir)
 conf.set_quoted('LOCALSTATEDIR', localstatedir)
-conf.set_quoted('RUNTIME_PATH', runtimepath)
+conf.set_quoted('DEFAULT_RUNTIME_PATH', runtimepath)
 conf.set_quoted('SYSCONFDIR', sysconfdir)
 
 conf.set_quoted('LXCCONFDIR', lxcconfdir)
