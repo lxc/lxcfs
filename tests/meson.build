@@ -13,6 +13,18 @@ test_programs += custom_target(
     ])
 
 test_programs += custom_target(
+   'live-upgrade-test.sh',
+    build_by_default: want_tests != false,
+    input: 'live-upgrade-test.sh.in',
+    output: 'live-upgrade-test.sh',
+    command: [
+        meson_render_jinja2,
+        config_h,
+        '@INPUT@',
+        '@OUTPUT@',
+    ])
+
+test_programs += custom_target(
     'test_cgroup',
     build_by_default: want_tests != false,
     input: 'test_cgroup.in',
