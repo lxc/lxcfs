@@ -93,3 +93,66 @@ jobs:
         run: |
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
+  live-upgrade-compatibility:
+    name: Live upgrade test
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+        os:
+          - ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get update -qq
+          sudo apt-get install -qq gcc clang
+          sudo apt-get install -qq libfuse3-dev uuid-runtime
+          sudo apt-get install -qq python3 python3-setuptools
+          sudo pip3 install meson==0.55.1 ninja
+
+      - name: Compiler version
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          ${CC} --version
+
+      - name: Build PR head version
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
+          meson compile -C build
+
+      - name: Build upstream head version
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          git clone -b stable-6.0 https://github.com/lxc/lxcfs.git ../upstream-lxcfs
+          cd ../upstream-lxcfs
+          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
+          meson compile -C build
+
+      - name: Test
+        env:
+          CC: ${{ matrix.compiler }}
+          WORKSPACE_PATH: ${{ github.workspace }}
+        run: |
+          UPSTREAM_LXCFS_TREE=$(realpath ${WORKSPACE_PATH}/../upstream-lxcfs)
+          NEW_LXCFS_TREE="${WORKSPACE_PATH}"
+
+          echo "${NEW_LXCFS_TREE}"
+          echo "${UPSTREAM_LXCFS_TREE}"
+
+          cd $UPSTREAM_LXCFS_TREE
+          [ -f build/tests/live-upgrade-test.sh ] || exit 0
+
+          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/live-upgrade-test.sh "${NEW_LXCFS_TREE}"
