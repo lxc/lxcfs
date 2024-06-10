@@ -98,7 +98,7 @@ lxc.kmsg = 0
 lxc.include = /usr/share/lxc/config/common.conf.d/00-lxcfs.conf
 ```
 
-## Using with Docker
+### Using with Docker
 
 ```
 docker run -it -m 256m --memory-swap 256m \
@@ -163,3 +163,29 @@ As a result, LXCFS had to make some compromise which go as follow:
    usage (100% full) is reported. This provides adequate reporting of
    the memory consumption while preventing applications from assuming more
    SWAP is available.
+
+## Issue reporting
+
+### Core dump
+
+In case of LXCFS crash, it can be extremely useful for us to have a core dump of the LXCFS process memory.
+
+1. Please, check `/var/crash` and `coredumpctl list` just in case if you already have an LXCFS core dump file
+2. If not, you can use the following way to collect it from your system:
+
+On the machine where you run LXCFS, execute as root:
+```
+# save an old core_pattern setting value:
+cat /proc/sys/kernel/core_pattern > /root/core_pattern.old_value.bak
+
+# set a new one to collect all core dumps:
+echo '|/bin/sh -c $@ -- eval exec gzip --fast > /var/crash/core-%e.%p.gz' > /proc/sys/kernel/core_pattern
+
+# wait for the next LXCFS crash and check
+ls -lah /var/crash
+
+# there should be a file with a name like "core-lxcfs.80581.gz". Please, upload it somewhere and share with us.
+
+# restore the old "core_pattern" value:
+cat /root/core_pattern.old_value.bak > /proc/sys/kernel/core_pattern
+```
