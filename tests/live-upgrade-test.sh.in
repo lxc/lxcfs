@@ -1,0 +1,143 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+[ $(id -u) -eq 0 ]
+
+NEW_LXCFS_TREE=$1
+
+echo "LXCFS trees:"
+pwd
+echo "${NEW_LXCFS_TREE}"
+
+# Run lxcfs testsuite
+export LXCFSDIR=$(mktemp -d)
+pidfile=$(mktemp)
+export LXCFSPID=-1
+
+cmdline=$(realpath $0)
+dirname=$(dirname ${cmdline})
+
+FAILED=1
+UNSHARE=1
+cleanup() {
+	echo "=> Cleaning up"
+	set +e
+	if [ $LXCFSPID -ne -1 ]; then
+		kill -9 $LXCFSPID
+	fi
+	if [ ${LXCFSDIR} != "/var/lib/lxcfs" ]; then
+		umount -l ${LXCFSDIR}
+		rmdir ${LXCFSDIR}
+	fi
+	rm -f ${pidfile}
+	if [ ${FAILED} -eq 1 ]; then
+		echo "=> FAILED at $TESTCASE"
+		exit 1
+	fi
+	echo "=> PASSED"
+	exit 0
+}
+
+TESTCASE="setup"
+lxcfs="{{LXCFS_BUILD_ROOT}}/lxcfs"
+
+if [ -x ${lxcfs} ]; then
+	if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}:${LD_LIBRARY_PATH}"
+	else
+		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}"
+	fi
+	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
+	${lxcfs} --enable-cgroup -p ${pidfile} ${LXCFSDIR} &
+	LXCFSPID=$!
+else
+	UNSHARE=0
+	LXCFSPID=$(cat "{{RUNTIME_PATH}}/lxcfs.pid")
+	echo "=> Re-using host lxcfs"
+	rmdir $LXCFSDIR
+	export LXCFSDIR=/var/lib/lxcfs
+fi
+
+trap cleanup EXIT HUP INT TERM
+
+count=1
+while ! mountpoint -q $LXCFSDIR; do
+	sleep 1s
+	if [ $count -gt 5 ]; then
+		echo "lxcfs failed to start"
+		false
+	fi
+	count=$((count+1))
+done
+
+RUNTEST() {
+	echo ""
+	echo "=> Running ${TESTCASE}"
+
+	if [ "${UNSHARE:-1}" != "0" ]; then
+		unshare -fmp --mount-proc $*
+	else
+		$*
+	fi
+}
+
+RUNTESTS() {
+	TESTCASE="Stress readdir"
+	RUNTEST ${dirname}/test_readdir
+	TESTCASE="test_proc"
+	RUNTEST ${dirname}/test_proc
+	TESTCASE="test_cgroup"
+	RUNTEST ${dirname}/test_cgroup
+	TESTCASE="test_read_proc.sh"
+	RUNTEST ${dirname}/test_read_proc.sh
+	TESTCASE="cpusetrange"
+	RUNTEST ${dirname}/test-cpusetrange
+	TESTCASE="meminfo hierarchy"
+	RUNTEST ${dirname}/test_meminfo_hierarchy.sh
+
+	TESTCASE="SIGUSR2 virtualization mode switching"
+	echo "==> Switching to non-virtualization mode"
+	kill -USR2 $LXCFSPID
+	RUNTEST ${dirname}/test_sigusr2.sh
+	echo "==> Switching to virtualization mode"
+	kill -USR2 $LXCFSPID
+}
+
+echo ""
+echo "=> Running tests BEFORE reload"
+RUNTESTS
+
+TESTCASE="liblxcfs reloading (with upgrade)"
+
+rm -f /tmp/lxcfs-iwashere
+
+echo "==> Ensure that lxcfs is functional BEFORE reload"
+cat ${LXCFSDIR}/proc/uptime
+
+libdir="{{LXCFS_BUILD_ROOT}}"
+
+[ ! -f /tmp/lxcfs-iwashere ]
+rm -f ${libdir}/liblxcfs.so ${libdir}/liblxcfs.la
+cp ${NEW_LXCFS_TREE}/build/liblxcfstest.so ${libdir}/liblxcfs.so
+
+echo "==> Reload liblxcfs"
+kill -USR1 $LXCFSPID
+sleep 1
+
+echo "==> Ensure that lxcfs is functional AFTER reload"
+cat ${LXCFSDIR}/proc/uptime
+sleep 1
+[ -f /tmp/lxcfs-iwashere ]
+
+echo ""
+echo "=> Running tests AFTER reload"
+RUNTESTS
+
+# Check for any defunct processes - children we didn't reap
+n=`ps -ef | grep lxcfs | grep defunct | wc -l`
+[ $n = 0 ]
+
+FAILED=0
