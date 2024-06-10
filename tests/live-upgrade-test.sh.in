@@ -51,7 +51,7 @@ if [ -x ${lxcfs} ]; then
 		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}"
 	fi
 	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
-	${lxcfs} --enable-cgroup -p ${pidfile} ${LXCFSDIR} &
+	${lxcfs} -p ${pidfile} ${LXCFSDIR} &
 	LXCFSPID=$!
 else
 	UNSHARE=0
