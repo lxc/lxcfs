@@ -101,9 +101,12 @@ jobs:
       matrix:
         compiler:
           - gcc
-          - clang
         os:
           - ubuntu-22.04
+        branch:
+          - stable-5.0
+          - stable-6.0
+          - main
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -134,8 +137,9 @@ jobs:
       - name: Build upstream head version
         env:
           CC: ${{ matrix.compiler }}
+          BASE_BRANCH: ${{ matrix.branch }}
         run: |
-          git clone https://github.com/lxc/lxcfs.git ../upstream-lxcfs
+          git clone -b "${BASE_BRANCH}" https://github.com/lxc/lxcfs.git ../upstream-lxcfs
           cd ../upstream-lxcfs
           meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
           meson compile -C build
