@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse-dev uuid-runtime
+          sudo apt-get install -qq libcap-dev libfuse-dev uuid-runtime
           sudo apt-get install -qq python3 python3-setuptools
           sudo pip3 install meson==0.55.1 ninja
 
@@ -71,7 +71,7 @@ jobs:
           sudo add-apt-repository universe
           sudo apt-get update -qq
           sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse3-dev uuid-runtime
+          sudo apt-get install -qq libcap-dev libfuse3-dev uuid-runtime
           sudo apt-get install -qq python3 python3-setuptools
           sudo pip3 install meson==0.55.1 ninja
 
@@ -117,7 +117,7 @@ jobs:
           sudo add-apt-repository universe
           sudo apt-get update -qq
           sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse3-dev uuid-runtime
+          sudo apt-get install -qq libcap-dev libfuse3-dev uuid-runtime
           sudo apt-get install -qq python3 python3-setuptools
           sudo pip3 install meson==0.55.1 ninja
 

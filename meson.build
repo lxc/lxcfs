@@ -222,6 +222,8 @@ liblxcfs_sources = files(
     'src/syscall_numbers.h',
     'src/sysfs_fuse.c',
     'src/sysfs_fuse.h',
+    'src/lxcfsctl_fuse.c',
+    'src/lxcfsctl_fuse.h',
     'src/utils.c',
     'src/utils.h')
 
