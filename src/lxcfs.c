@@ -746,6 +746,9 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 #endif
 {
 	int ret;
+	enum lxcfs_virt_t type;
+	
+	type = file_info_type(fi);
 
 	if (strcmp(path, "/") == 0) {
 		if (dir_filler(filler, buf, ".", 0) != 0 ||
@@ -758,21 +761,21 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return 0;
 	}
 
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_readdir(path, buf, filler, offset, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strcmp(path, "/proc") == 0) {
+	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
 		ret = do_proc_readdir(path, buf, filler, offset, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/sys", 4) == 0) {
+	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_readdir(path, buf, filler, offset, fi);
 		down_users();
@@ -879,27 +882,33 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	int ret;
+	enum lxcfs_virt_t type;
+	
+	type = file_info_type(fi);
 
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_read(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/proc", 5) == 0) {
+	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
 		ret = do_proc_read(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/sys", 4) == 0) {
+	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_read(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
+
+	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
+		path, type, fi->fh); 
 
 	return -EINVAL;
 }
@@ -908,15 +917,18 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi)
 {
 	int ret;
+	enum lxcfs_virt_t type;
+	
+	type = file_info_type(fi);
 
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
+	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_write(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
 
-	if (strncmp(path, "/sys", 4) == 0) {
+	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_write(path, buf, size, offset, fi);
 		down_users();
