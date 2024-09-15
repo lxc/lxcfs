@@ -7,6 +7,7 @@
 
 #include <signal.h>
 #include <stdbool.h>
+#include <sys/capability.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -81,5 +82,8 @@ extern char *read_file_at(int dfd, const char *fnam, unsigned int o_flags);
 extern int get_task_personality(pid_t pid, __u32 *personality);
 extern bool can_access_personality(void);
 extern int get_host_personality(__u32 *personality);
+
+extern bool proc_has_capability(pid_t pid, __u64 caps);
+extern bool proc_has_capability_in(pid_t nspid, pid_t pid, cap_value_t cap);
 
 #endif /* __LXCFS_UTILS_H */
