@@ -5,6 +5,7 @@
 
 #include "config.h"
 
+#include <linux/limits.h>
 #include <linux/types.h>
 #include <signal.h>
 #include <stdbool.h>
