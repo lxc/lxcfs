@@ -80,6 +80,7 @@ extern char *cg_hybrid_get_current_cgroup(char *basecginfo,
 extern char *cg_legacy_get_current_cgroup(pid_t pid, const char *controller);
 extern bool mkdir_p(const char *dir, mode_t mode);
 extern bool is_cgroup_fd(int fd);
+extern bool is_cgroup2_fd(int fd);
 
 static inline int openat_safe(int fd, const char *path)
 {
