@@ -636,6 +636,7 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 	__do_free char *cgroup_rel = NULL, *junk_value = NULL;
 	const char *file;
 	struct hierarchy *h;
+	bool ret;
 
 	h = ops->get_hierarchy(ops, "memory");
 	if (!h)
@@ -643,13 +644,64 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 
 	cgroup_rel = must_make_path_relative(cgroup, NULL);
 	file = is_unified_hierarchy(h) ? "memory.swap.current" : "memory.memsw.usage_in_bytes";
+
 	/* For v2, we need to look at the lower levels of the hierarchy because
 	 * no 'memory.swap.current' file exists at the root. We must search
 	 * upwards in the hierarchy in case memory accounting is disabled via
 	 * cgroup.subtree_control for the given cgroup itself.
 	 */
-	int ret = cgroup_walkup_to_root(ops->cgroup2_root_fd, h->fd, cgroup_rel, file, &junk_value);
-	return ret == 0;
+	if (is_cgroup2_fd(h->fd) && strcmp(cgroup, "/") == 0) {
+		/*
+		 * It looks like LXCFS sits in the root cgroup,
+		 * which means that we have to find *some* cgroup
+		 * down the tree and check a (file) presence in there.
+		 *
+		 * Note, that this only needed for cgroup2.
+		 */
+
+		__do_close int fd = -EBADF;
+		__do_closedir DIR *dir = NULL;
+		struct dirent *dent;
+
+		fd = dup(h->fd);
+		if (fd < 0)
+			return false;
+
+		dir = fdopendir(fd);
+		if (!dir) {
+			lxcfs_error("Failed to open memory cgroup hierarchy\n");
+			return false;
+		}
+		/* Transfer ownership to fdopendir(). */
+		move_fd(fd);
+
+		ret = false;
+		while (((dent = readdir(dir)) != NULL)) {
+			if (strcmp(dent->d_name, ".") == 0 ||
+			    strcmp(dent->d_name, "..") == 0)
+				continue;
+
+			if (dent->d_type == DT_DIR) {
+				__do_free char *path;
+
+				path = must_make_path_relative(dent->d_name, "memory.swap.current", NULL);
+
+				if (!faccessat(h->fd, path, F_OK, 0)) {
+					/* We found it. Exit. */
+					ret = true;
+					break;
+				}
+			}
+		}
+	} else {
+		/*
+		 * We can check a (file) presence on the current
+		 * level and go up in the cgroup tree if needed.
+		 */
+		ret = cgroup_walkup_to_root(ops->cgroup2_root_fd, h->fd, cgroup_rel, file, &junk_value) == 0;
+	}
+
+	return ret;
 }
 
 static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
