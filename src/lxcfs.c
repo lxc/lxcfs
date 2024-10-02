@@ -747,7 +747,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
 	int ret;
 	enum lxcfs_virt_t type;
-	
+
 	type = file_info_type(fi);
 
 	if (strcmp(path, "/") == 0) {
@@ -768,7 +768,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return ret;
 	}
 
-	if (LXCFS_TYPE_PROC(type)) {
+	if (strcmp(path, "/proc") == 0) {
 		up_users();
 		ret = do_proc_readdir(path, buf, filler, offset, fi);
 		down_users();
@@ -883,7 +883,7 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	int ret;
 	enum lxcfs_virt_t type;
-	
+
 	type = file_info_type(fi);
 
 	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
@@ -908,7 +908,7 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 	}
 
 	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
-		path, type, fi->fh); 
+		path, type, fi->fh);
 
 	return -EINVAL;
 }
@@ -918,7 +918,7 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 {
 	int ret;
 	enum lxcfs_virt_t type;
-	
+
 	type = file_info_type(fi);
 
 	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
