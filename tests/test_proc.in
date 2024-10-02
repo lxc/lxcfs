@@ -65,6 +65,13 @@ fi
 echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/${memory_limit_file}
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
+# Test that readdir on /proc basically works
+echo "==> Testing directory listing on /proc"
+ls -l ${LXCFSDIR}/proc | grep uptime
+ls -l ${LXCFSDIR}/proc | grep cpuinfo
+ls -l ${LXCFSDIR}/proc | grep stat
+ls -l ${LXCFSDIR}/proc | grep meminfo
+
 # Test uptime
 echo "==> Testing /proc/uptime"
 grep -Eq "^0.[0-9]{2} 0.[0-9]{2}$" ${LXCFSDIR}/proc/uptime
