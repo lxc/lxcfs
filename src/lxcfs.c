@@ -524,6 +524,20 @@ static int do_proc_open(const char *path, struct fuse_file_info *fi)
 	return __proc_open(path, fi);
 }
 
+static int do_proc_opendir(const char *path, struct fuse_file_info *fi)
+{
+	char *error;
+	int (*__proc_opendir)(const char *path, struct fuse_file_info *fi);
+
+	dlerror();
+	__proc_opendir = (int (*)(const char *path, struct fuse_file_info *fi))dlsym(dlopen_handle, "proc_opendir");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find proc_opendir()", error);
+
+	return __proc_opendir(path, fi);
+}
+
 static int do_proc_access(const char *path, int mode)
 {
 	char *error;
@@ -606,6 +620,20 @@ static int do_proc_release(const char *path, struct fuse_file_info *fi)
 		return log_error(-1, "%s - Failed to find proc_release()", error);
 
 	return __proc_release(path, fi);
+}
+
+static int do_proc_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	char *error;
+	int (*__proc_releasedir)(const char *path, struct fuse_file_info *fi);
+
+	dlerror();
+	__proc_releasedir = (int (*)(const char *path, struct fuse_file_info *)) dlsym(dlopen_handle, "proc_releasedir");
+	error = dlerror();
+	if (error)
+		return log_error(-1, "%s - Failed to find proc_releasedir()", error);
+
+	return __proc_releasedir(path, fi);
 }
 
 static int do_sys_release(const char *path, struct fuse_file_info *fi)
@@ -724,8 +752,12 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
-	if (strcmp(path, "/proc") == 0)
-		return 0;
+	if (strncmp(path, "/proc", 5) == 0) {
+		up_users();
+		ret = do_proc_opendir(path, fi);
+		down_users();
+		return ret;
+	}
 
 	if (strncmp(path, "/sys", 4) == 0) {
 		up_users();
@@ -768,7 +800,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return ret;
 	}
 
-	if (strcmp(path, "/proc") == 0) {
+	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
 		ret = do_proc_readdir(path, buf, filler, offset, fi);
 		down_users();
@@ -837,12 +869,14 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
-	if (path) {
-		if (strcmp(path, "/") == 0)
-			return 0;
-		if (strcmp(path, "/proc") == 0)
-			return 0;
+	if (LXCFS_TYPE_PROC(type)) {
+		up_users();
+		ret = do_proc_releasedir(path, fi);
+		down_users();
+		return ret;
 	}
+	if (path && strcmp(path, "/") == 0)
+		return 0;
 
 	lxcfs_error("unknown file type: path=%s, type=%d, fi->fh=%" PRIu64,
 			path, type, fi->fh);

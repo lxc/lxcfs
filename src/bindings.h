@@ -66,12 +66,24 @@ enum lxcfs_virt_t {
 
 	LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE,
 #define LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH "/sys/devices/system/cpu/online"
+
+	LXC_TYPE_PROC,
+	LXC_TYPE_PROC_PRESSURE,
+	LXC_TYPE_PROC_PRESSURE_IO,
+#define LXC_TYPE_PROC_PRESSURE_IO_PATH "/proc/pressure/io"
+
+	LXC_TYPE_PROC_PRESSURE_CPU,
+#define LXC_TYPE_PROC_PRESSURE_CPU_PATH "/proc/pressure/cpu"
+
+	LXC_TYPE_PROC_PRESSURE_MEMORY,
+#define LXC_TYPE_PROC_PRESSURE_MEMORY_PATH "/proc/pressure/memory"
 	LXC_TYPE_MAX,
 };
 
 /* Macros below used to check the class from the file types above */
 #define LXCFS_TYPE_CGROUP(type) (type >= LXC_TYPE_CGDIR && type <= LXC_TYPE_CGFILE)
-#define LXCFS_TYPE_PROC(type) (type >= LXC_TYPE_PROC_MEMINFO && type <= LXC_TYPE_PROC_SLABINFO)
+#define LXCFS_TYPE_PROC(type) ((type >= LXC_TYPE_PROC_MEMINFO && type <= LXC_TYPE_PROC_SLABINFO) || \
+							   (type >= LXC_TYPE_PROC && type <= LXC_TYPE_PROC_PRESSURE_MEMORY))
 #define LXCFS_TYPE_SYS(type) (type >= LXC_TYPE_SYS && type <= LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE)
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 

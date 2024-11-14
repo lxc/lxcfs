@@ -155,7 +155,7 @@ struct cgroup_ops {
 			       char **value);
 	bool (*can_use_cpuview)(struct cgroup_ops *ops);
 
-	/* io */
+	/* blkio */
 	int (*get_io_service_bytes)(struct cgroup_ops *ops, const char *cgroup,
 				    char **value);
 	int (*get_io_service_time)(struct cgroup_ops *ops, const char *cgroup,
@@ -166,6 +166,11 @@ struct cgroup_ops {
 			     char **value);
 	int (*get_io_wait_time)(struct cgroup_ops *ops, const char *cgroup,
 				char **value);
+	/* psi */
+	int (*get_pressure_io_fd)(struct cgroup_ops *ops, const char *cgroup);
+	int (*get_pressure_cpu_fd)(struct cgroup_ops *ops, const char *cgroup);
+	int (*get_pressure_memory_fd)(struct cgroup_ops *ops,
+				      const char *cgroup);
 };
 
 extern struct cgroup_ops *cgroup_ops;
