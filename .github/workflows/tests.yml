@@ -7,14 +7,17 @@ permissions:
   contents: read
 
 jobs:
-  fuse2:
-    name: FUSE2
+  testsuite-hosted:
+    name: Test suite (x86_64)
     strategy:
       fail-fast: false
       matrix:
         compiler:
           - gcc
           - clang
+        fuse:
+          - fuse
+          - fuse3
         os:
           - ubuntu-22.04
           - ubuntu-24.04
@@ -26,10 +29,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse-dev uuid-runtime
-          sudo apt-get install -qq python3 python3-setuptools
-          sudo pip3 install meson==0.55.1 ninja
+          sudo apt-get install -qq ${{ matrix.compiler }}
+          sudo apt-get install -qq lib${{ matrix.fuse }}-dev
+          sudo apt-get install -qq python3 python3-pip python3-setuptools pkg-config uuid-runtime
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            sudo pip3 install meson==0.55.1 ninja
+          else
+            sudo pip3 install meson==0.55.1 ninja --break-system-packages
+          fi
 
       - name: Compiler version
         env:
@@ -43,6 +50,7 @@ jobs:
         run: |
           meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
           meson compile -C build
+
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
@@ -50,59 +58,14 @@ jobs:
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
 
-  fuse3:
-    name: FUSE3
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler:
-          - gcc
-          - clang
-        os:
-          - ubuntu-22.04
-          - ubuntu-24.04
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Install dependencies
-        run: |
-          sudo add-apt-repository universe
-          sudo apt-get update -qq
-          sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse3-dev uuid-runtime
-          sudo apt-get install -qq python3 python3-setuptools
-          sudo pip3 install meson==0.55.1 ninja
-
-      - name: Compiler version
-        env:
-          CC: ${{ matrix.compiler }}
-        run: |
-          ${CC} --version
-
-      - name: Build
-        env:
-          CC: ${{ matrix.compiler }}
-        run: |
-          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
-          meson compile -C build
-      - name: Test
-        env:
-          CC: ${{ matrix.compiler }}
-        run: |
-          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
-          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
-
-  live-upgrade-compatibility:
-    name: Live upgrade test
+  upgrade-test:
+    name: Upgrade test
     strategy:
       fail-fast: false
       matrix:
         compiler:
           - gcc
         os:
-          - ubuntu-22.04
           - ubuntu-24.04
         branch:
           - stable-5.0
@@ -117,16 +80,14 @@ jobs:
         run: |
           sudo add-apt-repository universe
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse3-dev uuid-runtime
-          sudo apt-get install -qq python3 python3-setuptools
-          sudo pip3 install meson==0.55.1 ninja
-
-      - name: Compiler version
-        env:
-          CC: ${{ matrix.compiler }}
-        run: |
-          ${CC} --version
+          sudo apt-get install -qq gcc
+          sudo apt-get install -qq libfuse3-dev
+          sudo apt-get install -qq python3 python3-pip python3-setuptools pkg-config uuid-runtime
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            sudo pip3 install meson==0.55.1 ninja
+          else
+            sudo pip3 install meson==0.55.1 ninja --break-system-packages
+          fi
 
       - name: Build PR head version
         env:
