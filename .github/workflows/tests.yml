@@ -16,8 +16,8 @@ jobs:
           - gcc
           - clang
         os:
-          - ubuntu-20.04
           - ubuntu-22.04
+          - ubuntu-24.04
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -59,8 +59,8 @@ jobs:
           - gcc
           - clang
         os:
-          - ubuntu-20.04
           - ubuntu-22.04
+          - ubuntu-24.04
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -103,6 +103,7 @@ jobs:
           - gcc
         os:
           - ubuntu-22.04
+          - ubuntu-24.04
         branch:
           - stable-5.0
           - stable-6.0
