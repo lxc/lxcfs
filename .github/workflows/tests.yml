@@ -58,6 +58,63 @@ jobs:
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
 
+  testsuite-self-hosted:
+    name: Test suite (aarch64)
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+        fuse:
+          - fuse
+          - fuse3
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+    runs-on:
+      - self-hosted
+      - cpu-4
+      - mem-4G
+      - disk-50G
+      - arch-arm64
+      - image-${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq ${{ matrix.compiler }}
+          sudo apt-get install -qq lib${{ matrix.fuse }}-dev
+          sudo apt-get install -qq python3 python3-pip python3-setuptools pkg-config uuid-runtime
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            sudo pip3 install meson==0.55.1 ninja
+          else
+            sudo pip3 install meson==0.55.1 ninja --break-system-packages
+          fi
+
+      - name: Compiler version
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          ${CC} --version
+
+      - name: Build
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
+          meson compile -C build
+
+      - name: Test
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
   upgrade-test:
     name: Upgrade test
     strategy:
