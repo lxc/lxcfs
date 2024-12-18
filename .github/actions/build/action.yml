@@ -1,12 +1,13 @@
 name: Build LXCFS
 description: Install dependencies and build the codebase
 inputs:
+  compiler:
+    required: true
   fuse:
     required: true
   os:
     required: true
-  compiler:
-    required: true
+
 runs:
   using: "composite"
   steps:
@@ -14,14 +15,12 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -qq ${{ inputs.compiler }}
-        sudo apt-get install -qq lib${{ inputs.fuse }}-dev
-        sudo apt-get install -qq python3 python3-pip python3-setuptools pkg-config uuid-runtime
-        if [ "${{ inputs.os }}" = "ubuntu-22.04" ]; then
-          sudo pip3 install meson==0.55.1 ninja
-        else
-          sudo pip3 install meson==0.55.1 ninja --break-system-packages
-        fi
+        sudo apt-get install -qq \
+            ${{ inputs.compiler }} \
+            lib${{ inputs.fuse }}-dev \
+            meson \
+            pkg-config \
+            uuid-runtime
 
     - name: Compiler version
       shell: bash
@@ -35,5 +34,11 @@ runs:
       env:
         CC: ${{ inputs.compiler }}
       run: |
-        meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
+        # Standard build
+        meson setup build \
+            -Ddocs=false \
+            -Dtests=true \
+            -Dinit-script=systemd \
+            -Dprefix=/usr \
+            -Db_sanitize=address,undefined
         meson compile -C build

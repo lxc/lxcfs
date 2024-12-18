@@ -1,19 +1,19 @@
-name: Builds
+name: Coverity
 on:
   push:
     branches:
-      - master
+      - main
 
 permissions:
   contents: read
 
 jobs:
   coverity:
-    name: Coverity
+    name: Build and upload
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Download Coverity Build Tool
         run: |
@@ -26,28 +26,30 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qq gcc clang
-          sudo apt-get install -qq libfuse-dev uuid-runtime
-          sudo apt-get install -qq python3 python3-setuptools
-          sudo pip3 install meson ninja
+          sudo apt-get install -qq gcc clang meson
+          sudo apt-get install -qq libfuse-dev uuid-runtime python3 python3-setuptools
 
       - name: Run coverity
         run: |
+          # Configure
           export PATH="$(pwd)/cov-analysis-linux64/bin:${PATH}"
+          export CFLAGS="-Wall -Werror"
+          export LDFLAGS="-pthread -lpthread"
 
+          BUILD="$(pwd)/build"
           meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr build/
 
           # Build
-          cov-build --dir cov-int ninja -C build
-          tar czvf lxcfs.tgz cov-int
+          cov-build --dir cov-int ninja -C ${BUILD}
+          tar czvf upload.tgz cov-int
 
           # Submit the results
           curl \
             --form project=lxc/lxcfs \
             --form token=${TOKEN} \
             --form email=lxc-devel@lists.linuxcontainers.org \
-            --form file=@lxcfs.tgz \
-            --form version=master \
+            --form file=@upload.tgz \
+            --form version=main \
             --form description="${GITHUB_SHA}" \
             https://scan.coverity.com/builds?project=lxc/lxcfs
         env:
