@@ -37,7 +37,7 @@ if [ "$IS_CGROUP_V2" = "1" ]; then
 
     echo 1 > ${hierarchy_path}/lxcfs_test_proc/cgroup.procs
 
-    echo '+cpu +memory' > ${hierarchy_path}/cgroup.subtree_control
+    echo '+cpu +cpuset +memory' > ${hierarchy_path}/cgroup.subtree_control
 
     memory_limit_file=memory.max
 else

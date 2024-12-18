@@ -10,7 +10,7 @@ permissions:
 jobs:
   coverity:
     name: Coverity
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v2

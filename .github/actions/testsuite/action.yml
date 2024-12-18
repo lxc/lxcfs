@@ -1,0 +1,25 @@
+name: Test suite
+description: Runs the testsuite
+inputs:
+  fuse:
+    required: true
+  os:
+    required: true
+  compiler:
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/build
+      with:
+        compiler: ${{ inputs.compiler }}
+        fuse: ${{ inputs.fuse }}
+        os: ${{ inputs.os }}
+
+    - name: Test
+      shell: bash
+      env:
+        CC: ${{ inputs.compiler }}
+      run: |
+        echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+        sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
