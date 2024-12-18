@@ -1,12 +1,13 @@
 name: Test suite
 description: Runs the testsuite
 inputs:
+  compiler:
+    required: true
   fuse:
     required: true
   os:
     required: true
-  compiler:
-    required: true
+
 runs:
   using: "composite"
   steps:
