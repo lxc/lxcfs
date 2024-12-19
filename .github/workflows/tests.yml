@@ -26,7 +26,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: ./.github/actions/testsuite
+      - name: Run the testsuite
+        uses: ./.github/actions/testsuite
         with:
           compiler: ${{ matrix.compiler }}
           fuse: ${{ matrix.fuse }}
@@ -57,7 +58,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: ./.github/actions/testsuite
+      - name: Run the testsuite
+        uses: ./.github/actions/testsuite
         with:
           compiler: ${{ matrix.compiler }}
           fuse: ${{ matrix.fuse }}
@@ -83,7 +85,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: ./.github/actions/build
+      - name: Build LXCFS
+        uses: ./.github/actions/build
         with:
           compiler: ${{ matrix.compiler }}
           fuse: ${{ matrix.fuse }}
