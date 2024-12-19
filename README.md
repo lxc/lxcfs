@@ -16,6 +16,9 @@ such as:
 /proc/swaps
 /proc/uptime
 /proc/slabinfo
+/proc/pressure/io
+/proc/pressure/cpu
+/proc/pressure/memory
 /sys/devices/system/cpu/online
 ```
 
@@ -109,6 +112,9 @@ docker run -it -m 256m --memory-swap 256m \
       -v /var/lib/lxcfs/proc/swaps:/proc/swaps:rw \
       -v /var/lib/lxcfs/proc/uptime:/proc/uptime:rw \
       -v /var/lib/lxcfs/proc/slabinfo:/proc/slabinfo:rw \
+      -v /var/lib/lxcfs/proc/pressure/io:/proc/pressure/io:rw \
+      -v /var/lib/lxcfs/proc/pressure/cpu:/proc/pressure/cpu:rw \
+      -v /var/lib/lxcfs/proc/pressure/memory:/proc/pressure/memory:rw \
       -v /var/lib/lxcfs/sys/devices/system/cpu:/sys/devices/system/cpu:rw \
       ubuntu:18.04 /bin/bash
  ```

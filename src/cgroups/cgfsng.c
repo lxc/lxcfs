@@ -854,6 +854,54 @@ static bool cgfsng_can_use_cpuview(struct cgroup_ops *ops)
 	return true;
 }
 
+static int cgfsng_get_pressure_io_fd(struct cgroup_ops *ops, const char *cgroup)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "blkio");
+	if (!h)
+		return -1;
+
+	if (faccessat(h->fd, "io.pressure", F_OK, 0))
+		return -1;
+
+	path = must_make_path_relative(cgroup, "io.pressure", NULL);
+	return openat(h->fd, path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+}
+
+static int cgfsng_get_pressure_cpu_fd(struct cgroup_ops *ops, const char *cgroup)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "cpu");
+	if (!h)
+		return -1;
+
+	if (faccessat(h->fd, "cpu.pressure", F_OK, 0))
+		return -1;
+
+	path = must_make_path_relative(cgroup, "cpu.pressure", NULL);
+	return openat(h->fd, path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+}
+
+static int cgfsng_get_pressure_memory_fd(struct cgroup_ops *ops, const char *cgroup)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return -1;
+
+	if (faccessat(h->fd, "memory.pressure", F_OK, 0))
+		return -1;
+
+	path = must_make_path_relative(cgroup, "memory.pressure", NULL);
+	return openat(h->fd, path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+}
+
 /* At startup, parse_hierarchies finds all the info we need about cgroup
  * mountpoints and current cgroups, and stores it in @d.
  */
@@ -1074,6 +1122,10 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_io_merged		= cgfsng_get_io_merged;
 	cgfsng_ops->get_io_wait_time		= cgfsng_get_io_wait_time;
 
+	/* psi */
+	cgfsng_ops->get_pressure_io_fd = cgfsng_get_pressure_io_fd;
+	cgfsng_ops->get_pressure_cpu_fd = cgfsng_get_pressure_cpu_fd;
+	cgfsng_ops->get_pressure_memory_fd = cgfsng_get_pressure_memory_fd;
 
 	return move_ptr(cgfsng_ops);
 }

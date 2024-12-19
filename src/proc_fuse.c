@@ -136,6 +136,11 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 2;
 		return 0;
 	}
+	if (strcmp(path, "/proc/pressure") == 0) {
+		sb->st_mode = S_IFDIR | 00555;
+		sb->st_nlink = 2;
+		return 0;
+	}
 
 	if (strcmp(path, "/proc/meminfo")	== 0 ||
 	    strcmp(path, "/proc/cpuinfo")	== 0 ||
@@ -156,6 +161,21 @@ __lxcfs_fuse_ops int proc_getattr(const char *path, struct stat *sb)
 		sb->st_nlink = 1;
 		return 0;
 	}
+	if (strcmp(path, "/proc/pressure/io")		== 0 ||
+	    strcmp(path, "/proc/pressure/cpu")		== 0 ||
+	    strcmp(path, "/proc/pressure/memory")	== 0) {
+		if (liblxcfs_functional()) {
+			if (!can_access_personality())
+				return log_error(-EACCES, RESTRICTED_PERSONALITY_ACCESS_POLICY);
+			sb->st_size = get_procfile_size_with_personality(path);
+		}
+		else
+			sb->st_size = get_procfile_size(path);
+		/* TODO: read-only now, will be writable after monitoring support */
+		sb->st_mode = S_IFREG | 00444;
+		sb->st_nlink = 1;
+		return 0;
+	}
 
 	return -ENOENT;
 }
@@ -164,17 +184,30 @@ __lxcfs_fuse_ops int proc_readdir(const char *path, void *buf,
 				  fuse_fill_dir_t filler, off_t offset,
 				  struct fuse_file_info *fi)
 {
-	if (dir_filler(filler, buf, ".",		0) != 0 ||
-	    dir_filler(filler, buf, "..",		0) != 0 ||
-	    dir_filler(filler, buf, "cpuinfo",		0) != 0 ||
-	    dir_filler(filler, buf, "meminfo",		0) != 0 ||
-	    dir_filler(filler, buf, "stat",		0) != 0 ||
-	    dir_filler(filler, buf, "uptime",		0) != 0 ||
-	    dir_filler(filler, buf, "diskstats",	0) != 0 ||
-	    dir_filler(filler, buf, "swaps",		0) != 0 ||
-	    dir_filler(filler, buf, "loadavg",		0) != 0 ||
-	    dir_filler(filler, buf, "slabinfo",		0) != 0)
-		return -EINVAL;
+	if (strcmp(path, "/proc") ==  0) {
+		if (dir_filler(filler, buf, ".",		0) != 0 ||
+		    dir_filler(filler, buf, "..",		0) != 0 ||
+		    dir_filler(filler, buf, "cpuinfo",		0) != 0 ||
+		    dir_filler(filler, buf, "meminfo",		0) != 0 ||
+		    dir_filler(filler, buf, "stat",		0) != 0 ||
+		    dir_filler(filler, buf, "uptime",		0) != 0 ||
+		    dir_filler(filler, buf, "diskstats",	0) != 0 ||
+		    dir_filler(filler, buf, "swaps",		0) != 0 ||
+		    dir_filler(filler, buf, "loadavg",		0) != 0 ||
+		    dir_filler(filler, buf, "slabinfo",		0) != 0 ||
+		    dirent_filler(filler, path, "pressure", buf, 0) != 0)
+			return -EINVAL;
+		return 0;
+	}
+	if (strcmp(path, "/proc/pressure") ==  0) {
+		if (dir_filler(filler, buf, ".",	0) != 0 ||
+		    dir_filler(filler, buf, "..",	0) != 0 ||
+		    dir_filler(filler, buf, "io",	0) != 0 ||
+		    dir_filler(filler, buf, "cpu",	0) != 0 ||
+		    dir_filler(filler, buf, "memory",	0) != 0)
+			return -EINVAL;
+		return 0;
+	}
 
 	return 0;
 }
@@ -200,6 +233,12 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_PROC_LOADAVG;
 	else if (strcmp(path, "/proc/slabinfo") == 0)
 		type = LXC_TYPE_PROC_SLABINFO;
+	else if (strcmp(path, "/proc/pressure/io") == 0)
+		type = LXC_TYPE_PROC_PRESSURE_IO;
+	else if (strcmp(path, "/proc/pressure/cpu") == 0)
+		type = LXC_TYPE_PROC_PRESSURE_CPU;
+	else if (strcmp(path, "/proc/pressure/memory") == 0)
+		type = LXC_TYPE_PROC_PRESSURE_MEMORY;
 	if (type == -1)
 		return -ENOENT;
 
@@ -227,9 +266,39 @@ __lxcfs_fuse_ops int proc_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+__lxcfs_fuse_ops int proc_opendir(const char *path, struct fuse_file_info *fi)
+{
+	__do_free struct file_info *dir_info = NULL;
+	int type = -1;
+
+	if (!liblxcfs_functional())
+		return -EIO;
+
+	if (strcmp(path, "/proc") == 0)
+		type = LXC_TYPE_PROC;
+	else if (strcmp(path, "/proc/pressure") == 0)
+		type = LXC_TYPE_PROC_PRESSURE;
+	if (type == -1)
+		return -ENOENT;
+
+	dir_info = zalloc(sizeof(*dir_info));
+	if (!dir_info)
+		return -ENOMEM;
+
+	dir_info->type = type;
+	dir_info->buf = NULL;
+	dir_info->file = NULL;
+	dir_info->buflen = 0;
+
+	fi->fh = PTR_TO_UINT64(move_ptr(dir_info));
+	return 0;
+}
+
 __lxcfs_fuse_ops int proc_access(const char *path, int mask)
 {
 	if (strcmp(path, "/proc") == 0 && access(path, R_OK) == 0)
+		return 0;
+	if (strcmp(path, "/proc/pressure") == 0 && access(path, R_OK) == 0)
 		return 0;
 
 	/* these are all read-only */
@@ -240,6 +309,12 @@ __lxcfs_fuse_ops int proc_access(const char *path, int mask)
 }
 
 __lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
+	return 0;
+}
+
+__lxcfs_fuse_ops int proc_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	do_release_file_info(fi);
 	return 0;
@@ -1599,6 +1674,213 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
+static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
+			         struct fuse_file_info *fi)
+{
+	__do_free char *cgroup = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_close int fd = -EBADF;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	size_t linelen = 0, total_len = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
+	pid_t initpid;
+
+	if (offset) {
+		size_t left;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cgroup = get_pid_cgroup(initpid, "blkio");
+	if (!cgroup)
+		return read_file_fuse("/proc/pressure/io", buf, size, d);
+
+	prune_init_slice(cgroup);
+
+	fd = cgroup_ops->get_pressure_io_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return read_file_fuse("/proc/pressure/io", buf, size, d);
+
+	f = fdopen_cached(fd, "re", &fopen_cache);
+	if (!f)
+		return read_file_fuse("/proc/pressure/io", buf, size, d);
+
+	while (getline(&line, &linelen, f) != -1) {
+		ssize_t l = snprintf(cache, cache_size, "%s", line);
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if ((size_t)l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
+		cache += l;
+		cache_size -= l;
+		total_len += l;
+	}
+
+	d->cached = 1;
+	d->size = total_len;
+	if (total_len > size)
+		total_len = size;
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int proc_pressure_cpu_read(char *buf, size_t size, off_t offset,
+				  struct fuse_file_info *fi)
+{
+	__do_free char *cgroup = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_close int fd = -EBADF;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	size_t linelen = 0, total_len = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
+	pid_t initpid;
+
+	if (offset) {
+		size_t left;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cgroup = get_pid_cgroup(initpid, "cpu");
+	if (!cgroup)
+		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+
+	prune_init_slice(cgroup);
+
+	fd = cgroup_ops->get_pressure_cpu_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+
+	f = fdopen_cached(fd, "re", &fopen_cache);
+	if (!f)
+		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+
+	while (getline(&line, &linelen, f) != -1) {
+		ssize_t l = snprintf(cache, cache_size, "%s", line);
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if ((size_t)l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
+		cache += l;
+		cache_size -= l;
+		total_len += l;
+	}
+
+	d->cached = 1;
+	d->size = total_len;
+	if (total_len > size)
+		total_len = size;
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
+static int proc_pressure_memory_read(char *buf, size_t size, off_t offset,
+				     struct fuse_file_info *fi)
+{
+	__do_free char *cgroup = NULL, *line = NULL;
+	__do_free void *fopen_cache = NULL;
+	__do_fclose FILE *f = NULL;
+	__do_close int fd = -EBADF;
+	struct fuse_context *fc = fuse_get_context();
+	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
+	size_t linelen = 0, total_len = 0;
+	char *cache = d->buf;
+	size_t cache_size = d->buflen;
+	pid_t initpid;
+
+	if (offset) {
+		size_t left;
+
+		if (offset > d->size)
+			return -EINVAL;
+
+		if (!d->cached)
+			return 0;
+
+		left = d->size - offset;
+		total_len = left > size ? size : left;
+		memcpy(buf, cache + offset, total_len);
+
+		return total_len;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cgroup = get_pid_cgroup(initpid, "memory");
+	if (!cgroup)
+		return read_file_fuse("/proc/pressure/memory", buf, size, d);
+
+	prune_init_slice(cgroup);
+
+	fd = cgroup_ops->get_pressure_memory_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return read_file_fuse("/proc/pressure/memory", buf, size, d);
+
+	f = fdopen_cached(fd, "re", &fopen_cache);
+	if (!f)
+		return read_file_fuse("/proc/pressure/memory", buf, size, d);
+
+	while (getline(&line, &linelen, f) != -1) {
+		ssize_t l = snprintf(cache, cache_size, "%s", line);
+		if (l < 0)
+			return log_error(0, "Failed to write cache");
+		if ((size_t)l >= cache_size)
+			return log_error(0, "Write to cache was truncated");
+
+		cache += l;
+		cache_size -= l;
+		total_len += l;
+	}
+
+	d->cached = 1;
+	d->size = total_len;
+	if (total_len > size)
+		total_len = size;
+	memcpy(buf, d->buf, total_len);
+
+	return total_len;
+}
+
 static int proc_read_with_personality(int (*do_proc_read)(char *, size_t, off_t,
 			     struct fuse_file_info *), char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi)
@@ -1695,6 +1977,24 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 			return proc_slabinfo_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_SLABINFO_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_PROC_PRESSURE_IO:
+		if (liblxcfs_functional())
+			return proc_pressure_io_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_IO_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+		if (liblxcfs_functional())
+			return proc_pressure_cpu_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_CPU_PATH,
+						  buf, size, offset, f);
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		if (liblxcfs_functional())
+			return proc_pressure_memory_read(buf, size, offset, fi);
+
+		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_MEMORY_PATH,
 						  buf, size, offset, f);
 	}
 
