@@ -63,6 +63,9 @@ struct memory_stat {
 	uint64_t total_inactive_file;
 	uint64_t total_active_file;
 	uint64_t total_unevictable;
+	uint64_t slab;
+	uint64_t slab_reclaimable;
+	uint64_t slab_unreclaimable;
 };
 
 static off_t get_procfile_size(const char *path)
@@ -1293,6 +1296,12 @@ static bool cgroup_parse_memory_stat(const char *cgroup, struct memory_stat *mst
 			sscanf(line, unified ? "active_file %" PRIu64 : "total_active_file %" PRIu64, &(mstat->total_active_file));
 		} else if (startswith(line, unified ? "unevictable" : "total_unevictable")) {
 			sscanf(line, unified ? "unevictable %" PRIu64 : "total_unevictable %" PRIu64, &(mstat->total_unevictable));
+		} else if (unified && startswith(line, "slab ")) {
+			sscanf(line, "slab %" PRIu64, &(mstat->slab));
+		} else if (unified && startswith(line, "slab_reclaimable")) {
+			sscanf(line, "slab_reclaimable %" PRIu64, &(mstat->slab_reclaimable));
+		} else if (unified && startswith(line, "slab_unreclaimable")) {
+			sscanf(line, "slab_unreclaimable %" PRIu64, &(mstat->slab_unreclaimable));
 		}
 	}
 
@@ -1389,7 +1398,8 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "MemFree:        %8" PRIu64 " kB\n", memlimit - memusage);
 			printme = lbuf;
 		} else if (startswith(line, "MemAvailable:")) {
-			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage + (mstat.total_active_file + mstat.total_inactive_file) / 1024);
+			snprintf(lbuf, 100, "MemAvailable:   %8" PRIu64 " kB\n", memlimit - memusage +
+				(mstat.total_active_file + mstat.total_inactive_file + mstat.slab_reclaimable) / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:")) {
 			if (wants_swap) {
@@ -1424,7 +1434,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "SwapFree:       %8" PRIu64 " kB\n", swfree);
 			printme = lbuf;
 		} else if (startswith(line, "Slab:")) {
-			snprintf(lbuf, 100, "Slab:           %8" PRIu64 " kB\n", (uint64_t)0);
+			snprintf(lbuf, 100, "Slab:           %8" PRIu64 " kB\n", mstat.slab / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Buffers:")) {
 			snprintf(lbuf, 100, "Buffers:        %8" PRIu64 " kB\n", (uint64_t)0);
@@ -1487,10 +1497,10 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 				 mstat.total_mapped_file / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SReclaimable:")) {
-			snprintf(lbuf, 100, "SReclaimable:   %8" PRIu64 " kB\n", (uint64_t)0);
+			snprintf(lbuf, 100, "SReclaimable:   %8" PRIu64 " kB\n", mstat.slab_reclaimable / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "SUnreclaim:")) {
-			snprintf(lbuf, 100, "SUnreclaim:     %8" PRIu64 " kB\n", (uint64_t)0);
+			snprintf(lbuf, 100, "SUnreclaim:     %8" PRIu64 " kB\n", mstat.slab_unreclaimable / 1024);
 			printme = lbuf;
 		} else if (startswith(line, "Shmem:")) {
 			snprintf(lbuf, 100, "Shmem:          %8" PRIu64 " kB\n",
