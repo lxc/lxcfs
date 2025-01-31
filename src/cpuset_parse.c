@@ -39,6 +39,9 @@ static int cpuset_getrange(const char *c, int *a, int *b)
  */
 bool cpu_in_cpuset(int cpu, const char *cpuset)
 {
+	if (!strlen(cpuset))
+		return false;
+
 	for (const char *c = cpuset; c; c = cpuset_nexttok(c)) {
 		int a, b, ret;
 

@@ -164,7 +164,8 @@ bool wait_for_sock(int sock, int timeout)
 {
 	__do_close int epfd = -EBADF;
 	struct epoll_event ev;
-	int ret, now, starttime, deltatime;
+	int ret;
+	time_t now, starttime, deltatime;
 
 	if ((starttime = time(NULL)) < 0)
 		return false;
@@ -713,3 +714,29 @@ bool can_access_personality(void)
 
 	return could_access_init_personality != 0;
 }
+
+#if !HAVE_STRLCPY
+size_t strlcpy(char *dest, const char *src, size_t size)
+{
+	size_t ret = strlen(src);
+
+	if (size) {
+		size_t len = (ret >= size) ? size - 1 : ret;
+		memcpy(dest, src, len);
+		dest[len] = '\0';
+	}
+
+	return ret;
+}
+#endif
+
+#if !HAVE_STRLCAT
+size_t strlcat(char *d, const char *s, size_t n)
+{
+	size_t l = strnlen(d, n);
+	if (l == n)
+		return l + strlen(s);
+
+	return l + strlcpy(d + l, s, n - l);
+}
+#endif

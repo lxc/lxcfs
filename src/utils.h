@@ -82,4 +82,12 @@ extern int get_task_personality(pid_t pid, __u32 *personality);
 extern bool can_access_personality(void);
 extern int get_host_personality(__u32 *personality);
 
+#if !HAVE_STRLCPY
+extern size_t strlcpy(char *, const char *, size_t);
+#endif
+
+#if !HAVE_STRLCAT
+extern size_t strlcat(char *d, const char *s, size_t n);
+#endif
+
 #endif /* __LXCFS_UTILS_H */
