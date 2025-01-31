@@ -164,7 +164,8 @@ bool wait_for_sock(int sock, int timeout)
 {
 	__do_close int epfd = -EBADF;
 	struct epoll_event ev;
-	int ret, now, starttime, deltatime;
+	int ret;
+	time_t now, starttime, deltatime;
 
 	if ((starttime = time(NULL)) < 0)
 		return false;
