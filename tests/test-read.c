@@ -45,6 +45,7 @@ int main(int argc, char *argv[]){
 		sleep(1);
 	}
 	printf("======read sum: %d======\n", sum);
-	close(fd);
+	if (fd >= 0)
+		close(fd);
 	return 0;
 }
