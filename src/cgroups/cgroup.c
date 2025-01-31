@@ -24,6 +24,7 @@
 
 #include "../macro.h"
 #include "../memory_utils.h"
+#include "../utils.h"
 #include "cgroup.h"
 #include "cgroup_utils.h"
 

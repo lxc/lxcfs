@@ -16,6 +16,7 @@
 
 #include "../macro.h"
 #include "../memory_utils.h"
+#include "../utils.h"
 #include "cgroup.h"
 #include "cgroup_utils.h"
 
@@ -441,32 +442,6 @@ int safe_mount(const char *src, const char *dest, const char *fstype,
 
 	return 0;
 }
-
-#if !HAVE_STRLCPY
-size_t strlcpy(char *dest, const char *src, size_t size)
-{
-	size_t ret = strlen(src);
-
-	if (size) {
-		size_t len = (ret >= size) ? size - 1 : ret;
-		memcpy(dest, src, len);
-		dest[len] = '\0';
-	}
-
-	return ret;
-}
-#endif
-
-#if !HAVE_STRLCAT
-size_t strlcat(char *d, const char *s, size_t n)
-{
-	size_t l = strnlen(d, n);
-	if (l == n)
-		return l + strlen(s);
-
-	return l + strlcpy(d + l, s, n - l);
-}
-#endif
 
 FILE *fopen_cloexec(const char *path, const char *mode)
 {
