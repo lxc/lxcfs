@@ -31,6 +31,7 @@
 #include "lxcfs_fuse_compat.h"
 #include "macro.h"
 #include "memory_utils.h"
+#include "utils.h"
 
 #define PID_FILE "/lxcfs.pid"
 
@@ -1432,10 +1433,10 @@ int main(int argc, char *argv[])
 	}
 
 	if (runtime_path_arg) {
-		strcpy(runtime_path, runtime_path_arg);
+		strlcpy(runtime_path, runtime_path_arg, sizeof(runtime_path));
 		lxcfs_info("runtime path set to %s", runtime_path);
 	}
-	strcpy(opts->runtime_path, runtime_path);
+	strlcpy(opts->runtime_path, runtime_path, sizeof(opts->runtime_path));
 
 	fuse_argv[fuse_argc++] = argv[0];
 	if (debug)
