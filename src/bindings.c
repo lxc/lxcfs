@@ -902,7 +902,7 @@ please_compiler:
 bool set_runtime_path(const char* new_path)
 {
 	if (new_path && strlen(new_path) < PATH_MAX) {
-		strcpy(runtime_path, new_path);
+		strlcpy(runtime_path, new_path, sizeof(runtime_path));
 		lxcfs_info("Using runtime path %s", runtime_path);
 		return true;
 	} else {

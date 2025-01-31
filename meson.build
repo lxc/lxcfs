@@ -182,7 +182,7 @@ config_include = include_directories('.')
 add_project_arguments('-include', 'config.h', language: 'c')
 
 # Binary.
-lxcfs_sources = files('src/lxcfs.c')
+lxcfs_sources = files('src/lxcfs.c', 'src/utils.c')
 lxcfs = executable(
     'lxcfs',
     lxcfs_sources,
