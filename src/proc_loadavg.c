@@ -504,6 +504,7 @@ static void *load_begin(void *arg)
 	int first_node, sum;
 	struct load_node *f;
 	clock_t time1, time2;
+	int sleep_time;
 
 	for (;;) {
 		if (loadavg_stop == 1)
@@ -542,8 +543,9 @@ static void *load_begin(void *arg)
 			return NULL;
 
 		time2 = clock();
-		usleep(FLUSH_TIME * 1000000 -
-		       (int)((time2 - time1) * 1000000 / CLOCKS_PER_SEC));
+		sleep_time = FLUSH_TIME - (int)((time2 - time1) / CLOCKS_PER_SEC);
+		if ((sleep_time > 0) && (sleep_time <= FLUSH_TIME))
+			usleep(sleep_time * 1000000);
 	}
 }
 
