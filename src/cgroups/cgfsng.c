@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../bindings.h"
 #include "../macro.h"
 #include "../memory_utils.h"
 #include "../utils.h"
@@ -401,6 +402,12 @@ static int __cg_mount_direct(struct hierarchy *h, const char *controllerpath)
 {
 	 __do_free char *controllers = NULL;
 	 char *fstype = "cgroup2";
+	 const char *mount_opts = NULL;
+
+	 const bool use_nsdelegate = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_NSDELEGATE_ON);
+	 if (use_nsdelegate) {
+		mount_opts = "nsdelegate";
+	 }
 	 unsigned long flags = 0;
 	 int ret;
 
@@ -414,9 +421,10 @@ static int __cg_mount_direct(struct hierarchy *h, const char *controllerpath)
 		 if (!controllers)
 			 return -ENOMEM;
 		 fstype = "cgroup";
+		 mount_opts = controllers;
 	}
 
-	ret = mount("cgroup", controllerpath, fstype, flags, controllers);
+	ret = mount("cgroup", controllerpath, fstype, flags, mount_opts);
 	if (ret < 0)
 		return -1;
 
