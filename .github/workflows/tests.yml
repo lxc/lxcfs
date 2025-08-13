@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  testsuite-hosted:
-    name: Test suite (x86_64)
+  testsuite:
+    name: Test suite
     strategy:
       fail-fast: false
       matrix:
@@ -21,49 +21,30 @@ jobs:
         os:
           - ubuntu-22.04
           - ubuntu-24.04
+          - ubuntu-22.04-arm
+          - ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Run the testsuite
-        uses: ./.github/actions/testsuite
+      - name: Build LXCFS
+        uses: ./.github/actions/build
         with:
           compiler: ${{ matrix.compiler }}
           fuse: ${{ matrix.fuse }}
           os: ${{ matrix.os }}
 
-  testsuite-self-hosted:
-    name: Test suite (aarch64)
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler:
-          - gcc
-          - clang
-        fuse:
-          - fuse
-          - fuse3
-        os:
-          - ubuntu-22.04
-          - ubuntu-24.04
-    runs-on:
-      - self-hosted
-      - cpu-4
-      - mem-4G
-      - disk-50G
-      - arch-arm64
-      - image-${{ matrix.os }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Test
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          echo "::group::Running the testsuite"
 
-      - name: Run the testsuite
-        uses: ./.github/actions/testsuite
-        with:
-          compiler: ${{ matrix.compiler }}
-          fuse: ${{ matrix.fuse }}
-          os: ${{ matrix.os }}
+          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
+          echo "::endgroup::"
 
   upgrade-test:
     name: Upgrade test
