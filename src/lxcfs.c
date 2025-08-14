@@ -1243,6 +1243,7 @@ static void usage(void)
 	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
 	lxcfs_info("  --enable-cgroup      Enable cgroup emulation code");
+	lxcfs_info("  --enable-nsdelegate  Enable cgroup nsdelegate mount option");
 	lxcfs_info("  --runtime-dir=DIR    Path to use as the runtime directory.");
 	lxcfs_info("                       Default is %s", DEFAULT_RUNTIME_PATH);
 	exit(EXIT_FAILURE);
@@ -1294,6 +1295,7 @@ static const struct option long_options[] = {
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
 	{"enable-cgroup",	no_argument,		0,	  0	},
+	{"enable-nsdelegate",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{"runtime-dir",		required_argument,	0,	  0	},
@@ -1367,6 +1369,7 @@ int main(int argc, char *argv[])
 	opts->swap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
+	opts->use_nsdelegate = false;
 	opts->version = 2;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
@@ -1378,6 +1381,8 @@ int main(int argc, char *argv[])
 				opts->use_cfs = true;
 			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
 				cgroup_is_enabled = true;
+			else if (strcmp(long_options[idx].name, "enable-nsdelegate") == 0)
+				opts->use_nsdelegate = true;
 			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)
 				runtime_path_arg = optarg;
 			else
