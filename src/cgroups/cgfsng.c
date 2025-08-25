@@ -709,6 +709,21 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 	return cgfsng_can_use_memory_feature(ops, h, cgroup, is_unified_hierarchy(h) ? "memory.swap.current" : "memory.memsw.usage_in_bytes");
 }
 
+static bool cgfsng_can_use_zswap(struct cgroup_ops *ops, const char *cgroup)
+{
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return false;
+
+	/* zswap is only available in cgroupv2 */
+	if (!is_unified_hierarchy(h))
+		return false;
+
+	return cgfsng_can_use_memory_feature(ops, h, cgroup, "memory.zswap.current");
+}
+
 static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
 				   char **value)
 {
@@ -1115,6 +1130,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
 	cgfsng_ops->get_memory_slabinfo_fd = cgfsng_get_memory_slabinfo_fd;
 	cgfsng_ops->can_use_swap = cgfsng_can_use_swap;
+	cgfsng_ops->can_use_zswap = cgfsng_can_use_zswap;
 
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
