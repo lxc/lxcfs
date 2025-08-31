@@ -999,6 +999,8 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	char *cache = d->buf + CPUALL_MAX_SIZE;
 	size_t cache_size = d->buflen - CPUALL_MAX_SIZE;
 	int cg_cpu_usage_size = 0;
+	bool use_view;
+	int max_cpus = 0;
 
 	if (offset) {
 		size_t left;
@@ -1064,6 +1066,13 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		lxcfs_v("proc_stat_read failed to read from cpuacct, falling back to the host's /proc/stat");
 	}
 
+	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
+		use_view = true;
+	else
+		use_view = false;
+	if (use_view)
+		max_cpus = max_cpu_count(cg, cpu_cg);
+
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
 		char cpu_char[10]; /* That's a lot of cores */
@@ -1091,12 +1100,15 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		if (sscanf(cpu_char, "%d", &physcpu) != 1)
 			continue;
 
+		if (use_view && max_cpus > 0 && (curcpu + 1) == max_cpus)
+			continue;	// cannot break here because we need to consume all non-cpu lines
+
 		if (!cpu_in_cpuset(physcpu, cpuset))
 			continue;
 
 		curcpu++;
 
-		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
+		if (use_view)
 			cpu_to_render = curcpu;
 		else
 			cpu_to_render = physcpu;
