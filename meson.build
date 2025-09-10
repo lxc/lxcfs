@@ -176,6 +176,7 @@ if not libfuse.found()
 endif
 
 libdl = cc.find_library('dl')
+libm = cc.find_library('m')
 threads = dependency('threads')
 
 config_h = configure_file(
@@ -232,6 +233,7 @@ liblxcfs_common_dependencies = declare_dependency(
     sources: liblxcfs_sources,
     dependencies: [
         threads,
+        libm,
         libfuse,
     ])
 
