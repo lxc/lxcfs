@@ -1286,6 +1286,7 @@ static int set_pidfile(char *pidfile)
 static const struct option long_options[] = {
 	{"debug",		no_argument,		0,	'd'	},
 	{"disable-swap",	no_argument,		0,	'u'	},
+	{"disable-zswap",	no_argument,		0,	'z'	},
 	{"enable-loadavg",	no_argument,		0,	'l'	},
 	{"foreground",		no_argument,		0,	'f'	},
 	{"help",		no_argument,		0,	'h'	},
@@ -1365,9 +1366,10 @@ int main(int argc, char *argv[])
 	}
 
 	opts->swap_off = false;
+	opts->zswap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
-	opts->version = 2;
+	opts->version = 3;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
@@ -1408,6 +1410,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'u':
 			opts->swap_off = true;
+			break;
+		case 'z':
+			opts->zswap_off = true;
 			break;
 		case 'v':
 			lxcfs_info("%s", STRINGIFY(PROJECT_VERSION));
