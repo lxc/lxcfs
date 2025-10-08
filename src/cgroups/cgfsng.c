@@ -657,7 +657,7 @@ static bool cgfsng_can_use_memory_feature(struct cgroup_ops *ops,
 		__do_closedir DIR *dir = NULL;
 		struct dirent *dent;
 
-		fd = dup(h->fd);
+		fd = openat_safe(h->fd, ".");
 		if (fd < 0)
 			return false;
 
