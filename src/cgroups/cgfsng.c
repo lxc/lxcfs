@@ -631,22 +631,16 @@ static int cgfsng_get_memory_slabinfo_fd(struct cgroup_ops *ops, const char *cgr
 	return openat(h->fd, path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 }
 
-static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
+static bool cgfsng_can_use_memory_feature(struct cgroup_ops *ops,
+				struct hierarchy *h, const char *cgroup, const char *file)
 {
 	__do_free char *cgroup_rel = NULL, *junk_value = NULL;
-	const char *file;
-	struct hierarchy *h;
 	bool ret;
 
-	h = ops->get_hierarchy(ops, "memory");
-	if (!h)
-		return false;
-
 	cgroup_rel = must_make_path_relative(cgroup, NULL);
-	file = is_unified_hierarchy(h) ? "memory.swap.current" : "memory.memsw.usage_in_bytes";
 
 	/* For v2, we need to look at the lower levels of the hierarchy because
-	 * no 'memory.swap.current' file exists at the root. We must search
+	 * no 'memory.<feature>.current' file exists at the root. We must search
 	 * upwards in the hierarchy in case memory accounting is disabled via
 	 * cgroup.subtree_control for the given cgroup itself.
 	 */
@@ -663,7 +657,7 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 		__do_closedir DIR *dir = NULL;
 		struct dirent *dent;
 
-		fd = dup(h->fd);
+		fd = openat_safe(h->fd, ".");
 		if (fd < 0)
 			return false;
 
@@ -684,7 +678,7 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 			if (dent->d_type == DT_DIR) {
 				__do_free char *path;
 
-				path = must_make_path_relative(dent->d_name, "memory.swap.current", NULL);
+				path = must_make_path_relative(dent->d_name, file, NULL);
 
 				if (!faccessat(h->fd, path, F_OK, 0)) {
 					/* We found it. Exit. */
@@ -702,6 +696,32 @@ static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
 	}
 
 	return ret;
+}
+
+static bool cgfsng_can_use_swap(struct cgroup_ops *ops, const char *cgroup)
+{
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return false;
+
+	return cgfsng_can_use_memory_feature(ops, h, cgroup, is_unified_hierarchy(h) ? "memory.swap.current" : "memory.memsw.usage_in_bytes");
+}
+
+static bool cgfsng_can_use_zswap(struct cgroup_ops *ops, const char *cgroup)
+{
+	struct hierarchy *h;
+
+	h = ops->get_hierarchy(ops, "memory");
+	if (!h)
+		return false;
+
+	/* zswap is only available in cgroupv2 */
+	if (!is_unified_hierarchy(h))
+		return false;
+
+	return cgfsng_can_use_memory_feature(ops, h, cgroup, "memory.zswap.current");
 }
 
 static int cgfsng_get_memory_stats(struct cgroup_ops *ops, const char *cgroup,
@@ -1110,6 +1130,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	cgfsng_ops->get_memory_swap_current = cgfsng_get_memory_swap_current;
 	cgfsng_ops->get_memory_slabinfo_fd = cgfsng_get_memory_slabinfo_fd;
 	cgfsng_ops->can_use_swap = cgfsng_can_use_swap;
+	cgfsng_ops->can_use_zswap = cgfsng_can_use_zswap;
 
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;

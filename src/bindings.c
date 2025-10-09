@@ -47,6 +47,7 @@
 
 static bool can_use_pidfd;
 static bool can_use_swap;
+static bool can_use_zswap;
 static bool can_use_sys_cpu;
 static bool has_versioned_opts;
 static bool memory_is_cgroupv2;
@@ -75,6 +76,11 @@ bool liblxcfs_functional(void)
 bool liblxcfs_can_use_swap(void)
 {
 	return can_use_swap;
+}
+
+bool liblxcfs_can_use_zswap(void)
+{
+	return can_use_zswap;
 }
 
 bool liblxcfs_can_use_sys_cpu(void)
@@ -979,6 +985,12 @@ void lxcfslib_init(void)
 
 	hierarchy = cgroup_ops->get_hierarchy(cgroup_ops, "memory");
 	memory_is_cgroupv2 = hierarchy && is_unified_hierarchy(hierarchy);
+
+	can_use_zswap = cgroup && cgroup_ops->can_use_zswap(cgroup_ops, cgroup);
+	if (can_use_zswap)
+		lxcfs_info("Kernel supports zswap accounting");
+	else
+		lxcfs_info("Kernel does not support zswap accounting");
 
 	lxcfs_info("api_extensions:");
 	for (size_t nr = 0; nr < nr_api_extensions; nr++)
