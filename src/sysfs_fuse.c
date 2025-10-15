@@ -57,7 +57,7 @@ static int do_cpuset_read(char *cg, char *cpu_cg, char *buf, size_t buflen)
                 use_view = false;
 
         if (use_view)
-                max_cpus = max_cpu_count(cg, cpu_cg);
+                max_cpus = max_cpu_count(cg, cpu_cg, lxcfs_has_opt(opts, LXCFS_RECURSIVE));
 
         if (use_view) {
                 if (max_cpus > 1)

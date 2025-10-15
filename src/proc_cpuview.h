@@ -24,14 +24,14 @@ struct cpuacct_usage {
 extern int cpuview_proc_stat(const char *cg, const char *cpu_cg, const char *cpuset,
 			     struct cpuacct_usage *cg_cpu_usage,
 			     int cg_cpu_usage_size, FILE *f, char *buf,
-			     size_t buf_size);
+			     size_t buf_size, bool recursive);
 extern int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			     struct fuse_file_info *fi);
 extern int read_cpuacct_usage_all(char *cg, char *cpuset,
 				  struct cpuacct_usage **return_usage, int *size);
 extern bool init_cpuview(void);
 extern void free_cpuview(void);
-extern int max_cpu_count(const char *cpuset_cg, const char *cpu_cg);
+extern int max_cpu_count(const char *cpuset_cg, const char *cpu_cg, bool recursive);
 
 #endif /* __LXCFS_PROC_CPUVIEW_FUSE_H */
 

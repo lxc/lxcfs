@@ -436,30 +436,68 @@ static uint64_t diff_cpu_usage(struct cpuacct_usage *older,
 }
 
 /*
- * Read cgroup CPU quota parameters from `cpu.cfs_quota_us` or
- * `cpu.cfs_period_us`, depending on `param`. Parameter value is returned
- * through `value`.
+ * Read CPU count from cgroup CPU quota parameter.
+ * In cgroup v1, parameters are `cpu.cfs_quota_us` and `cpu.cfs_period_us`.
+ * In cgroup v2, parameters are `cpu.max`.
+ * Parameter value is returned through `value`.If there is no quota set, zero is returned.
  */
-static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value)
+static bool read_cpu_count_cfs(const char *cg, int *value)
 {
 	__do_free char *str = NULL;
-	char file[STRLITERALLEN("cpu.cfs_period_us") + 1];
-	bool first = true;
-	int ret;
+	int64_t quota = 0, period = 0;
 
 	if (pure_unified_layout(cgroup_ops)) {
-		first = !strcmp(param, "quota");
-		ret = snprintf(file, sizeof(file), "cpu.max");
+		if (!cgroup_ops->get(cgroup_ops, "cpu", cg, "cpu.max", &str))
+			return false;
+		/*
+		 * When has no quota, cpu.max will be `max 100000`.
+		 * then return false
+		 */
+		if (sscanf(str, "%" PRId64 " %" PRId64, &quota, &period) != 2)
+			return false;
 	} else {
-		ret = snprintf(file, sizeof(file), "cpu.cfs_%s_us", param);
+		if (!cgroup_ops->get(cgroup_ops, "cpu", cg, "cpu.cfs_quota_us", &str))
+			return false;
+		if (sscanf(str, "%" PRId64, &quota) != 1)
+			return false;
+		if (!cgroup_ops->get(cgroup_ops, "cpu", cg, "cpu.cfs_period_us", &str))
+			return false;
+		if (sscanf(str, "%" PRId64, &period) != 1)
+			return false;
 	}
-	if (ret < 0 || (size_t)ret >= sizeof(file))
+	if (quota < 0 || period < 0)
 		return false;
+	*value = quota / period;
+	/*
+	 * In case quota/period does not yield a whole number, add one CPU for
+	 * the remainder.
+	 */
+	if (quota % period > 0)
+		*value += 1;
+	return true;
+}
 
-	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
-		return false;
+/*
+ * Same with read_cpu_count_cfs, but run recursively for parent.
+ */
+static bool read_cpu_count_cfs_hierarchy(const char *cg, int *rv)
+{
+	__do_free char *cur_sg = strdup(cg);
+	int value;
+	char *last_sep = NULL;
+	*rv = 0;
+	do {
+		if (read_cpu_count_cfs(cur_sg, &value))
+			if (*rv == 0 || value < *rv)
+				*rv = value;
 
-	return sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) == 1;
+		last_sep = strrchr(cur_sg, '/');
+		if (last_sep != NULL)
+			last_sep[0] = '\0';
+		else
+			cur_sg[0] = '\0';
+	} while (cur_sg[0] != '\0');
+	return *rv != 0;
 }
 
 /*
@@ -468,20 +506,11 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
  */
 static double exact_cpu_count(const char *cg)
 {
-	double rv;
+	int rv;
 	int nprocs;
-	int64_t cfs_quota, cfs_period;
 
-	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
+	if (!read_cpu_count_cfs(cg, &rv))
 		return 0;
-
-	if (!read_cpu_cfs_param(cg, "period", &cfs_period))
-		return 0;
-
-	if (cfs_quota <= 0 || cfs_period <= 0)
-		return 0;
-
-	rv = (double)cfs_quota / (double)cfs_period;
 
 	nprocs = get_nprocs();
 
@@ -496,50 +525,37 @@ static double exact_cpu_count(const char *cg)
  */
 static bool cfs_quota_disabled(const char *cg)
 {
-	int64_t cfs_quota;
+	int cpu_count;
 
-	if (!read_cpu_cfs_param(cg, "quota", &cfs_quota))
-		return true;
-
-	return cfs_quota < 0;
+	return read_cpu_count_cfs(cg, &cpu_count);
 }
 
 /*
  * Return the maximum number of visible CPUs based on CPU quotas.
  * If there is no quota set, cpu number in cpuset value is returned.
  */
-int max_cpu_count(const char *cpuset_cg, const char *cpu_cg)
+int max_cpu_count(const char *cpuset_cg, const char *cpu_cg, bool recursive)
 {
 	__do_free char *cpuset = NULL;
-	int rv, nprocs;
-	int64_t cfs_quota, cfs_period;
+	int nprocs;
+	int rv;
 	int nr_cpus_in_cpuset = 0;
 
-	if (!read_cpu_cfs_param(cpu_cg, "quota", &cfs_quota))
-		cfs_quota = 0;
-
-	if (!read_cpu_cfs_param(cpu_cg, "period", &cfs_period))
-		cfs_period = 0;
+	if (recursive) {
+		if (!read_cpu_count_cfs_hierarchy(cpu_cg, &rv))
+			rv = 0;
+	} else {
+		if (!read_cpu_count_cfs(cpu_cg, &rv))
+			rv = 0;
+	}
 
 	cpuset = get_cpuset(cpuset_cg);
 	if (cpuset)
 		nr_cpus_in_cpuset = cpu_number_in_cpuset(cpuset);
 
-	if (cfs_quota <= 0 || cfs_period <= 0) {
-		if (nr_cpus_in_cpuset > 0)
-			return nr_cpus_in_cpuset;
-
-		return 0;
+	if (rv == 0 && nr_cpus_in_cpuset > 0) {
+		return nr_cpus_in_cpuset;
 	}
-
-	rv = cfs_quota / cfs_period;
-
-	/*
-	 * In case quota/period does not yield a whole number, add one CPU for
-	 * the remainder.
-	 */
-	if ((cfs_quota % cfs_period) > 0)
-		rv += 1;
 
 	nprocs = get_nprocs();
 	if (rv > nprocs)
@@ -554,7 +570,7 @@ int max_cpu_count(const char *cpuset_cg, const char *cpu_cg)
 
 int cpuview_proc_stat(const char *cg, const char *cpu_cg, const char *cpuset,
 		      struct cpuacct_usage *cg_cpu_usage, int cg_cpu_usage_size,
-		      FILE *f, char *buf, size_t buf_size)
+		      FILE *f, char *buf, size_t buf_size, bool recursive)
 {
 	__do_free char *line = NULL;
 	__do_free struct cpuacct_usage *diff = NULL;
@@ -640,7 +656,7 @@ int cpuview_proc_stat(const char *cg, const char *cpu_cg, const char *cpuset,
 	}
 
 	/* Cannot use more CPUs than is available in cpuset. */
-	max_cpus = max_cpu_count(cg, cpu_cg);
+	max_cpus = max_cpu_count(cg, cpu_cg, recursive);
 	if (max_cpus > cpu_cnt || !max_cpus)
 		max_cpus = cpu_cnt;
 
@@ -998,7 +1014,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	else
 		use_view = false;
 	if (use_view)
-		max_cpus = max_cpu_count(cg, cpu_cg);
+		max_cpus = max_cpu_count(cg, cpu_cg, lxcfs_has_opt(opts, LXCFS_RECURSIVE));
 
 	f = fopen_cached("/proc/cpuinfo", "re", &fopen_cache);
 	if (!f)
