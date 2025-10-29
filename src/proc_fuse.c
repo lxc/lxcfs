@@ -1709,7 +1709,7 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
+static int proc_pressure_read(char *buf, size_t size, off_t offset,
 			         struct fuse_file_info *fi)
 {
 	__do_free char *cgroup = NULL, *line = NULL;
@@ -1721,6 +1721,9 @@ static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
+	char *fallback_path;
+	char *controller;
+	int (*get_pressure_fd)(struct cgroup_ops *ops, const char *cgroup);
 	pid_t initpid;
 
 	if (offset) {
@@ -1739,161 +1742,43 @@ static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "blkio");
-	if (!cgroup)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	prune_init_slice(cgroup);
-
-	fd = cgroup_ops->get_pressure_io_fd(cgroup_ops, cgroup);
-	if (fd < 0)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	f = fdopen_cached(fd, "re", &fopen_cache);
-	if (!f)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l = snprintf(cache, cache_size, "%s", line);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
-
-		cache += l;
-		cache_size -= l;
-		total_len += l;
-	}
-
-	d->cached = 1;
-	d->size = total_len;
-	if (total_len > size)
-		total_len = size;
-	memcpy(buf, d->buf, total_len);
-
-	return total_len;
-}
-
-static int proc_pressure_cpu_read(char *buf, size_t size, off_t offset,
-				  struct fuse_file_info *fi)
-{
-	__do_free char *cgroup = NULL, *line = NULL;
-	__do_free void *fopen_cache = NULL;
-	__do_fclose FILE *f = NULL;
-	__do_close int fd = -EBADF;
-	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	size_t linelen = 0, total_len = 0;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
-	pid_t initpid;
-
-	if (offset) {
-		size_t left;
-
-		if (offset > d->size)
-			return -EINVAL;
-
-		if (!d->cached)
-			return 0;
-
-		left = d->size - offset;
-		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
-
-		return total_len;
+	switch (d->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_IO_PATH;
+		controller = "blkio";
+		get_pressure_fd = cgroup_ops->get_pressure_io_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_CPU_PATH;
+		controller = "cpu";
+		get_pressure_fd = cgroup_ops->get_pressure_cpu_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_MEMORY_PATH;
+		controller = "memory";
+		get_pressure_fd = cgroup_ops->get_pressure_memory_fd;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 
-	cgroup = get_pid_cgroup(initpid, "cpu");
+	cgroup = get_pid_cgroup(initpid, controller);
 	if (!cgroup)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	prune_init_slice(cgroup);
 
-	fd = cgroup_ops->get_pressure_cpu_fd(cgroup_ops, cgroup);
+	fd = get_pressure_fd(cgroup_ops, cgroup);
 	if (fd < 0)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	f = fdopen_cached(fd, "re", &fopen_cache);
 	if (!f)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
-
-	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l = snprintf(cache, cache_size, "%s", line);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
-
-		cache += l;
-		cache_size -= l;
-		total_len += l;
-	}
-
-	d->cached = 1;
-	d->size = total_len;
-	if (total_len > size)
-		total_len = size;
-	memcpy(buf, d->buf, total_len);
-
-	return total_len;
-}
-
-static int proc_pressure_memory_read(char *buf, size_t size, off_t offset,
-				     struct fuse_file_info *fi)
-{
-	__do_free char *cgroup = NULL, *line = NULL;
-	__do_free void *fopen_cache = NULL;
-	__do_fclose FILE *f = NULL;
-	__do_close int fd = -EBADF;
-	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	size_t linelen = 0, total_len = 0;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
-	pid_t initpid;
-
-	if (offset) {
-		size_t left;
-
-		if (offset > d->size)
-			return -EINVAL;
-
-		if (!d->cached)
-			return 0;
-
-		left = d->size - offset;
-		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
-
-		return total_len;
-	}
-
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "memory");
-	if (!cgroup)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
-
-	prune_init_slice(cgroup);
-
-	fd = cgroup_ops->get_pressure_memory_fd(cgroup_ops, cgroup);
-	if (fd < 0)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
-
-	f = fdopen_cached(fd, "re", &fopen_cache);
-	if (!f)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
@@ -2015,19 +1900,19 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_IO:
 		if (liblxcfs_functional())
-			return proc_pressure_io_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_IO_PATH,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_CPU:
 		if (liblxcfs_functional())
-			return proc_pressure_cpu_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_CPU_PATH,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_MEMORY:
 		if (liblxcfs_functional())
-			return proc_pressure_memory_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_MEMORY_PATH,
 						  buf, size, offset, f);
