@@ -3,6 +3,9 @@
 option('tests', type : 'boolean', value: 'false',
        description : 'enable tests')
 
+option('mocks', type : 'boolean', value: 'false',
+       description : 'enable CI-only features (mocks some things in LXCFS for CI/testing purposes)')
+
 option('runtime-path', type : 'string', value : '/run',
        description : 'the runtime directory')
 
