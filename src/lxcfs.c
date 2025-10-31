@@ -242,6 +242,8 @@ static void sigusr1_reload(int signo, siginfo_t *info, void *extra)
 	need_reload = 1;
 }
 
+static void sig_noop_handler(int signo, siginfo_t *info, void *extra) {}
+
 /* Functions to run the library methods */
 
 #define DEF_LIB_FS_OP(type, fsop)					\
@@ -1225,6 +1227,11 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 #endif
+
+	if (install_signal_handler(SIG_NOTIFY_POLL_WAKEUP, sig_noop_handler)) {
+		lxcfs_error("%s - Failed to install SIG_NOTIFY_POLL_WAKEUP signal handler", strerror(errno));
+		goto out;
+	}
 
 	if (!pidfile) {
 		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s%s", runtime_path, PID_FILE);

@@ -88,6 +88,16 @@ enum lxcfs_virt_t {
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
 /*
+ * This signal will be used in /proc/pressure/{cpu, memory, io} poll()
+ * virtualization to notify a background thread that it's
+ * a time to finish.
+ *
+ * We don't need a handler for this, we want this signal to be
+ * ignored, but interrupt any interruptible syscall like poll().
+ */
+#define SIG_NOTIFY_POLL_WAKEUP (SIGRTMIN + 0)
+
+/*
  * This signal will be used to signal fuse request processing thread that
  * request was interrupted (FUSE_INTERRUPT came from the kernel).
  *
