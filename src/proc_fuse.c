@@ -314,18 +314,6 @@ __lxcfs_fuse_ops int proc_access(const char *path, int mask)
 	return 0;
 }
 
-__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
-{
-	do_release_file_info(fi);
-	return 0;
-}
-
-__lxcfs_fuse_ops int proc_releasedir(const char *path, struct fuse_file_info *fi)
-{
-	do_release_file_info(fi);
-	return 0;
-}
-
 /**
  * Gets a non-hierarchical memory controller limit, or UINT64_MAX if no limit is
  * in place. If `swap` is true, reads 'swap' (v2) or 'memsw' (v1); otherwise
@@ -1933,5 +1921,17 @@ __lxcfs_fuse_ops int proc_poll(const char *path, struct fuse_file_info *fi,
 {
 	fuse_pollhandle_destroy(ph);
 	*reventsp = DEFAULT_POLLMASK;
+	return 0;
+}
+
+__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
+	return 0;
+}
+
+__lxcfs_fuse_ops int proc_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
 	return 0;
 }
