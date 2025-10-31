@@ -279,6 +279,11 @@ DEF_LIB_FS_OP(cg   , write)
 DEF_LIB_FS_OP(proc , write)
 DEF_LIB_FS_OP(sys  , write)
 
+#define LIB_FS_poll_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi, \
+					struct fuse_pollhandle *ph, unsigned *reventsp
+#define LIB_FS_poll_OP_ARGS		path, fi, ph, reventsp
+DEF_LIB_FS_OP(proc , poll)
+
 #define LIB_FS_mkdir_OP_ARGS_TYPE	const char *path, mode_t mode
 #define LIB_FS_mkdir_OP_ARGS		path, mode
 DEF_LIB_FS_OP(cg, mkdir)
@@ -623,6 +628,27 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 	return -EINVAL;
 }
 
+int lxcfs_poll(const char *path, struct fuse_file_info *fi,
+	       struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	int ret;
+	enum lxcfs_virt_t type;
+
+	type = file_info_type(fi);
+
+	if (LXCFS_TYPE_PROC(type)) {
+		up_users();
+		ret = do_proc_poll(path, fi, ph, reventsp);
+		down_users();
+		return ret;
+	}
+
+	/* default f_op->poll() behavior when not supported */
+	fuse_pollhandle_destroy(ph);
+	*reventsp = DEFAULT_POLLMASK;
+	return 0;
+}
+
 int lxcfs_readlink(const char *path, char *buf, size_t size)
 {
 	int ret;
@@ -850,6 +876,9 @@ const struct fuse_operations lxcfs_ops = {
 	.truncate	= lxcfs_truncate,
 	.write		= lxcfs_write,
 	.readlink	= lxcfs_readlink,
+#if HAVE_FUSE3
+	.poll		= lxcfs_poll,
+#endif
 
 	.create		= NULL,
 	.destroy	= NULL,

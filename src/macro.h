@@ -20,6 +20,8 @@
 #define CGROUP2_SUPER_MAGIC 0x63677270
 #endif
 
+#define DEFAULT_POLLMASK (EPOLLIN | EPOLLOUT | EPOLLRDNORM | EPOLLWRNORM)
+
 #define lxcfs_debug_stream(stream, format, ...)                       \
 	do {                                                          \
 		fprintf(stream, "%s: %d: %s: " format "\n", __FILE__, \

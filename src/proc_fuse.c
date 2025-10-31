@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -1925,4 +1926,12 @@ __lxcfs_fuse_ops int proc_write(const char *path, const char *buf, size_t size,
 				off_t offset, struct fuse_file_info *fi)
 {
 	return -EINVAL;
+}
+
+__lxcfs_fuse_ops int proc_poll(const char *path, struct fuse_file_info *fi,
+			       struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	fuse_pollhandle_destroy(ph);
+	*reventsp = DEFAULT_POLLMASK;
+	return 0;
 }
