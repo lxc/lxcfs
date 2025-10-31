@@ -38,6 +38,7 @@ jobs:
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
+          LIBFUSE: ${{ matrix.fuse }}
         run: |
           echo "::group::Running the testsuite"
 

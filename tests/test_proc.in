@@ -92,4 +92,10 @@ echo "==> Testing /proc/stat"
 echo "==> Testing /proc/meminfo"
 grep -q "^MemTotal.*65536 kB$" ${LXCFSDIR}/proc/meminfo
 
+# We don't support PSI triggers virtualization with old libfuse
+if [ "$LIBFUSE" != "fuse" ]; then
+    echo "==> Testing /proc/pressure/{cpu, io, memory}"
+    {{LXCFS_BUILD_ROOT}}/tests/test-psi-triggers-poll ${LXCFSDIR}
+fi
+
 PASS=1
