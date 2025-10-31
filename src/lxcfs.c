@@ -276,6 +276,7 @@ DEF_LIB_FS_OP(sys  , read)
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_write_OP_ARGS		path, buf, size, offset, fi
 DEF_LIB_FS_OP(cg   , write)
+DEF_LIB_FS_OP(proc , write)
 DEF_LIB_FS_OP(sys  , write)
 
 #define LIB_FS_mkdir_OP_ARGS_TYPE	const char *path, mode_t mode
@@ -601,6 +602,13 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
 		up_users();
 		ret = do_cg_write(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
+	if (LXCFS_TYPE_PROC(type)) {
+		up_users();
+		ret = do_proc_write(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
