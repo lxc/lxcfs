@@ -20,6 +20,7 @@ __visible extern int proc_readdir(const char *path, void *buf, fuse_fill_dir_t f
 __visible extern int proc_open(const char *path, struct fuse_file_info *fi);
 __visible extern int proc_access(const char *path, int mask);
 __visible extern int proc_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
+__visible extern int proc_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
 __visible extern int proc_release(const char *path, struct fuse_file_info *fi);
 
 #endif /* __LXCFS_PROC_FUSE_H */
