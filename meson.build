@@ -69,6 +69,7 @@ conf.set_quoted('LXCFSTARGETDIR', join_paths(localstatedir, 'lib/lxcfs'))
 # Custom configuration.
 init_script = get_option('init-script')
 want_tests = get_option('tests')
+want_mocks = get_option('mocks')
 want_docs = get_option('docs')
 
 # Build flags.
@@ -232,12 +233,18 @@ liblxcfs_common_dependencies = declare_dependency(
         libfuse,
     ])
 
+liblxcfs_cargs = []
+if want_mocks == true
+	liblxcfs_cargs = ['-DPSITRIGGERTEST', '-DDEBUG']
+endif
+
 liblxcfs = shared_module(
     'lxcfs',
     liblxcfs_sources,
     dependencies: liblxcfs_common_dependencies,
     install: true,
-    install_dir: lxcfsdir)
+    install_dir: lxcfsdir,
+    c_args: liblxcfs_cargs)
 
 # Tests.
 test_programs = []
@@ -248,7 +255,7 @@ if want_tests == true
         dependencies: liblxcfs_common_dependencies,
         install: false,
         install_dir: lxcfsdir,
-        c_args: '-DRELOADTEST -DDEBUG')
+        c_args: ['-DRELOADTEST', '-DDEBUG'])
 endif
 
 # RPM spec.
@@ -306,6 +313,7 @@ status = [
     'lxcfs source root directory:	@0@'.format(project_source_root),
     'init system(s):		@0@'.format(init_script),
     'tests:				@0@'.format(want_tests),
+    'mocks:				@0@'.format(want_mocks),
     'documentation:			@0@'.format(want_docs),
 ]
 message('\n         '.join(status))
