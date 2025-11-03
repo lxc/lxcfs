@@ -976,6 +976,7 @@ static const struct option long_options[] = {
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
 	{"enable-cgroup",	no_argument,		0,	  0	},
+	{"enable-psi-poll",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{"runtime-dir",		required_argument,	0,	  0	},
@@ -1050,7 +1051,8 @@ int main(int argc, char *argv[])
 	opts->zswap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
-	opts->version = 3;
+	opts->psi_poll_on = false;
+	opts->version = 4;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
@@ -1061,6 +1063,8 @@ int main(int argc, char *argv[])
 				opts->use_cfs = true;
 			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
 				cgroup_is_enabled = true;
+			else if (strcmp(long_options[idx].name, "enable-psi-poll") == 0)
+				opts->psi_poll_on = true;
 			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)
 				runtime_path_arg = optarg;
 			else

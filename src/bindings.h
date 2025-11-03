@@ -142,17 +142,19 @@ struct lxcfs_opts {
 	 * and the use of bool instead of explicited __u32 and __u64 we can't.
 	 */
 	__u32 version;
-        // As of opts version 2.
-        char runtime_path[PATH_MAX];
+	// As of opts version 2.
+	char runtime_path[PATH_MAX];
 	bool zswap_off;
+	bool psi_poll_on;
 };
 
 typedef enum lxcfs_opt_t {
-	LXCFS_SWAP_ON	= 0,
-	LXCFS_PIDFD_ON	= 1,
-	LXCFS_CFS_ON	= 2,
-	LXCFS_ZSWAP_ON  = 3,
-	LXCFS_OPTS_MAX	= LXCFS_ZSWAP_ON,
+	LXCFS_SWAP_ON		= 0,
+	LXCFS_PIDFD_ON		= 1,
+	LXCFS_CFS_ON		= 2,
+	LXCFS_ZSWAP_ON		= 3,
+	LXCFS_PSI_POLL_ON	= 4,
+	LXCFS_OPTS_MAX		= LXCFS_PSI_POLL_ON,
 } lxcfs_opt_t;
 
 
@@ -189,6 +191,8 @@ static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 		if (opts->version >= 3 && !opts->zswap_off)
 			return liblxcfs_can_use_zswap();
 		return false;
+	case LXCFS_PSI_POLL_ON:
+		return (opts->version >= 4 && opts->psi_poll_on);
 	}
 
 	return false;

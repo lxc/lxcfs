@@ -1938,6 +1938,7 @@ static int proc_psi_trigger_write(const char *path, const char *buf, size_t size
 				off_t offset, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	bool psi_virtualization_enabled = lxcfs_has_opt(fc->private_data, LXCFS_PSI_POLL_ON);
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	__do_free psi_trigger_t *t = NULL;
 	__do_free char *cgroup = NULL;
@@ -1954,6 +1955,9 @@ static int proc_psi_trigger_write(const char *path, const char *buf, size_t size
 
 	if (!liblxcfs_functional())
 		return -EIO;
+
+	if (!psi_virtualization_enabled)
+		return -EINVAL;
 
 	/* mimic logic from kernel/sched/psi.c psi_write() */
 	if (f->private_data)
