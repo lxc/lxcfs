@@ -145,3 +145,10 @@ test_programs += executable(
     include_directories: config_include,
     install: false,
     build_by_default: want_tests != false)
+
+test_programs += executable(
+    'test-psi-triggers-poll',
+    'test-psi-triggers-poll.c',
+    include_directories: config_include,
+    install: false,
+    build_by_default: want_tests != false)

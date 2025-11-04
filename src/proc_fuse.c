@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -310,18 +311,6 @@ __lxcfs_fuse_ops int proc_access(const char *path, int mask)
 	if ((mask & ~R_OK) != 0)
 		return -EACCES;
 
-	return 0;
-}
-
-__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
-{
-	do_release_file_info(fi);
-	return 0;
-}
-
-__lxcfs_fuse_ops int proc_releasedir(const char *path, struct fuse_file_info *fi)
-{
-	do_release_file_info(fi);
 	return 0;
 }
 
@@ -1709,7 +1698,7 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	return total_len;
 }
 
-static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
+static int proc_pressure_read(char *buf, size_t size, off_t offset,
 			         struct fuse_file_info *fi)
 {
 	__do_free char *cgroup = NULL, *line = NULL;
@@ -1721,6 +1710,9 @@ static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
 	size_t linelen = 0, total_len = 0;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
+	char *fallback_path;
+	char *controller;
+	int (*get_pressure_fd)(struct cgroup_ops *ops, const char *cgroup);
 	pid_t initpid;
 
 	if (offset) {
@@ -1739,161 +1731,43 @@ static int proc_pressure_io_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "blkio");
-	if (!cgroup)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	prune_init_slice(cgroup);
-
-	fd = cgroup_ops->get_pressure_io_fd(cgroup_ops, cgroup);
-	if (fd < 0)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	f = fdopen_cached(fd, "re", &fopen_cache);
-	if (!f)
-		return read_file_fuse("/proc/pressure/io", buf, size, d);
-
-	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l = snprintf(cache, cache_size, "%s", line);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
-
-		cache += l;
-		cache_size -= l;
-		total_len += l;
-	}
-
-	d->cached = 1;
-	d->size = total_len;
-	if (total_len > size)
-		total_len = size;
-	memcpy(buf, d->buf, total_len);
-
-	return total_len;
-}
-
-static int proc_pressure_cpu_read(char *buf, size_t size, off_t offset,
-				  struct fuse_file_info *fi)
-{
-	__do_free char *cgroup = NULL, *line = NULL;
-	__do_free void *fopen_cache = NULL;
-	__do_fclose FILE *f = NULL;
-	__do_close int fd = -EBADF;
-	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	size_t linelen = 0, total_len = 0;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
-	pid_t initpid;
-
-	if (offset) {
-		size_t left;
-
-		if (offset > d->size)
-			return -EINVAL;
-
-		if (!d->cached)
-			return 0;
-
-		left = d->size - offset;
-		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
-
-		return total_len;
+	switch (d->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_IO_PATH;
+		controller = "blkio";
+		get_pressure_fd = cgroup_ops->get_pressure_io_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_CPU_PATH;
+		controller = "cpu";
+		get_pressure_fd = cgroup_ops->get_pressure_cpu_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		fallback_path = LXC_TYPE_PROC_PRESSURE_MEMORY_PATH;
+		controller = "memory";
+		get_pressure_fd = cgroup_ops->get_pressure_memory_fd;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))
 		initpid = fc->pid;
 
-	cgroup = get_pid_cgroup(initpid, "cpu");
+	cgroup = get_pid_cgroup(initpid, controller);
 	if (!cgroup)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	prune_init_slice(cgroup);
 
-	fd = cgroup_ops->get_pressure_cpu_fd(cgroup_ops, cgroup);
+	fd = get_pressure_fd(cgroup_ops, cgroup);
 	if (fd < 0)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	f = fdopen_cached(fd, "re", &fopen_cache);
 	if (!f)
-		return read_file_fuse("/proc/pressure/cpu", buf, size, d);
-
-	while (getline(&line, &linelen, f) != -1) {
-		ssize_t l = snprintf(cache, cache_size, "%s", line);
-		if (l < 0)
-			return log_error(0, "Failed to write cache");
-		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
-
-		cache += l;
-		cache_size -= l;
-		total_len += l;
-	}
-
-	d->cached = 1;
-	d->size = total_len;
-	if (total_len > size)
-		total_len = size;
-	memcpy(buf, d->buf, total_len);
-
-	return total_len;
-}
-
-static int proc_pressure_memory_read(char *buf, size_t size, off_t offset,
-				     struct fuse_file_info *fi)
-{
-	__do_free char *cgroup = NULL, *line = NULL;
-	__do_free void *fopen_cache = NULL;
-	__do_fclose FILE *f = NULL;
-	__do_close int fd = -EBADF;
-	struct fuse_context *fc = fuse_get_context();
-	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
-	size_t linelen = 0, total_len = 0;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
-	pid_t initpid;
-
-	if (offset) {
-		size_t left;
-
-		if (offset > d->size)
-			return -EINVAL;
-
-		if (!d->cached)
-			return 0;
-
-		left = d->size - offset;
-		total_len = left > size ? size : left;
-		memcpy(buf, cache + offset, total_len);
-
-		return total_len;
-	}
-
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "memory");
-	if (!cgroup)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
-
-	prune_init_slice(cgroup);
-
-	fd = cgroup_ops->get_pressure_memory_fd(cgroup_ops, cgroup);
-	if (fd < 0)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
-
-	f = fdopen_cached(fd, "re", &fopen_cache);
-	if (!f)
-		return read_file_fuse("/proc/pressure/memory", buf, size, d);
+		return read_file_fuse(fallback_path, buf, size, d);
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
@@ -2015,23 +1889,493 @@ __lxcfs_fuse_ops int proc_read(const char *path, char *buf, size_t size,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_IO:
 		if (liblxcfs_functional())
-			return proc_pressure_io_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_IO_PATH,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_CPU:
 		if (liblxcfs_functional())
-			return proc_pressure_cpu_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_CPU_PATH,
 						  buf, size, offset, f);
 	case LXC_TYPE_PROC_PRESSURE_MEMORY:
 		if (liblxcfs_functional())
-			return proc_pressure_memory_read(buf, size, offset, fi);
+			return proc_pressure_read(buf, size, offset, fi);
 
 		return read_file_fuse_with_offset(LXC_TYPE_PROC_PRESSURE_MEMORY_PATH,
 						  buf, size, offset, f);
 	}
 
 	return -EINVAL;
+}
+
+typedef enum {
+	POLL_NOTIFY_THREAD_EXITED = 0,
+	POLL_NOTIFY_THREAD_SPAWNED  = 1,
+	POLL_NOTIFY_THREAD_RUNNING  = 2,
+} notify_poll_thread_state_t;
+
+typedef struct psi_trigger {
+	/* increase version if the structure was changed */
+	__u16 version;
+
+	pthread_mutex_t lock;
+
+	pthread_t tid;
+	notify_poll_thread_state_t thread_state;
+
+	/* libfuse's FUSE_NOTIFY_POLL handle */
+	struct fuse_pollhandle *ph;
+
+	struct pollfd pfd;
+} psi_trigger_t;
+
+/* PSI trigger definitions from the kernel */
+#define WINDOW_MAX_US 10000000	/* Max window size is 10s */
+
+static int proc_psi_trigger_write(const char *path, const char *buf, size_t size,
+				off_t offset, struct fuse_file_info *fi)
+{
+	struct fuse_context *fc = fuse_get_context();
+	bool psi_virtualization_enabled = lxcfs_has_opt(fc->private_data, LXCFS_PSI_POLL_ON);
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
+	__do_free psi_trigger_t *t = NULL;
+	__do_free char *cgroup = NULL;
+	__do_close int fd = -EBADF;
+	char *controller;
+	int (*get_pressure_fd)(struct cgroup_ops *ops, const char *cgroup);
+	pid_t initpid;
+	char tmpbuf[32];
+	size_t tmpbuf_size;
+	bool psi_full;
+	__u32 threshold_us;
+	__u32 window_us;
+	int ret;
+
+	if (!liblxcfs_functional())
+		return -EIO;
+
+	if (!psi_virtualization_enabled)
+		return -EINVAL;
+
+	/* mimic logic from kernel/sched/psi.c psi_write() */
+	if (f->private_data)
+		return -EBUSY;
+
+	if (offset || !size)
+		return -EINVAL;
+
+	/*
+	 * We could just use buf as an input argument for write()
+	 * syscall on a real fd, but it can be dangerous. It is safer
+	 * to do all the parsing, parameters validation on LXCFS side
+	 * and only then call write() on the underlying fd.
+	 */
+
+	tmpbuf_size = MIN(size, sizeof(tmpbuf));
+	memcpy(tmpbuf, buf, tmpbuf_size);
+	tmpbuf[tmpbuf_size - 1] = '\0';
+
+	if (sscanf(tmpbuf, "some %u %u", &threshold_us, &window_us) == 2)
+		psi_full = false;
+	else if (sscanf(tmpbuf, "full %u %u", &threshold_us, &window_us) == 2)
+		psi_full = true;
+	else
+		return -EINVAL;
+
+	if (window_us == 0 || window_us > WINDOW_MAX_US)
+		return -EINVAL;
+
+	/*
+	 * Use limitation for unprivileged user (see kernels psi_trigger_create()).
+	 * We can relax this later if needed.
+	 */
+	if (window_us % 2000000)
+		window_us = 2000000;
+
+	/* Check threshold */
+	if (threshold_us == 0 || threshold_us > window_us)
+		return -EINVAL;
+
+	/* rebuild everything back */
+	ret = strnprintf(tmpbuf, sizeof(tmpbuf), "%s %u %u",
+			 psi_full ? "full" : "some", threshold_us, window_us);
+	if (ret < 0)
+		return -EIO;
+
+	switch (f->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+		controller = "blkio";
+		get_pressure_fd = cgroup_ops->get_pressure_io_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+		controller = "cpu";
+		get_pressure_fd = cgroup_ops->get_pressure_cpu_fd;
+		break;
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		controller = "memory";
+		get_pressure_fd = cgroup_ops->get_pressure_memory_fd;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cgroup = get_pid_cgroup(initpid, controller);
+	if (!cgroup)
+		return -EIO;
+
+	prune_init_slice(cgroup);
+
+	fd = get_pressure_fd(cgroup_ops, cgroup);
+	if (fd < 0)
+		return -EIO;
+
+	if (write(fd, tmpbuf, strlen(tmpbuf) + 1) < 0) {
+		lxcfs_error("/proc/pressure/{cpu, io, memory} write error: %s", strerror(errno));
+		return -EIO;
+	}
+
+	t = zalloc(sizeof(*t));
+	if (!t)
+		return -EIO;
+
+	t->version = 1;
+
+	if (pthread_mutex_init(&t->lock, NULL))
+		return -EIO;
+
+	t->pfd.fd = move_fd(fd);
+	t->pfd.events = POLLPRI;
+
+	/* will be released in proc_psi_trigger_release() */
+	f->private_data = move_ptr(t);
+
+	return size;
+}
+
+static void notify_poll(psi_trigger_t *t)
+{
+	if (!t->ph) {
+		lxcfs_error("notify_poll called without pollhandle");
+		return;
+	}
+
+	lxcfs_debug("thread %d sends FUSE_NOTIFY_POLL", gettid());
+
+	/* send FUSE_NOTIFY_POLL to the kernel */
+	fuse_notify_poll(t->ph);
+
+	fuse_pollhandle_destroy(t->ph);
+	t->ph = NULL;
+}
+
+static void *poll_thread(void *arg)
+{
+	psi_trigger_t *t = arg;
+	int n;
+#ifdef PSITRIGGERTEST
+	struct timespec req = { 1, 0 };
+#endif
+
+	pthread_mutex_lock(&t->lock);
+	t->thread_state = POLL_NOTIFY_THREAD_RUNNING;
+
+	/*
+	 * If t->pfd.revents is not zero, then we already got
+	 * a poll event before, so our job is only to notify
+	 * kernel about it with FUSE_NOTIFY_POLL and clean t->pfd.revents.
+	 */
+	if (t->pfd.revents) {
+		notify_poll(t);
+		t->pfd.revents = 0;
+		goto exit;
+	}
+
+	lxcfs_debug("thread %d is going to poll", gettid());
+
+again:
+#ifndef PSITRIGGERTEST
+	n = poll(&t->pfd, 1, -1);
+#else
+	/*
+	 * It would be not practical and not stable to simulate pressure events
+	 * on CI. So instead of real poll-ing on PSI files, lets just simulate "events"
+	 * with nanosleep. This allows to test all the main logic.
+	 *
+	 * See also tests/test-psi-triggers-poll.c
+	 */
+	n = nanosleep(&req, NULL);
+	if (n == 0) {
+		/* simulate successful poll() return with event */
+		n = 1;
+		t->pfd.revents = DEFAULT_POLLMASK | POLLPRI;
+	}
+#endif
+
+	if (n < 0) {
+		/* SIG_NOTIFY_POLL_WAKEUP signal? */
+		if (errno == EINTR) {
+			lxcfs_debug("poll() was interrupted by a signal");
+
+			/* see comment in proc_psi_trigger_release() */
+			if (t->pfd.fd > 0)
+				goto again;
+		} else {
+			lxcfs_error("poll() failed: %s", strerror(errno));
+			t->pfd.revents = DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
+		}
+
+		goto exit;
+	}
+
+	lxcfs_debug("thread %d has done with poll-ing %d %x", gettid(), n, t->pfd.revents);
+
+	if (n > 0)
+		notify_poll(t);
+
+exit:
+	t->thread_state = POLL_NOTIFY_THREAD_EXITED;
+	pthread_mutex_unlock(&t->lock);
+	return NULL;
+}
+
+static int schedule_notify_poll(psi_trigger_t *t)
+{
+	int ret = 0;
+
+	ret = pthread_create(&t->tid, NULL, poll_thread, t);
+	if (ret) {
+		lxcfs_error("Failed to spawn a thread for FUSE_NOTIFY_POLL: %s", strerror(ret));
+		goto exit;
+	}
+
+	ret = pthread_detach(t->tid);
+	if (ret) {
+		lxcfs_error("Failed to detach the FUSE_NOTIFY_POLL thread: %s", strerror(ret));
+		goto exit;
+	}
+
+	lxcfs_debug("FUSE_NOTIFY_POLL thread spawned");
+	t->thread_state = POLL_NOTIFY_THREAD_SPAWNED;
+
+exit:
+	return ret;
+}
+
+static int proc_psi_trigger_poll(const char *path, struct fuse_file_info *fi,
+			       struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
+	psi_trigger_t *t = f->private_data;
+	int ret = 0;
+
+	if (!liblxcfs_functional()) {
+		fuse_pollhandle_destroy(ph);
+		return -EIO;
+	}
+
+	if (f->type != LXC_TYPE_PROC_PRESSURE_IO &&
+	    f->type != LXC_TYPE_PROC_PRESSURE_CPU &&
+	    f->type != LXC_TYPE_PROC_PRESSURE_MEMORY) {
+		fuse_pollhandle_destroy(ph);
+		*reventsp = DEFAULT_POLLMASK;
+		return 0;
+	}
+
+	if (!t) {
+		fuse_pollhandle_destroy(ph);
+		*reventsp = DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
+		return 0;
+	}
+
+	/*
+	 * We shouldn't block the kernel and bail out quickly,
+	 * otherwise poll-s with timeout won't work.
+	 */
+	if (pthread_mutex_trylock(&t->lock)) {
+		lxcfs_debug("proc_psi_trigger_poll() can't take a mutex now");
+		fuse_pollhandle_destroy(ph);
+		*reventsp = DEFAULT_POLLMASK;
+		return 0;
+	}
+
+	lxcfs_debug("proc_psi_trigger_poll() has taken t->lock");
+
+	/*
+	 * We want to ensure that notify thread was able to take t->lock mutex
+	 * and make its job (or wasn't spawned yet) before we go again.
+	 */
+	if (t->thread_state != POLL_NOTIFY_THREAD_EXITED) {
+		lxcfs_debug("FUSE_NOTIFY_POLL thread hasn't finished before next FUSE_POLL arrive");
+		goto exit_retry;
+	}
+
+	if (!t->pfd.revents) {
+		int n = poll(&t->pfd, 1, 0);
+		if (n < 0) {
+			lxcfs_error("poll() failed: %s", strerror(errno));
+			t->pfd.revents = DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
+		}
+	}
+
+	/* let know the kernel which events we've got */
+	*reventsp = t->pfd.revents;
+
+	/* cleanup old notify handle */
+	if (t->ph) {
+		fuse_pollhandle_destroy(t->ph);
+		t->ph = NULL;
+	}
+
+	/*
+	 * When ph is not NULL it means that kernel asks us
+	 * to do FUSE_NOTIFY_POLL once we have something.
+	 *
+	 * We must do this from a separate thread to prevent deadlocks.
+	 */
+	if (ph) {
+		t->ph = ph;
+
+		ret = schedule_notify_poll(t);
+		if (ret)
+			goto exit;
+	} else {
+		/*
+		 * All my tests show that ph is *always* not NULL, basically,
+		 * we always being asked by the kernel to send FUSE_NOTIFY_POLL
+		 * even when *reventsp is non-zero. After sending a notification
+		 * we clean t->pfd.revents to prepare it for the next poll() if needed.
+		 *
+		 * But if ph is NULL, we need to clean it up in here.
+		 */
+		t->pfd.revents = 0;
+	}
+
+exit:
+	pthread_mutex_unlock(&t->lock);
+	lxcfs_debug("returning ret = %d *reventsp = %x", ret, *reventsp);
+	return ret;
+
+exit_retry:
+	if (ph) {
+		if (t->ph) {
+			fuse_pollhandle_destroy(t->ph);
+			t->ph = NULL;
+		}
+
+		t->ph = ph;
+	}
+
+	/* ask the kernel to get back later */
+	*reventsp = 0;
+	pthread_mutex_unlock(&t->lock);
+	lxcfs_debug("returning ret = %d *reventsp = %x", ret, *reventsp);
+	return 0;
+}
+
+static void proc_psi_trigger_release(struct file_info *f)
+{
+	psi_trigger_t *t = f->private_data;
+
+	if (!t)
+		return;
+
+	/*
+	 * It can happen, that proc_psi_trigger_release() is called
+	 * while poll notify thread is running. We can use t->pfd.fd
+	 * as a signal for this thread that it's time to finish.
+	 * Once we close fd and set t->pfd.fd to -EBADF, thread will
+	 * gracefully exit on our signal.
+	 */
+	close_prot_errno_disarm(t->pfd.fd);
+	pthread_kill(t->tid, SIG_NOTIFY_POLL_WAKEUP);
+
+	lxcfs_debug("proc_psi_trigger_release is waiting on t->lock");
+	pthread_mutex_lock(&t->lock);
+	if (t->thread_state != POLL_NOTIFY_THREAD_EXITED) {
+		lxcfs_error("FUSE_NOTIFY_POLL thread hasn't finished (gracefully)");
+		pthread_kill(t->tid, SIGKILL);
+	}
+	pthread_mutex_unlock(&t->lock);
+
+	/*
+	 * pthread_mutex_lock() works as a barrier in this case, we know
+	 * that nobody can access (t) anymore, because poll notify thread
+	 * is dead by now and we are in f_op->release() callback, there is
+	 * no active read/write/poll syscall in there, because (struct file)
+	 * is being destroyed.
+	 */
+
+	pthread_mutex_destroy(&t->lock);
+
+	if (t->ph) {
+		fuse_pollhandle_destroy(t->ph);
+		t->ph = NULL;
+	}
+
+	free_disarm(f->private_data);
+	lxcfs_debug("proc_psi_trigger_release has done");
+}
+
+__lxcfs_fuse_ops int proc_write(const char *path, const char *buf, size_t size,
+				off_t offset, struct fuse_file_info *fi)
+{
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
+
+	switch (f->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		return proc_psi_trigger_write(path, buf, size, offset, fi);
+	}
+
+	return -EINVAL;
+}
+
+__lxcfs_fuse_ops int proc_poll(const char *path, struct fuse_file_info *fi,
+			       struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
+
+	switch (f->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		return proc_psi_trigger_poll(path, fi, ph, reventsp);
+	}
+
+	fuse_pollhandle_destroy(ph);
+	*reventsp = DEFAULT_POLLMASK;
+	return 0;
+}
+
+__lxcfs_fuse_ops int proc_release(const char *path, struct fuse_file_info *fi)
+{
+	struct file_info *f;
+
+	f = INTTYPE_TO_PTR(fi->fh);
+	if (!f)
+		return 0;
+
+	switch (f->type) {
+	case LXC_TYPE_PROC_PRESSURE_IO:
+	case LXC_TYPE_PROC_PRESSURE_CPU:
+	case LXC_TYPE_PROC_PRESSURE_MEMORY:
+		proc_psi_trigger_release(f);
+		break;
+	}
+
+	do_release_file_info(fi);
+	return 0;
+}
+
+__lxcfs_fuse_ops int proc_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	do_release_file_info(fi);
+	return 0;
 }

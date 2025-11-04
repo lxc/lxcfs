@@ -88,6 +88,16 @@ enum lxcfs_virt_t {
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
 /*
+ * This signal will be used in /proc/pressure/{cpu, memory, io} poll()
+ * virtualization to notify a background thread that it's
+ * a time to finish.
+ *
+ * We don't need a handler for this, we want this signal to be
+ * ignored, but interrupt any interruptible syscall like poll().
+ */
+#define SIG_NOTIFY_POLL_WAKEUP (SIGRTMIN + 0)
+
+/*
  * This signal will be used to signal fuse request processing thread that
  * request was interrupted (FUSE_INTERRUPT came from the kernel).
  *
@@ -106,13 +116,20 @@ extern int rwlock_rdlock_interruptible(pthread_rwlock_t *l);
 extern int rwlock_wrlock_interruptible(pthread_rwlock_t *l);
 
 struct file_info {
-	char *controller;
-	char *cgroup;
-	char *file;
+	union {
+		struct {
+			char *controller;
+			char *cgroup;
+			char *file;
+		};
+		struct {
+			void *private_data;
+		};
+	};
 	int type;
 	char *buf; /* unused */
 	int buflen;
-	int size; /*actual data size */
+	int size; /* actual data size */
 	int cached;
 };
 
@@ -125,17 +142,19 @@ struct lxcfs_opts {
 	 * and the use of bool instead of explicited __u32 and __u64 we can't.
 	 */
 	__u32 version;
-        // As of opts version 2.
-        char runtime_path[PATH_MAX];
+	// As of opts version 2.
+	char runtime_path[PATH_MAX];
 	bool zswap_off;
+	bool psi_poll_on;
 };
 
 typedef enum lxcfs_opt_t {
-	LXCFS_SWAP_ON	= 0,
-	LXCFS_PIDFD_ON	= 1,
-	LXCFS_CFS_ON	= 2,
-	LXCFS_ZSWAP_ON  = 3,
-	LXCFS_OPTS_MAX	= LXCFS_ZSWAP_ON,
+	LXCFS_SWAP_ON		= 0,
+	LXCFS_PIDFD_ON		= 1,
+	LXCFS_CFS_ON		= 2,
+	LXCFS_ZSWAP_ON		= 3,
+	LXCFS_PSI_POLL_ON	= 4,
+	LXCFS_OPTS_MAX		= LXCFS_PSI_POLL_ON,
 } lxcfs_opt_t;
 
 
@@ -172,6 +191,8 @@ static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 		if (opts->version >= 3 && !opts->zswap_off)
 			return liblxcfs_can_use_zswap();
 		return false;
+	case LXCFS_PSI_POLL_ON:
+		return (opts->version >= 4 && opts->psi_poll_on);
 	}
 
 	return false;

@@ -48,6 +48,7 @@ runs:
         meson setup build \
             -Ddocs=false \
             -Dtests=true \
+            -Dmocks=true \
             -Dinit-script=systemd \
             -Dprefix=/usr \
             -Db_sanitize=address,undefined

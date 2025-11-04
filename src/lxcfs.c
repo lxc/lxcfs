@@ -242,6 +242,8 @@ static void sigusr1_reload(int signo, siginfo_t *info, void *extra)
 	need_reload = 1;
 }
 
+static void sig_noop_handler(int signo, siginfo_t *info, void *extra) {}
+
 /* Functions to run the library methods */
 
 #define DEF_LIB_FS_OP(type, fsop)					\
@@ -276,7 +278,13 @@ DEF_LIB_FS_OP(sys  , read)
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_write_OP_ARGS		path, buf, size, offset, fi
 DEF_LIB_FS_OP(cg   , write)
+DEF_LIB_FS_OP(proc , write)
 DEF_LIB_FS_OP(sys  , write)
+
+#define LIB_FS_poll_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi, \
+					struct fuse_pollhandle *ph, unsigned *reventsp
+#define LIB_FS_poll_OP_ARGS		path, fi, ph, reventsp
+DEF_LIB_FS_OP(proc , poll)
 
 #define LIB_FS_mkdir_OP_ARGS_TYPE	const char *path, mode_t mode
 #define LIB_FS_mkdir_OP_ARGS		path, mode
@@ -605,6 +613,13 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 		return ret;
 	}
 
+	if (LXCFS_TYPE_PROC(type)) {
+		up_users();
+		ret = do_proc_write(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_write(path, buf, size, offset, fi);
@@ -613,6 +628,27 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 	}
 
 	return -EINVAL;
+}
+
+int lxcfs_poll(const char *path, struct fuse_file_info *fi,
+	       struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	int ret;
+	enum lxcfs_virt_t type;
+
+	type = file_info_type(fi);
+
+	if (LXCFS_TYPE_PROC(type)) {
+		up_users();
+		ret = do_proc_poll(path, fi, ph, reventsp);
+		down_users();
+		return ret;
+	}
+
+	/* default f_op->poll() behavior when not supported */
+	fuse_pollhandle_destroy(ph);
+	*reventsp = DEFAULT_POLLMASK;
+	return 0;
 }
 
 int lxcfs_readlink(const char *path, char *buf, size_t size)
@@ -842,6 +878,9 @@ const struct fuse_operations lxcfs_ops = {
 	.truncate	= lxcfs_truncate,
 	.write		= lxcfs_write,
 	.readlink	= lxcfs_readlink,
+#if HAVE_FUSE3
+	.poll		= lxcfs_poll,
+#endif
 
 	.create		= NULL,
 	.destroy	= NULL,
@@ -937,6 +976,7 @@ static const struct option long_options[] = {
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
 	{"enable-cgroup",	no_argument,		0,	  0	},
+	{"enable-psi-poll",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{"runtime-dir",		required_argument,	0,	  0	},
@@ -1011,7 +1051,8 @@ int main(int argc, char *argv[])
 	opts->zswap_off = false;
 	opts->use_pidfd = false;
 	opts->use_cfs = false;
-	opts->version = 3;
+	opts->psi_poll_on = false;
+	opts->version = 4;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
@@ -1022,6 +1063,8 @@ int main(int argc, char *argv[])
 				opts->use_cfs = true;
 			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
 				cgroup_is_enabled = true;
+			else if (strcmp(long_options[idx].name, "enable-psi-poll") == 0)
+				opts->psi_poll_on = true;
 			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)
 				runtime_path_arg = optarg;
 			else
@@ -1188,6 +1231,11 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 #endif
+
+	if (install_signal_handler(SIG_NOTIFY_POLL_WAKEUP, sig_noop_handler)) {
+		lxcfs_error("%s - Failed to install SIG_NOTIFY_POLL_WAKEUP signal handler", strerror(errno));
+		goto out;
+	}
 
 	if (!pidfile) {
 		snprintf(pidfile_buf, sizeof(pidfile_buf), "%s%s", runtime_path, PID_FILE);
