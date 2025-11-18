@@ -152,3 +152,16 @@ test_programs += executable(
     include_directories: config_include,
     install: false,
     build_by_default: want_tests != false)
+
+test_cgroup_utils = executable(
+    'test_cgroup_utils',
+    [
+        'test_cgroup_utils.c',
+        '../src/cgroups/cgroup_utils.c',
+        '../src/utils.c'
+    ],
+    include_directories: config_include,
+    install: false,
+    build_by_default: want_tests != false )
+
+test('test_cgroup_utils', test_cgroup_utils)

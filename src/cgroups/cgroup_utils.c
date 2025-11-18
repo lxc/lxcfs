@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/vfs.h>
 #include <unistd.h>
+#include <mntent.h>
 
 #include "../macro.h"
 #include "../memory_utils.h"
@@ -809,4 +810,61 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 	}
 
 	return log_error_errno(-ELOOP, ELOOP, "To many nested cgroups or invalid mount tree. Terminating walk");
+}
+
+// return first matching cgroup2 super option from opts string
+// eg: "rw,nosuid,nodev,noexec,relatime,memory_localevents,memory_recursiveprot"
+// returns "memory_localevents,memory_recursiveprot"
+const char *extract_cgroup2_super_opts(const char *opts) {
+	static const char *wanted_opts[] = {
+		"nsdelegate",
+		"memory_recursiveprot",
+		"memory_localevents",
+		NULL
+	};
+	if (opts == NULL)
+		return NULL;
+
+	const char *p = opts;
+	while (*p) {
+		const char *start = p;
+		while (*p && *p != ',')
+			p++;
+		size_t len = p - start;
+		for (int i = 0; wanted_opts[i] != NULL; i++) {
+			size_t wanted_len = strlen(wanted_opts[i]);
+			if (len == wanted_len && strncmp(start, wanted_opts[i], len) == 0){
+				return start;
+			}
+		}
+		if (*p == ',')
+			p++;
+	}
+	return NULL;
+}
+
+// return mount options for given target and expected fs type
+// eg: target="/sys/fs/cgroup", expect_type="cgroup2"
+// return NULL if not found, else strdup'ed string of mount options
+// the caller is responsible for freeing the returned string
+char *get_mount_opts(const char *target, const char *expect_type) {
+	if (target == NULL || expect_type == NULL)
+		return NULL;
+
+	char *res = NULL;
+	FILE *fp = setmntent("/proc/self/mounts", "r");
+	if (!fp)
+		return NULL;
+
+	struct mntent *ent;
+	while ((ent = getmntent(fp)) != NULL) {
+		if (strncmp(ent->mnt_dir, target, strlen(target)) == 0 
+			&& strncmp(ent->mnt_type, expect_type, strlen(expect_type)) == 0) {
+			res = strdup(ent->mnt_opts); // allocate, caller frees
+			goto out;
+		}
+	}
+out:
+	endmntent(fp);
+	return res;
 }
