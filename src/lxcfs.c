@@ -37,6 +37,7 @@
 
 void *dlopen_handle;
 static char runtime_path[PATH_MAX] = DEFAULT_RUNTIME_PATH;
+static char cgroup_override[PATH_MAX] = "";
 
 
 /* Functions to keep track of number of threads using the library */
@@ -754,6 +755,10 @@ static void usage(void)
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
 	lxcfs_info("  --runtime-dir=DIR    Path to use as the runtime directory.");
 	lxcfs_info("                       Default is %s", DEFAULT_RUNTIME_PATH);
+	lxcfs_info("  --cgroup-override=CGROUP");
+	lxcfs_info("                       Override cgroup path for all procfs/sysfs");
+	lxcfs_info("                       virtualization instead of resolving it from");
+	lxcfs_info("                       the calling process's PID.");
 	exit(EXIT_FAILURE);
 }
 
@@ -804,6 +809,7 @@ static const struct option long_options[] = {
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
 	{"enable-psi-poll",	no_argument,		0,	  0	},
+	{"cgroup-override",	required_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
 	{"runtime-dir",		required_argument,	0,	  0	},
@@ -864,6 +870,7 @@ int main(int argc, char *argv[])
 	char *const *new_argv;
 	struct lxcfs_opts *opts;
 	char *runtime_path_arg = NULL;
+	char *cgroup_override_arg = NULL;
 
 	opts = malloc(sizeof(struct lxcfs_opts));
 	if (opts == NULL) {
@@ -876,7 +883,7 @@ int main(int argc, char *argv[])
 	opts->use_pidfd = true;
 	opts->use_cfs = false;
 	opts->psi_poll_on = false;
-	opts->version = 4;
+	opts->version = 5;
 
 	while ((c = getopt_long(argc, argv, "dulfhvso:p:", long_options, &idx)) != -1) {
 		switch (c) {
@@ -889,6 +896,8 @@ int main(int argc, char *argv[])
 				opts->psi_poll_on = true;
 			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)
 				runtime_path_arg = optarg;
+			else if (strcmp(long_options[idx].name, "cgroup-override") == 0)
+				cgroup_override_arg = optarg;
 			else
 				usage();
 			break;
@@ -949,6 +958,11 @@ int main(int argc, char *argv[])
 		lxcfs_info("runtime path set to %s", runtime_path);
 	}
 	strlcpy(opts->runtime_path, runtime_path, sizeof(opts->runtime_path));
+	if (cgroup_override_arg) {
+		strlcpy(cgroup_override, cgroup_override_arg, sizeof(cgroup_override));
+		lxcfs_info("cgroup override set to %s", cgroup_override);
+	}
+	strlcpy(opts->cgroup_override, cgroup_override, sizeof(opts->cgroup_override));
 
 	fuse_argv[fuse_argc++] = argv[0];
 	if (debug)

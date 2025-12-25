@@ -54,7 +54,7 @@ static bool has_versioned_opts;
 static bool memory_is_cgroupv2;
 static __u32 host_personality;
 static char runtime_path[PATH_MAX] = DEFAULT_RUNTIME_PATH;
-
+static char cgroup_override[PATH_MAX] = "";
 
 static volatile sig_atomic_t reload_successful;
 
@@ -567,6 +567,28 @@ pid_t lookup_initpid_in_store(pid_t pid)
 	return hashed_pid;
 }
 
+char *resolve_virtualized_cgroup(struct lxcfs_opts *opts,
+				 pid_t requester_pid,
+				 const char *controller)
+{
+	char *cgroup;
+	pid_t initpid;
+
+	if (opts && opts->version >= 5 && opts->cgroup_override[0])
+		return strdup(opts->cgroup_override);
+
+	initpid = lookup_initpid_in_store(requester_pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = requester_pid;
+
+	cgroup = get_pid_cgroup(initpid, controller);
+	if (!cgroup)
+		return NULL;
+
+	prune_init_slice(cgroup);
+	return cgroup;
+}
+
 /*
  * Functions needed to setup cgroups in the __constructor__.
  */
@@ -886,6 +908,18 @@ bool set_runtime_path(const char* new_path)
 	}
 }
 
+void set_cgroup_override(const char* new_path)
+{
+	if (new_path && strlen(new_path) < PATH_MAX) {
+		if (new_path[0]) {
+			strlcpy(cgroup_override, new_path, sizeof(cgroup_override));
+			lxcfs_info("Using cgroup override %s", cgroup_override);
+		}
+	} else {
+		lxcfs_error("%s\n", "Failed to overwrite the cgroup override");
+	}
+}
+
 void lxcfslib_init(void)
 {
 	__do_close int init_ns = -EBADF, root_fd = -EBADF,
@@ -1013,6 +1047,9 @@ void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 	// We can read runtime_path as of opts version 2.
 	if (opts && opts->version >= 2) {
 		set_runtime_path(opts->runtime_path);
+	}
+	if (opts && opts->version >= 5) {
+		set_cgroup_override(opts->cgroup_override);
 	}
 
 	/* initialize the library */
