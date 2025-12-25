@@ -53,6 +53,7 @@ static bool has_versioned_opts;
 static bool memory_is_cgroupv2;
 static __u32 host_personality;
 static char runtime_path[PATH_MAX] = DEFAULT_RUNTIME_PATH;
+static char force_render_cgroup[PATH_MAX] = "";
 
 
 static volatile sig_atomic_t reload_successful;
@@ -917,6 +918,18 @@ bool set_runtime_path(const char* new_path)
 	}
 }
 
+void set_force_render_cgroup(const char* new_path)
+{
+	if (new_path && strlen(new_path) < PATH_MAX) {
+		if (new_path[0]) {
+			strlcpy(force_render_cgroup, new_path, sizeof(force_render_cgroup));
+			lxcfs_info("Using force render cgroup %s", force_render_cgroup);
+		}
+	} else {
+		lxcfs_error("%s\n", "Failed to overwrite the force render cgroup");
+	}
+}
+
 void lxcfslib_init(void)
 {
 	__do_close int init_ns = -EBADF, root_fd = -EBADF,
@@ -1042,6 +1055,9 @@ void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 	// We can read runtime_path as of opts version 2.
 	if (opts && opts->version >= 2) {
 		set_runtime_path(opts->runtime_path);
+	}
+	if (opts && opts->version >= 5) {
+		set_force_render_cgroup(opts->force_render_cgroup);
 	}
 
 	/* initialize the library */
