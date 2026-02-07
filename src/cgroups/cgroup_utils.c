@@ -815,31 +815,31 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 // return first matching cgroup2 super option from opts string
 // eg: "rw,nosuid,nodev,noexec,relatime,memory_localevents,memory_recursiveprot"
 // returns "memory_localevents,memory_recursiveprot"
-const char *extract_cgroup2_super_opts(const char *opts) {
+const char *extract_cgroup2_super_opts(const char *opts)
+{
 	static const char *wanted_opts[] = {
 		"nsdelegate",
 		"memory_recursiveprot",
 		"memory_localevents",
 		NULL
 	};
+	__do_free char *dup = NULL;
+	char *tok;
+
 	if (opts == NULL)
 		return NULL;
 
-	const char *p = opts;
-	while (*p) {
-		const char *start = p;
-		while (*p && *p != ',')
-			p++;
-		size_t len = p - start;
+	dup = strdup(opts);
+	if (dup == NULL)
+		return NULL;
+
+	lxc_iterate_parts(tok, dup, ",") {
 		for (int i = 0; wanted_opts[i] != NULL; i++) {
-			size_t wanted_len = strlen(wanted_opts[i]);
-			if (len == wanted_len && strncmp(start, wanted_opts[i], len) == 0){
-				return start;
-			}
+			if (strcmp(tok, wanted_opts[i]) == 0)
+				return opts + (tok - dup);
 		}
-		if (*p == ',')
-			p++;
 	}
+
 	return NULL;
 }
 

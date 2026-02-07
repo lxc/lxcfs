@@ -427,7 +427,7 @@ static int __cg_mount_direct(struct hierarchy *h, const char *controllerpath)
 
 	if (ret < 0)
 		return -1;
-	
+
 	return 0;
 }
 

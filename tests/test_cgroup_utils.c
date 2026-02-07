@@ -9,6 +9,15 @@ void test_extract_cgroup2_super_opts(void) {
     }
 }
 
+void test_extract_cgroup2_super_opts_with_nsdelegate(void) {
+    const char *opts = "rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_localevents";
+    const char *result = extract_cgroup2_super_opts(opts);
+    if (result == NULL || strcmp(result, "nsdelegate,memory_localevents") != 0) {
+        fprintf(stderr, "Test failed: expected 'nsdelegate,memory_localevents', got '%s'\n", result ? result : "NULL");
+        exit(1);
+    }
+}
+
 void test_extract_cgroup2_super_opts_not_match(void) {
     const char *opts = "rw,nosuid,nodev,noexec,relatime";
     const char *result = extract_cgroup2_super_opts(opts);
@@ -21,6 +30,7 @@ void test_extract_cgroup2_super_opts_not_match(void) {
 int main(int argc, char *argv[]) {
     test_extract_cgroup2_super_opts();
     test_extract_cgroup2_super_opts_not_match();
+    test_extract_cgroup2_super_opts_with_nsdelegate();
 	printf("All tests passed\n");
     return 0;
 }
