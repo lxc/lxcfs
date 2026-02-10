@@ -399,30 +399,30 @@ static void trim(char *s)
  */
 static int __cg_mount_direct(struct hierarchy *h, const char *controllerpath)
 {
-	__do_free char *controllers = NULL;
-	__do_free const char *opts = NULL;
-	char *fstype = "cgroup2";
-	unsigned long flags = 0;
-	int ret;
+	 __do_free char *controllers = NULL;
+	 __do_free const char *opts = NULL;
+	 char *fstype = "cgroup2";
+	 unsigned long flags = 0;
+	 int ret;
 
-	flags |= MS_NOSUID;
-	flags |= MS_NOEXEC;
-	flags |= MS_NODEV;
-	flags |= MS_RELATIME;
+	 flags |= MS_NOSUID;
+	 flags |= MS_NOEXEC;
+	 flags |= MS_NODEV;
+	 flags |= MS_RELATIME;
 
-	if (h->version != CGROUP2_SUPER_MAGIC) {
-		controllers = lxc_string_join(",", (const char **)h->controllers, false);
-		if (!controllers)
-			return -ENOMEM;
-		fstype = "cgroup";
-		ret = mount("cgroup", controllerpath, fstype, flags, controllers);
-	} else {
-		opts = get_mount_opts(DEFAULT_CGROUP_MOUNTPOINT, fstype);
-		if (!opts) {
-			return -1;
-		}
-		const char *super_opts = extract_cgroup2_super_opts(opts);
-		ret = mount(fstype, controllerpath, fstype, flags, super_opts);
+	 if (h->version != CGROUP2_SUPER_MAGIC) {
+		 controllers = lxc_string_join(",", (const char **)h->controllers, false);
+		 if (!controllers)
+			 return -ENOMEM;
+		 fstype = "cgroup";
+		 ret = mount("cgroup", controllerpath, fstype, flags, controllers);
+	 } else {
+		 opts = get_mount_opts(DEFAULT_CGROUP_MOUNTPOINT, fstype);
+		 if (!opts) {
+			 return -1;
+		 }
+		 const char *super_opts = extract_cgroup2_super_opts(opts);
+		 ret = mount(fstype, controllerpath, fstype, flags, super_opts);
 	}
 
 	if (ret < 0)
