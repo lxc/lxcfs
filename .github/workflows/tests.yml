@@ -87,6 +87,7 @@ jobs:
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
+          LIBFUSE: ${{ matrix.fuse }}
           WORKSPACE_PATH: ${{ github.workspace }}
         run: |
           UPSTREAM_LXCFS_TREE=$(realpath ${WORKSPACE_PATH}/../upstream-lxcfs)
