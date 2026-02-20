@@ -399,24 +399,39 @@ static void trim(char *s)
  */
 static int __cg_mount_direct(struct hierarchy *h, const char *controllerpath)
 {
-	 __do_free char *controllers = NULL;
-	 char *fstype = "cgroup2";
-	 unsigned long flags = 0;
-	 int ret;
+	__do_free char *controllers = NULL;
+	char *fstype = "cgroup2";
+	unsigned long flags = 0;
+	int ret;
 
-	 flags |= MS_NOSUID;
-	 flags |= MS_NOEXEC;
-	 flags |= MS_NODEV;
-	 flags |= MS_RELATIME;
+	flags |= MS_NOSUID;
+	flags |= MS_NOEXEC;
+	flags |= MS_NODEV;
+	flags |= MS_RELATIME;
 
-	 if (h->version != CGROUP2_SUPER_MAGIC) {
-		 controllers = lxc_string_join(",", (const char **)h->controllers, false);
-		 if (!controllers)
-			 return -ENOMEM;
-		 fstype = "cgroup";
+	if (h->version != CGROUP2_SUPER_MAGIC) {
+		controllers = lxc_string_join(",", (const char **)h->controllers, false);
+		if (!controllers)
+			return -ENOMEM;
+		fstype = "cgroup";
+		ret = mount("cgroup", controllerpath, fstype, flags, controllers);
+	} else {
+		__do_free const char *sb_opts = NULL;
+
+		/*
+		 * Before mounting cgroup2 fs we have to try out best to find
+		 * an existing mount and extract mount existing mount options from it.
+		 * It is important because otherwise we can change cgroup2 superblock
+		 * options. See kernel logic in apply_cgroup_root_flags for more details:
+		 * https://github.com/torvalds/linux/blob/18f7fcd5e69a04df57b563360b88be72471d6b62/kernel/cgroup/cgroup.c#L2047
+		 *
+		 * If we haven't found an existing mount, just mount a new one with
+		 * an empty list of options.
+		 */
+		sb_opts = cgroup2_extract_sb_opts(DEFAULT_CGROUP_MOUNTPOINT);
+		ret = mount(fstype, controllerpath, fstype, flags, sb_opts);
 	}
 
-	ret = mount("cgroup", controllerpath, fstype, flags, controllers);
 	if (ret < 0)
 		return -1;
 

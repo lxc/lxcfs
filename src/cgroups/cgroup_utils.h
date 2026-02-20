@@ -98,4 +98,6 @@ static inline bool is_empty_string(const char *s)
 	return !s || strcmp(s, "") == 0;
 }
 
+const char *cgroup2_extract_sb_opts(const char *mnt);
+
 #endif /* __LXC_CGROUP_UTILS_H */
