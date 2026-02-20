@@ -234,8 +234,10 @@ liblxcfs_common_dependencies = declare_dependency(
     ])
 
 liblxcfs_cargs = []
+liblxcfstest_cargs = ['-DRELOADTEST', '-DDEBUG']
 if want_mocks == true
-	liblxcfs_cargs = ['-DPSITRIGGERTEST', '-DDEBUG']
+    liblxcfs_cargs = ['-DPSITRIGGERTEST', '-DDEBUG']
+    liblxcfstest_cargs += ['-DPSITRIGGERTEST']
 endif
 
 liblxcfs = shared_module(
@@ -255,7 +257,7 @@ if want_tests == true
         dependencies: liblxcfs_common_dependencies,
         install: false,
         install_dir: lxcfsdir,
-        c_args: ['-DRELOADTEST', '-DDEBUG'])
+        c_args: liblxcfstest_cargs)
 endif
 
 # RPM spec.
