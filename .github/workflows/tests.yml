@@ -81,6 +81,7 @@ jobs:
         run: |
           git clone -b "${BASE_BRANCH}" https://github.com/lxc/lxcfs.git ../upstream-lxcfs
           cd ../upstream-lxcfs
+          meson setup -Ddocs=false -Dtests=true -Dmocks=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/ || \
           meson setup -Ddocs=false -Dtests=true -Dinit-script=systemd -Dprefix=/usr -Db_sanitize=address,undefined build/
           meson compile -C build
 
