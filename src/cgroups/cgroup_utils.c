@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/vfs.h>
 #include <unistd.h>
+#include <mntent.h>
 
 #include "../macro.h"
 #include "../memory_utils.h"
@@ -809,4 +810,89 @@ int cgroup_walkup_to_root(int cgroup2_root_fd, int hierarchy_fd,
 	}
 
 	return log_error_errno(-ELOOP, ELOOP, "To many nested cgroups or invalid mount tree. Terminating walk");
+}
+
+/**
+ * get_mount_opts() - Returns the mount options for a given mnt and with fs_type
+ *
+ * @mnt:	Mount point.
+ * @fs_type:	File system type.
+ *
+ * Returns: mount options if success, NULL if mount is not found or error occurred.
+ */
+static char *get_mount_opts(const char *mnt, const char *fs_type) {
+	FILE *fp;
+	char *mnt_opts = NULL;
+	struct mntent *ent;
+
+	if (mnt == NULL || fs_type == NULL)
+		return NULL;
+
+	fp = setmntent("/proc/self/mounts", "r");
+	if (!fp)
+		return NULL;
+
+	while ((ent = getmntent(fp)) != NULL) {
+		if (strncmp(ent->mnt_dir, mnt, strlen(mnt)) == 0 &&
+		    strncmp(ent->mnt_type, fs_type, strlen(fs_type)) == 0) {
+			mnt_opts = strdup(ent->mnt_opts); /* allocate, caller frees */
+			goto out;
+		}
+	}
+
+out:
+	endmntent(fp);
+	return mnt_opts;
+}
+
+/**
+ * cgroup2_extract_sb_opts() - Returns cgroup2 fs superblock options for a given mount point
+ *
+ * @mnt:	cgroup2 fs mount point.
+ *
+ * Returns: sb options if success, NULL if mount is not found or error occurred.
+ */
+const char *cgroup2_extract_sb_opts(const char *mnt)
+{
+	__do_free char *mnt_opts = NULL;
+	char *tok;
+	char *buf;
+	size_t buf_len = 0;
+	static const char *wanted_opts[] = {
+		"nsdelegate",
+		"favordynmods",
+		"memory_localevents",
+		"memory_recursiveprot",
+		"memory_hugetlb_accounting",
+		"pids_localevents",
+		NULL
+	};
+
+	mnt_opts = get_mount_opts(mnt, "cgroup2");
+	if (mnt_opts == NULL) {
+		/* report as info, because it is not critical */
+		lxcfs_info("Failed to find an existing cgroup2 mount and get mount options from it");
+		return NULL;
+	}
+
+	for (int i = 0; wanted_opts[i] != NULL; i++)
+		buf_len += strlen(wanted_opts[i]) + 1; /* for comma or null terminator */
+
+	buf = calloc(buf_len, 1);
+	if (!buf)
+		return NULL;
+	buf[0] = '\0';
+
+	lxc_iterate_parts(tok, mnt_opts, ",") {
+		for (int i = 0; wanted_opts[i] != NULL; i++) {
+			if (strcmp(tok, wanted_opts[i]) != 0)
+				continue;
+
+			if (buf[0] != '\0')
+				(void)strlcat(buf, ",", buf_len);
+			(void)strlcat(buf, tok, buf_len);
+		}
+	}
+
+	return buf;
 }
