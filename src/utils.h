@@ -40,6 +40,7 @@ extern int read_file_fuse(const char *path, char *buf, size_t size,
 			  struct file_info *d);
 extern int read_file_fuse_with_offset(const char *path, char *buf, size_t size,
 				      off_t offset, struct file_info *d);
+extern bool try_realloc_proc_buf(struct file_info *d, const char *path);
 extern void prune_init_slice(char *cg);
 extern int wait_for_pid(pid_t pid);
 
