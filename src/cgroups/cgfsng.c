@@ -285,7 +285,8 @@ static struct hierarchy *add_hierarchy(struct hierarchy ***h, char **clist, char
 	struct hierarchy *new;
 	int newentry;
 
-	new = zalloc(sizeof(*new));
+	new = must_realloc(NULL, sizeof(*new));
+	memset(new, 0, sizeof(*new));
 	new->controllers = clist;
 	new->mountpoint = mountpoint;
 	new->base_path = base_path;
