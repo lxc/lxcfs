@@ -958,8 +958,8 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	bool am_printing = false, firstline = true, is_s390x = false;
 	int curcpu = -1, cpu, max_cpus = 0;
 	bool use_view;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
+	char *cache;
+	size_t cache_size;
 
 	if (offset) {
 		size_t left;
@@ -972,10 +972,16 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 		left = d->size - offset;
 		total_len = left > size ? size: left;
-		memcpy(buf, cache + offset, total_len);
+		memcpy(buf, d->buf + offset, total_len);
 
 		return total_len;
 	}
+
+	/* Realloc if /proc/cpuinfo has grown since open(). */
+	if (!try_realloc_proc_buf(d, "/proc/cpuinfo"))
+		return -ENOMEM;
+	cache = d->buf;
+	cache_size = d->buflen;
 
 	pid_t initpid = lookup_initpid_in_store(fc->pid);
 	if (initpid <= 1 || is_shared_pidns(initpid))

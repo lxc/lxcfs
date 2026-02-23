@@ -88,6 +88,24 @@ echo "==> Testing /sys/devices/system/cpu/online"
 echo "==> Testing /proc/stat"
 [ "$(grep "^cpu" ${LXCFSDIR}/proc/stat | wc -l)" = "2" ]
 
+# Test stat integrity — verify the output is well-formed and never truncated.
+# This catches the bug reported in https://github.com/lxc/lxcfs/issues/694
+echo "==> Testing /proc/stat integrity"
+stat_content=$(cat ${LXCFSDIR}/proc/stat)
+# Must start with "cpu " aggregate line
+echo "$stat_content" | head -1 | grep -q "^cpu "
+# Must contain standard non-cpu lines (these appear after cpu lines)
+echo "$stat_content" | grep -q "^intr "
+echo "$stat_content" | grep -q "^ctxt "
+echo "$stat_content" | grep -q "^btime "
+echo "$stat_content" | grep -q "^processes "
+# Read /proc/stat repeatedly — must never return empty
+echo "==> Testing /proc/stat repeated reads"
+for i in $(seq 1 100); do
+    bytes=$(cat ${LXCFSDIR}/proc/stat | wc -c)
+    [ "$bytes" -gt 0 ] || (echo "FAIL: /proc/stat returned empty on read $i" && exit 1)
+done
+
 # Test meminfo
 echo "==> Testing /proc/meminfo"
 grep -q "^MemTotal.*65536 kB$" ${LXCFSDIR}/proc/meminfo
