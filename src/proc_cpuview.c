@@ -977,18 +977,23 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
+	if (opts && opts->force_render_cgroup[0]) {
+        cg = strdup(opts->force_render_cgroup);
+        cpu_cg = strdup(opts->force_render_cgroup);
+    } else {
+    	pid_t initpid = lookup_initpid_in_store(fc->pid);
+    	if (initpid <= 1 || is_shared_pidns(initpid))
+    		initpid = fc->pid;
 
-	cg = get_pid_cgroup(initpid, "cpuset");
-	if (!cg)
-		return read_file_fuse("proc/cpuinfo", buf, size, d);
-	prune_init_slice(cg);
-	cpu_cg = get_pid_cgroup(initpid, "cpu");
-	if (!cpu_cg)
-		return read_file_fuse("proc/cpuinfo", buf, size, d);
-	prune_init_slice(cpu_cg);
+    	cg = get_pid_cgroup(initpid, "cpuset");
+    	if (!cg)
+    		return read_file_fuse("proc/cpuinfo", buf, size, d);
+    	prune_init_slice(cg);
+    	cpu_cg = get_pid_cgroup(initpid, "cpu");
+    	if (!cpu_cg)
+    		return read_file_fuse("proc/cpuinfo", buf, size, d);
+    	prune_init_slice(cpu_cg);
+    }
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
 		return 0;
