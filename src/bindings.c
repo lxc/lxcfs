@@ -45,6 +45,11 @@
 #define BASEDIR "/lxcfs/controllers"
 #define ROOTDIR "/lxcfs/root"
 
+feature_t per_instance_features[63] = {
+	{ .name = "disable_uptime", },
+	{ }
+};
+
 static bool can_use_pidfd;
 static bool can_use_swap;
 static bool can_use_zswap;
@@ -113,35 +118,8 @@ static int pivot_root(const char *new_root, const char *put_old)
 extern int pivot_root(const char *new_root, const char *put_old);
 #endif
 
-/*
- * A table caching which pid is init for a pid namespace.
- * When looking up which pid is init for $qpid, we first
- * 1. Stat /proc/$qpid/ns/pid.
- * 2. Check whether the ino_t is in our store.
- *   a. if not, fork a child in qpid's ns to send us
- *	 ucred.pid = 1, and read the initpid.  Cache
- *	 initpid and creation time for /proc/initpid
- *	 in a new store entry.
- *   b. if so, verify that /proc/initpid still matches
- *	 what we have saved.  If not, clear the store
- *	 entry and go back to a.  If so, return the
- *	 cached initpid.
- */
-struct pidns_init_store {
-	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
-	pid_t initpid; /* the pid of nit in that ns */
-	int init_pidfd;
-	int64_t ctime; /* the time at which /proc/$initpid was created */
-	struct pidns_init_store *next;
-	int64_t lastcheck;
-};
-
-/* lol - look at how they are allocated in the kernel */
-#define PIDNS_HASH_SIZE 4096
-#define HASH(x) ((x) % PIDNS_HASH_SIZE)
-
-static struct pidns_init_store *pidns_hash_table[PIDNS_HASH_SIZE];
-static pthread_mutex_t pidns_store_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct pidns_store **pidns_hash_table;
+static pthread_mutex_t *pidns_store_mutex;
 
 static void mutex_lock(pthread_mutex_t *l)
 {
@@ -165,12 +143,12 @@ static void mutex_unlock(pthread_mutex_t *l)
 
 static inline void store_lock(void)
 {
-	mutex_lock(&pidns_store_mutex);
+	mutex_lock(pidns_store_mutex);
 }
 
 static inline void store_unlock(void)
 {
-	mutex_unlock(&pidns_store_mutex);
+	mutex_unlock(pidns_store_mutex);
 }
 
 #define define_interruptible_lock(type, lockname, lockfn)           \
@@ -201,7 +179,7 @@ define_interruptible_lock(pthread_rwlock_t, rwlock_wrlock, pthread_rwlock_timedw
 #define LXCFS_PROC_PID_LEN \
 	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + +1)
 
-static int initpid_still_valid_pidfd(struct pidns_init_store *entry)
+static int initpid_still_valid_pidfd(struct pidns_store *entry)
 {
 	int ret;
 
@@ -219,7 +197,7 @@ static int initpid_still_valid_pidfd(struct pidns_init_store *entry)
 	return 1;
 }
 
-static int initpid_still_valid_stat(struct pidns_init_store *entry)
+static int initpid_still_valid_stat(struct pidns_store *entry)
 {
 	struct stat st;
 	char path[LXCFS_PROC_PID_LEN];
@@ -232,7 +210,7 @@ static int initpid_still_valid_stat(struct pidns_init_store *entry)
 }
 
 /* Must be called under store_lock */
-static bool initpid_still_valid(struct pidns_init_store *entry)
+static bool initpid_still_valid(struct pidns_store *entry)
 {
 	int ret;
 
@@ -243,11 +221,20 @@ static bool initpid_still_valid(struct pidns_init_store *entry)
 	return ret == 1;
 }
 
-/* Must be called under store_lock */
-static void remove_initpid(struct pidns_init_store *entry)
+static void free_initpid(struct pidns_store *entry)
 {
-	struct pidns_init_store *it;
+	close_prot_errno_disarm(entry->init_pidfd);
+	free_disarm(entry);
+}
+
+/* Must be called under store_lock */
+static void remove_initpid(struct pidns_store *entry)
+{
+	struct pidns_store *it;
 	int ino_hash;
+
+	if (!pidns_hash_table)
+		return;
 
 	lxcfs_debug("Removing cached entry for pid %d from init pid cache",
 		    entry->initpid);
@@ -255,8 +242,7 @@ static void remove_initpid(struct pidns_init_store *entry)
 	ino_hash = HASH(entry->ino);
 	if (pidns_hash_table[ino_hash] == entry) {
 		pidns_hash_table[ino_hash] = entry->next;
-		close_prot_errno_disarm(entry->init_pidfd);
-		free_disarm(entry);
+		free_initpid(entry);
 		return;
 	}
 
@@ -264,12 +250,17 @@ static void remove_initpid(struct pidns_init_store *entry)
 	while (it) {
 		if (it->next == entry) {
 			it->next = entry->next;
-			close_prot_errno_disarm(entry->init_pidfd);
-			free_disarm(entry);
+			free_initpid(entry);
 			return;
 		}
 		it = it->next;
 	}
+}
+
+static bool keep_pidns_entry(struct pidns_store *entry)
+{
+	return (entry->version >= 1) && entry->keep_on_reload &&
+	       initpid_still_valid(entry);
 }
 
 #define PURGE_SECS 5
@@ -278,6 +269,9 @@ static void prune_initpid_store(void)
 {
 	static int64_t last_prune = 0;
 	int64_t now, threshold;
+
+	if (!pidns_hash_table)
+		return;
 
 	if (!last_prune) {
 		last_prune = time(NULL);
@@ -294,20 +288,22 @@ static void prune_initpid_store(void)
 	threshold = now - 2 * PURGE_SECS;
 
 	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
-		for (struct pidns_init_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
-			if (entry->lastcheck < threshold) {
-				struct pidns_init_store *cur = entry;
+		for (struct pidns_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
+			struct pidns_store *cur = entry;
 
-				lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
+			if ((entry->lastcheck < threshold) &&
+			    !keep_pidns_entry(cur)) {
+				lxcfs_debug("Removed cache entry for pid %d from init pid cache", cur->initpid);
 
 				if (prev)
 					prev->next = entry->next;
 				else
 					pidns_hash_table[i] = entry->next;
 				entry = entry->next;
-				close_prot_errno_disarm(cur->init_pidfd);
-				free_disarm(cur);
+				free_initpid(cur);
 			} else {
+				lxcfs_debug("Kept cache entry for pid %d in init pid cache", cur->initpid);
+
 				prev = entry;
 				entry = entry->next;
 			}
@@ -317,31 +313,67 @@ static void prune_initpid_store(void)
 
 static void clear_initpid_store(void)
 {
+	if (!pidns_hash_table)
+		return;
+
 	store_lock();
 	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
-		for (struct pidns_init_store *entry = pidns_hash_table[i]; entry;) {
-			struct pidns_init_store *cur = entry;
+		for (struct pidns_store *entry = pidns_hash_table[i], *prev = NULL; entry;) {
+			struct pidns_store *cur = entry;
 
-			lxcfs_debug("Removed cache entry for pid %d to init pid cache", cur->initpid);
+			if (keep_pidns_entry(cur)) {
+				lxcfs_debug("Kept cache entry for pid %d in init pid cache", cur->initpid);
 
-			pidns_hash_table[i] = entry->next;
-			entry = entry->next;
-			close_prot_errno_disarm(cur->init_pidfd);
-			free_disarm(cur);
+				prev = entry;
+				entry = entry->next;
+			} else {
+				lxcfs_debug("Removed cache entry for pid %d from init pid cache", cur->initpid);
+
+				if (prev)
+					prev->next = entry->next;
+				else
+					pidns_hash_table[i] = entry->next;
+				entry = entry->next;
+				free_initpid(cur);
+			}
 		}
 	}
 	store_unlock();
 }
 
+int iter_initpid_store(pidns_store_iter_func_t f, void *data)
+{
+	int ret;
+
+	if (!pidns_hash_table)
+		return 0;
+
+	store_lock();
+	for (int i = 0; i < PIDNS_HASH_SIZE; i++) {
+		for (struct pidns_store *entry = pidns_hash_table[i]; entry; entry = entry->next) {
+			ret = f(entry, data);
+			if (ret)
+				goto out;
+		}
+	}
+
+out:
+	store_unlock();
+	return ret;
+}
+
 /* Must be called under store_lock */
 static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
-	__do_free struct pidns_init_store *entry = NULL;
+	__do_free struct pidns_store *entry = NULL;
 	__do_close int pidfd = -EBADF;
 	const struct lxcfs_opts *opts = fuse_get_context()->private_data;
 	char path[LXCFS_PROC_PID_LEN];
 	struct stat st;
 	int ino_hash;
+
+	if (!pidns_hash_table)
+		return;
 
 	if (opts && opts->use_pidfd && can_use_pidfd) {
 		pidfd = pidfd_open(pid, 0);
@@ -358,17 +390,44 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 		return;
 
 	ino_hash = HASH(pidns_inode);
-	*entry = (struct pidns_init_store){
+	*entry = (struct pidns_store){
+		.version	= 2,
 		.ino		= pidns_inode,
 		.initpid	= pid,
 		.ctime		= st.st_ctime,
 		.next		= pidns_hash_table[ino_hash],
 		.lastcheck	= time(NULL),
 		.init_pidfd	= move_fd(pidfd),
+		.keep_on_reload	= false,
 	};
 	pidns_hash_table[ino_hash] = move_ptr(entry);
 
 	lxcfs_debug("Added cache entry %d for pid %d to init pid cache", ino_hash, pid);
+}
+
+static struct pidns_store *lookup_verify_pidns_entry(ino_t pidns_inode)
+{
+	struct pidns_store *entry;
+
+	if (!pidns_hash_table)
+		return NULL;
+
+	entry = pidns_hash_table[HASH(pidns_inode)];
+
+	while (entry) {
+		if (entry->ino == pidns_inode) {
+			if (initpid_still_valid(entry)) {
+				entry->lastcheck = time(NULL);
+				return entry;
+			}
+
+			remove_initpid(entry);
+			return NULL;
+		}
+		entry = entry->next;
+	}
+
+	return NULL;
 }
 
 /*
@@ -380,22 +439,12 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
  */
 static pid_t lookup_verify_initpid(ino_t pidns_inode)
 {
-	struct pidns_init_store *entry = pidns_hash_table[HASH(pidns_inode)];
+	struct pidns_store *entry = lookup_verify_pidns_entry(pidns_inode);
 
-	while (entry) {
-		if (entry->ino == pidns_inode) {
-			if (initpid_still_valid(entry)) {
-				entry->lastcheck = time(NULL);
-				return entry->initpid;
-			}
+	if (!entry)
+		return ret_errno(ESRCH);
 
-			remove_initpid(entry);
-			return ret_errno(ESRCH);
-		}
-		entry = entry->next;
-	}
-
-	return ret_errno(ESRCH);
+	return entry->initpid;
 }
 
 static bool send_creds_ok(int sock_fd)
@@ -563,20 +612,33 @@ out:
 	return pid_ret;
 }
 
-pid_t lookup_initpid_in_store(pid_t pid)
+static ino_t get_pidns_ino(pid_t pid)
 {
-	pid_t hashed_pid = 0;
 	char path[LXCFS_PROC_PID_NS_LEN];
 	struct stat st;
 
 	snprintf(path, sizeof(path), "/proc/%d/ns/pid", pid);
 	if (stat(path, &st))
+		return 0;
+
+	return st.st_ino;
+}
+
+pid_t lookup_initpid_in_store(pid_t pid)
+{
+	pid_t hashed_pid = 0;
+	ino_t pidns_ino;
+
+	pidns_ino = get_pidns_ino(pid);
+	if (!pidns_ino)
 		return ret_errno(ESRCH);
 
 	store_lock();
 
-	hashed_pid = lookup_verify_initpid(st.st_ino);
+	hashed_pid = lookup_verify_initpid(pidns_ino);
 	if (hashed_pid < 0) {
+		pid_t already_hashed_pid;
+
 		/* release the mutex as the following call is expensive */
 		store_unlock();
 
@@ -584,8 +646,20 @@ pid_t lookup_initpid_in_store(pid_t pid)
 
 		store_lock();
 
-		if (hashed_pid > 0)
-			save_initpid(st.st_ino, hashed_pid);
+		/* recheck that entry wasn't added while lock was released */
+		already_hashed_pid = lookup_verify_initpid(pidns_ino);
+
+		/* no existing entry found. Just add a new one. */
+		if (already_hashed_pid < 0) {
+			if (hashed_pid > 0)
+				save_initpid(pidns_ino, hashed_pid);
+
+		/* entry found it must have the same pid */
+		} else if (already_hashed_pid != hashed_pid) {
+			lxcfs_error("Different init pids (%d, %d) for the same cache entry %lu\n",
+				    already_hashed_pid, hashed_pid, HASH(pidns_ino));
+			hashed_pid = -1;
+		}
 	}
 
 	/*
@@ -596,6 +670,55 @@ pid_t lookup_initpid_in_store(pid_t pid)
 	store_unlock();
 
 	return hashed_pid;
+}
+
+bool check_set_lxcfs_feature(pid_t pid, enum lxcfs_feature_op op, __u64 feature)
+{
+	bool ret = false;
+	struct pidns_store *entry;
+	ino_t pidns_ino;
+
+	pidns_ino = get_pidns_ino(pid);
+	if (!pidns_ino)
+		return ret;
+
+	store_lock();
+
+	entry = lookup_verify_pidns_entry(pidns_ino);
+	if (!entry)
+		goto out;
+
+	if (entry->version < 2)
+		goto out;
+
+	switch (op) {
+	case LXCFS_FEATURE_CHECK:
+		ret = entry->features & feature;
+
+		break;
+	case LXCFS_FEATURE_SET:
+		entry->features |= feature;
+
+		/*
+		 * As we have enabled feature, this entry
+		 * must be kept across lxcfs live reloads.
+		 */
+		entry->keep_on_reload = true;
+
+		ret = true;
+
+		break;
+	case LXCFS_FEATURE_CLEAR:
+		entry->features &= ~feature;
+		ret = true;
+
+		break;
+	}
+
+out:
+	store_unlock();
+
+	return ret;
 }
 
 /*
@@ -1020,11 +1143,23 @@ broken_upgrade:
 	lxcfs_info("Failed to run constructor %s to reload liblxcfs", __func__);
 }
 
+static bool old_daemon = false;
+
 static void __attribute__((destructor)) lxcfs_exit(void)
 {
 	lxcfs_info("Running destructor %s", __func__);
 
 	clear_initpid_store();
+
+	if (old_daemon) {
+		if (pidns_store_mutex) {
+			pthread_mutex_destroy(pidns_store_mutex);
+			free(pidns_store_mutex);
+		}
+
+		free(pidns_hash_table);
+	}
+
 	free_cpuview();
 	cgroup_exit(cgroup_ops);
 }
@@ -1033,6 +1168,7 @@ void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 {
 	struct fuse_context *fc = fuse_get_context();
 	struct lxcfs_opts *opts = fc ? fc->private_data : NULL;
+	struct lxcfs_persistent_data *lxcfs_data = data;
 
 #if HAVE_FUSE_RETURNS_DT_TYPE
 	can_use_sys_cpu = true;
@@ -1047,5 +1183,30 @@ void *lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 	/* initialize the library */
 	lxcfslib_init();
 
+	if (lxcfs_data) {
+		pidns_hash_table = lxcfs_data->pidns_hash_table;
+		pidns_store_mutex = &lxcfs_data->pidns_store_mutex;
+	} else {
+		lxcfs_info("Fallback way to initialize liblxcfs with old daemon binary. Please, consider full restart.");
+
+		old_daemon = true;
+
+		pidns_hash_table = zalloc(PIDNS_HASH_SIZE * sizeof(struct pidns_store *));
+		if (!pidns_hash_table)
+			goto err;
+
+		pidns_store_mutex = malloc(PIDNS_HASH_SIZE * sizeof(*pidns_store_mutex));
+		if (!pidns_store_mutex)
+			goto err;
+
+		if (pthread_mutex_init(pidns_store_mutex, NULL))
+			goto err;
+	}
+
 	return opts;
+
+err:
+	lxcfs_error("liblxcfs failed to initialize. Turning off LXCFS virtualization.\n");
+	reload_successful = 0;
+	return NULL;
 }

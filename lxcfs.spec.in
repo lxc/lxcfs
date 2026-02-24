@@ -33,6 +33,7 @@ BuildRequires: libtool
 BuildRequires: docbook2X
 BuildRequires: doxygen
 BuildRequires: fuse-devel
+BuildRequires: libcap-devel
 Requires: fuse-libs
 
 %description
