@@ -25,6 +25,9 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
+#if HAVE_PIDFD_OPEN
+#include <sys/pidfd.h>
+#endif
 #include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
