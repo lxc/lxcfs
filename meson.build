@@ -134,11 +134,13 @@ foreach ident: [
     ['pidfd_send_signal',
      '''#include <stdlib.h>
         #include <unistd.h>
+        #include <sys/pidfd.h>
         #include <signal.h>
         #include <sys/wait.h>'''],
     ['pidfd_open',
      '''#include <stdlib.h>
         #include <unistd.h>
+        #include <sys/pidfd.h>
         #include <signal.h>
         #include <sys/wait.h>'''],
 ]
