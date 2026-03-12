@@ -295,13 +295,55 @@ int send_creds(int sock, struct ucred *cred, char v, bool pingfirst)
 	return SEND_CREDS_OK;
 }
 
+/*
+ * If the file at @path has grown since the buffer was allocated at open()
+ * time, reallocate to fit.  Prevents "Write to cache was truncated" on
+ * systems with many CPUs or after extended uptime (see issue #694).
+ */
+bool try_realloc_proc_buf(struct file_info *d, const char *path)
+{
+	__do_fclose FILE *f = NULL;
+	__do_free char *line = NULL;
+	size_t len = 0;
+	ssize_t sz;
+	size_t file_size = 0, needed;
+	char *new_buf;
+
+	f = fopen(path, "re");
+	if (!f)
+		return true; /* can't read → keep current buffer */
+
+	while ((sz = getline(&line, &len, f)) != -1)
+		file_size += sz;
+
+	needed = file_size + BUF_RESERVE_SIZE;
+	if (needed <= (size_t)d->buflen)
+		return true;
+
+	needed *= 2;
+	new_buf = realloc(d->buf, needed);
+	if (!new_buf)
+		return false;
+
+	memset(new_buf + d->buflen, 0, needed - d->buflen);
+	d->buf = new_buf;
+	d->buflen = (int)needed;
+	return true;
+}
+
 int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d)
 {
 	__do_free char *line = NULL;
 	__do_fclose FILE *f = NULL;
 	size_t linelen = 0, total_len = 0;
-	char *cache = d->buf;
-	size_t cache_size = d->buflen;
+	char *cache;
+	size_t cache_size;
+
+	/* Realloc if the file has grown since open(). */
+	if (!try_realloc_proc_buf(d, path))
+		return 0;
+	cache = d->buf;
+	cache_size = d->buflen;
 
 	f = fopen(path, "re");
 	if (!f)
