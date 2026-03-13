@@ -71,6 +71,40 @@ static inline void users_unlock(void)
 	unlock_mutex(&user_count_mutex);
 }
 
+static struct lxcfs_persistent_data *lxcfs_data;
+
+struct lxcfs_persistent_data *alloc_lxcfs_data(void)
+{
+	struct lxcfs_persistent_data *data;
+
+	data = zalloc(sizeof(struct lxcfs_persistent_data));
+	if (!data)
+		return NULL;
+
+	data->version = 1;
+
+	data->pidns_hash_table = zalloc(PIDNS_HASH_SIZE * sizeof(struct pidns_store *));
+	if (!data->pidns_hash_table)
+		goto err;
+
+	if (pthread_mutex_init(&data->pidns_store_mutex, NULL))
+		goto err;
+
+	return data;
+
+err:
+	free(data->pidns_hash_table);
+	free(data);
+	return NULL;
+}
+
+void free_lxcfs_data(struct lxcfs_persistent_data *data)
+{
+	pthread_mutex_destroy(&data->pidns_store_mutex);
+	free(data->pidns_hash_table);
+	free(data);
+}
+
 /* Returns file info type of custom type declaration carried
  * in fuse_file_info */
 static inline enum lxcfs_virt_t file_info_type(struct fuse_file_info *fi)
@@ -151,18 +185,18 @@ static int stop_loadavg(void)
 
 static volatile sig_atomic_t need_reload;
 
-static int do_lxcfs_fuse_init(void)
+static int do_lxcfs_fuse_init(struct fuse_conn_info *conn, void *data)
 {
 	char *error;
-	void *(*__lxcfs_fuse_init)(struct fuse_conn_info * conn, void * cfg);
+	void *(*__lxcfs_fuse_init)(struct fuse_conn_info *, void *);
 
 	dlerror();
-	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info * conn, void * cfg))dlsym(dlopen_handle, "lxcfs_fuse_init");
+	__lxcfs_fuse_init = (void *(*)(struct fuse_conn_info *, void *))dlsym(dlopen_handle, "lxcfs_fuse_init");
 	error = dlerror();
 	if (error)
 		return log_error(-1, "%s - Failed to find lxcfs_fuse_init()", error);
 
-	__lxcfs_fuse_init(NULL, NULL);
+	__lxcfs_fuse_init(conn, data);
 
 	return 0;
 }
@@ -209,7 +243,7 @@ static void do_reload(bool reinit)
 		lxcfs_debug("Opened %s", lxcfs_lib_path);
 
 good:
-	if (reinit && do_lxcfs_fuse_init() < 0) {
+	if (reinit && do_lxcfs_fuse_init(NULL, lxcfs_data) < 0) {
 		log_exit("Failed to initialize liblxcfs.so");
 	}
 
@@ -266,6 +300,7 @@ static int do_##type##_##fsop(LIB_FS_##fsop##_OP_ARGS_TYPE)	\
 DEF_LIB_FS_OP(cg   , getattr)
 DEF_LIB_FS_OP(proc , getattr)
 DEF_LIB_FS_OP(sys  , getattr)
+DEF_LIB_FS_OP(lxcfsctl, getattr)
 
 #define LIB_FS_read_OP_ARGS_TYPE	const char *path, char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
@@ -273,6 +308,7 @@ DEF_LIB_FS_OP(sys  , getattr)
 DEF_LIB_FS_OP(cg   , read)
 DEF_LIB_FS_OP(proc , read)
 DEF_LIB_FS_OP(sys  , read)
+DEF_LIB_FS_OP(lxcfsctl, read)
 
 #define LIB_FS_write_OP_ARGS_TYPE	const char *path, const char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
@@ -280,6 +316,7 @@ DEF_LIB_FS_OP(sys  , read)
 DEF_LIB_FS_OP(cg   , write)
 DEF_LIB_FS_OP(proc , write)
 DEF_LIB_FS_OP(sys  , write)
+DEF_LIB_FS_OP(lxcfsctl, write)
 
 #define LIB_FS_poll_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi, \
 					struct fuse_pollhandle *ph, unsigned *reventsp
@@ -308,40 +345,47 @@ DEF_LIB_FS_OP(cg, chmod)
 DEF_LIB_FS_OP(cg   , readdir)
 DEF_LIB_FS_OP(proc , readdir)
 DEF_LIB_FS_OP(sys  , readdir)
+DEF_LIB_FS_OP(lxcfsctl, readdir)
 
 #define LIB_FS_readlink_OP_ARGS_TYPE	const char *path, char *buf, size_t size
 #define LIB_FS_readlink_OP_ARGS		path, buf, size
 DEF_LIB_FS_OP(sys  , readlink)
+DEF_LIB_FS_OP(lxcfsctl, readlink)
 
 #define LIB_FS_open_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_open_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , open)
 DEF_LIB_FS_OP(proc , open)
 DEF_LIB_FS_OP(sys  , open)
+DEF_LIB_FS_OP(lxcfsctl, open)
 
 #define LIB_FS_access_OP_ARGS_TYPE	const char *path, int mode
 #define LIB_FS_access_OP_ARGS		path, mode
 DEF_LIB_FS_OP(cg   , access)
 DEF_LIB_FS_OP(proc , access)
 DEF_LIB_FS_OP(sys  , access)
+DEF_LIB_FS_OP(lxcfsctl, access)
 
 #define LIB_FS_opendir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_opendir_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , opendir)
 DEF_LIB_FS_OP(proc , opendir)
 DEF_LIB_FS_OP(sys  , opendir)
+DEF_LIB_FS_OP(lxcfsctl, opendir)
 
 #define LIB_FS_release_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_release_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , release)
 DEF_LIB_FS_OP(proc , release)
 DEF_LIB_FS_OP(sys  , release)
+DEF_LIB_FS_OP(lxcfsctl, release)
 
 #define LIB_FS_releasedir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_releasedir_OP_ARGS		path, fi
 DEF_LIB_FS_OP(cg   , releasedir)
 DEF_LIB_FS_OP(proc , releasedir)
 DEF_LIB_FS_OP(sys  , releasedir)
+DEF_LIB_FS_OP(lxcfsctl, releasedir)
 
 static bool cgroup_is_enabled = false;
 
@@ -386,6 +430,13 @@ static int lxcfs_getattr(const char *path, struct stat *sb)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_getattr(path, sb);
+		down_users();
+		return ret;
+	}
+
 	return -ENOENT;
 }
 
@@ -417,6 +468,13 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_opendir(path, fi);
+		down_users();
+		return ret;
+	}
+
 	return -ENOENT;
 }
 
@@ -436,6 +494,7 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	if (strcmp(path, "/") == 0) {
 		if (dir_filler(filler, buf, ".", 0) != 0 ||
 		    dir_filler(filler, buf, "..", 0) != 0 ||
+		    dir_filler(filler, buf, "lxcfs", 0) != 0 ||
 		    dir_filler(filler, buf, "proc", 0) != 0 ||
 		    dir_filler(filler, buf, "sys", 0) != 0 ||
 		    (cgroup_is_enabled && dir_filler(filler, buf, "cgroup", 0) != 0))
@@ -461,6 +520,13 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_readdir(path, buf, filler, offset, fi);
+		down_users();
+		return ret;
+	}
+
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_readdir(path, buf, filler, offset, fi);
 		down_users();
 		return ret;
 	}
@@ -496,6 +562,13 @@ static int lxcfs_access(const char *path, int mode)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_access(path, mode);
+		down_users();
+		return ret;
+	}
+
 	return -EACCES;
 }
 
@@ -526,6 +599,14 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 		down_users();
 		return ret;
 	}
+
+	if (LXCFS_TYPE_LXCFS(type)) {
+		up_users();
+		ret = do_lxcfsctl_releasedir(path, fi);
+		down_users();
+		return ret;
+	}
+
 	if (path && strcmp(path, "/") == 0)
 		return 0;
 
@@ -560,6 +641,13 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_open(path, fi);
+		down_users();
+		return ret;
+	}
+
 	return -EACCES;
 }
 
@@ -588,6 +676,13 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_read(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_read(path, buf, size, offset, fi);
 		down_users();
 		return ret;
 	}
@@ -627,6 +722,13 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 		return ret;
 	}
 
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_write(path, buf, size, offset, fi);
+		down_users();
+		return ret;
+	}
+
 	return -EINVAL;
 }
 
@@ -658,6 +760,13 @@ int lxcfs_readlink(const char *path, char *buf, size_t size)
 	if (strncmp(path, "/sys", 4) == 0) {
 		up_users();
 		ret = do_sys_readlink(path, buf, size);
+		down_users();
+		return ret;
+	}
+
+	if (strncmp(path, "/lxcfs", 6) == 0) {
+		up_users();
+		ret = do_lxcfsctl_readlink(path, buf, size);
 		down_users();
 		return ret;
 	}
@@ -694,6 +803,13 @@ static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
 		ret = do_sys_release(path, fi);
+		down_users();
+		return ret;
+	}
+
+	if (LXCFS_TYPE_LXCFS(type)) {
+		up_users();
+		ret = do_lxcfsctl_release(path, fi);
 		down_users();
 		return ret;
 	}
@@ -744,6 +860,9 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
 	if (strncmp(path, "/sys", 4) == 0)
 		return -EPERM;
 
+	if (strncmp(path, "/lxcfs", 6) == 0)
+		return -EPERM;
+
 	return -ENOENT;
 }
 
@@ -762,6 +881,9 @@ int lxcfs_truncate(const char *path, off_t newsize)
 		return 0;
 
 	if (strncmp(path, "/sys", 4) == 0)
+		return 0;
+
+	if (strncmp(path, "/lxcfs", 6) == 0)
 		return 0;
 
 	return -EPERM;
@@ -800,6 +922,9 @@ int lxcfs_chmod(const char *path, mode_t mode)
 		return -EPERM;
 
 	if (strncmp(path, "/sys", 4) == 0)
+		return -EPERM;
+
+	if (strncmp(path, "/lxcfs", 6) == 0)
 		return -EPERM;
 
 	return -ENOENT;
@@ -847,7 +972,7 @@ static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 static void *lxcfs_init(struct fuse_conn_info *conn)
 #endif
 {
-	if (do_lxcfs_fuse_init() < 0)
+	if (do_lxcfs_fuse_init(conn, lxcfs_data) < 0)
 		return NULL;
 
 #if HAVE_FUSE3
@@ -1040,6 +1165,12 @@ int main(int argc, char *argv[])
 	char *const *new_argv;
 	struct lxcfs_opts *opts;
 	char *runtime_path_arg = NULL;
+
+	lxcfs_data = alloc_lxcfs_data();
+	if (lxcfs_data == NULL) {
+		lxcfs_error("Error allocating memory for lxcfs persistent data");
+		goto out;
+	}
 
 	opts = malloc(sizeof(struct lxcfs_opts));
 	if (opts == NULL) {
@@ -1262,6 +1393,7 @@ out:
 		unlink(pidfile);
 	free(new_fuse_opts);
 	free(opts);
+	free_lxcfs_data(lxcfs_data);
 	close_prot_errno_disarm(pidfile_fd);
 	exit(ret);
 }

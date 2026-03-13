@@ -7,6 +7,7 @@
 
 #include <linux/limits.h>
 #include <linux/types.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -77,6 +78,14 @@ enum lxcfs_virt_t {
 
 	LXC_TYPE_PROC_PRESSURE_MEMORY,
 #define LXC_TYPE_PROC_PRESSURE_MEMORY_PATH "/proc/pressure/memory"
+
+	LXC_TYPE_LXCFS,
+	LXC_TYPE_LXCFS_PIDNS_SUBDIR,
+	LXC_TYPE_LXCFS_PIDNS_PID_SUBDIR,
+	LXC_TYPE_LXCFS_PIDNS_CURPID_SUBDIR,
+	LXC_TYPE_LXCFS_PIDNS_PID_FEATURES_SUBDIR,
+	LXC_TYPE_LXCFS_PIDNS_PID_FEATURES_F_SUBFILE,
+
 	LXC_TYPE_MAX,
 };
 
@@ -85,6 +94,7 @@ enum lxcfs_virt_t {
 #define LXCFS_TYPE_PROC(type) ((type >= LXC_TYPE_PROC_MEMINFO && type <= LXC_TYPE_PROC_SLABINFO) || \
 							   (type >= LXC_TYPE_PROC && type <= LXC_TYPE_PROC_PRESSURE_MEMORY))
 #define LXCFS_TYPE_SYS(type) (type >= LXC_TYPE_SYS && type <= LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE)
+#define LXCFS_TYPE_LXCFS(type) (type >= LXC_TYPE_LXCFS && type < LXC_TYPE_MAX)
 #define LXCFS_TYPE_OK(type) (type >= LXC_TYPE_CGDIR && type < LXC_TYPE_MAX)
 
 /*
@@ -126,11 +136,74 @@ struct file_info {
 			void *private_data;
 		};
 	};
+
 	int type;
 	char *buf; /* unused */
 	int buflen;
 	int size; /* actual data size */
 	int cached;
+};
+
+typedef struct feature {
+	char *name;
+} feature_t;
+
+extern feature_t per_instance_features[];
+
+enum lxcfs_feature_op {
+	LXCFS_FEATURE_CHECK,
+	LXCFS_FEATURE_SET,
+	LXCFS_FEATURE_CLEAR,
+};
+
+/*
+ * A table caching which pid is init for a pid namespace.
+ * When looking up which pid is init for $qpid, we first
+ * 1. Stat /proc/$qpid/ns/pid.
+ * 2. Check whether the ino_t is in our store.
+ *   a. if not, fork a child in qpid's ns to send us
+ *	 ucred.pid = 1, and read the initpid.  Cache
+ *	 initpid and creation time for /proc/initpid
+ *	 in a new store entry.
+ *   b. if so, verify that /proc/initpid still matches
+ *	 what we have saved.  If not, clear the store
+ *	 entry and go back to a.  If so, return the
+ *	 cached initpid.
+ */
+struct pidns_store {
+	/* increase version if the structure was changed */
+	__u16 version;
+
+	/* hash table key */
+	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
+
+	/* next entry in hash table's bucket */
+	struct pidns_store *next;
+
+	pid_t initpid; /* the pid of init in that ns */
+	int init_pidfd;
+	int64_t ctime; /* the time at which /proc/$initpid was created */
+	int64_t lastcheck;
+
+	/* Do not free on liblxcfs reload (contains useful persistent data) */
+	bool keep_on_reload;
+
+#define	LXCFS_FEATURES_DISABLE_UPTIME	(1 << 0)
+	/* bit mask for per-instance configuration options (on/off) */
+	__u64 features;
+};
+
+/* lol - look at how they are allocated in the kernel */
+#define PIDNS_HASH_SIZE 4096
+#define HASH(x) ((x) % PIDNS_HASH_SIZE)
+
+/* structure that contains data that should survive reload */
+struct lxcfs_persistent_data {
+	/* increase version if the structure was changed */
+	__u16 version;
+
+	struct pidns_store **pidns_hash_table;
+	pthread_mutex_t pidns_store_mutex;
 };
 
 struct lxcfs_opts {
@@ -157,8 +230,11 @@ typedef enum lxcfs_opt_t {
 	LXCFS_OPTS_MAX		= LXCFS_PSI_POLL_ON,
 } lxcfs_opt_t;
 
+typedef int (*pidns_store_iter_func_t) (struct pidns_store *cur, void *data);
 
+extern int iter_initpid_store(pidns_store_iter_func_t f, void *data);
 extern pid_t lookup_initpid_in_store(pid_t qpid);
+extern bool check_set_lxcfs_feature(pid_t pid, enum lxcfs_feature_op op, __u64 feature);
 extern void prune_init_slice(char *cg);
 extern bool supports_pidfd(void);
 extern bool liblxcfs_functional(void);

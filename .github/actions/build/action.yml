@@ -22,7 +22,8 @@ runs:
             lib${{ inputs.fuse }}-dev \
             meson \
             pkg-config \
-            uuid-runtime
+            uuid-runtime \
+            libcap-dev
 
         echo "::endgroup::"
 
