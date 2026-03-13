@@ -146,6 +146,7 @@ struct lxcfs_opts {
 	char runtime_path[PATH_MAX];
 	bool zswap_off;
 	bool psi_poll_on;
+	char force_render_cgroup[PATH_MAX];
 };
 
 typedef enum lxcfs_opt_t {

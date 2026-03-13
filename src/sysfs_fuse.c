@@ -79,6 +79,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 {
 	__do_free char *cg = NULL, *cpu_cg = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	char *cache = d->buf;
 	pid_t initpid;
@@ -100,18 +101,23 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 		return total_len;
 	}
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
+	if (opts && opts->force_render_cgroup[0]) {
+		cg = strdup(opts->force_render_cgroup);
+		cpu_cg = strdup(opts->force_render_cgroup);
+	} else {
+		initpid = lookup_initpid_in_store(fc->pid);
+		if (initpid <= 1 || is_shared_pidns(initpid))
+			initpid = fc->pid;
 
-	cg = get_pid_cgroup(initpid, "cpuset");
-	if (!cg)
-		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
-	prune_init_slice(cg);
-	cpu_cg = get_pid_cgroup(initpid, "cpu");
-	if (!cpu_cg)
-		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
-	prune_init_slice(cpu_cg);
+		cg = get_pid_cgroup(initpid, "cpuset");
+		if (!cg)
+			return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+		prune_init_slice(cg);
+		cpu_cg = get_pid_cgroup(initpid, "cpu");
+		if (!cpu_cg)
+			return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+		prune_init_slice(cpu_cg);
+	}
 	total_len = do_cpuset_read(cg, cpu_cg, d->buf, d->buflen);
 
 	d->size = (int)total_len;
@@ -129,22 +135,28 @@ static int sys_devices_system_cpu_online_getsize(const char *path)
 {
         __do_free char *cg = NULL, *cpu_cg = NULL;
         struct fuse_context *fc = fuse_get_context();
+		struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
         pid_t initpid;
         char buf[BUF_RESERVE_SIZE];
         int buflen = sizeof(buf);
 
-        initpid = lookup_initpid_in_store(fc->pid);
-        if (initpid <= 1 || is_shared_pidns(initpid))
-                initpid = fc->pid;
+		if (opts && opts->force_render_cgroup[0]) {
+			cg = strdup(opts->force_render_cgroup);
+			cpu_cg = strdup(opts->force_render_cgroup);
+		} else {
+			initpid = lookup_initpid_in_store(fc->pid);
+			if (initpid <= 1 || is_shared_pidns(initpid))
+				initpid = fc->pid;
 
-        cg = get_pid_cgroup(initpid, "cpuset");
-        if (!cg)
-                return get_sysfile_size(path);
-        cpu_cg = get_pid_cgroup(initpid, "cpu");
-        if (!cpu_cg)
-                return get_sysfile_size(path);
-        prune_init_slice(cg);
-        prune_init_slice(cpu_cg);
+			cg = get_pid_cgroup(initpid, "cpuset");
+			if (!cg)
+				return get_sysfile_size(path);
+			cpu_cg = get_pid_cgroup(initpid, "cpu");
+			if (!cpu_cg)
+				return get_sysfile_size(path);
+			prune_init_slice(cg);
+			prune_init_slice(cpu_cg);
+		}
 
         return do_cpuset_read(cg, cpu_cg, buf, buflen);
 }
