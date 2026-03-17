@@ -131,6 +131,8 @@ struct cgroup_ops {
 					   const char *controller);
 	bool (*get)(struct cgroup_ops *ops, const char *controller,
 		    const char *cgroup, const char *file, char **value);
+	bool (*get_walkup_to_root)(struct cgroup_ops *ops, const char *controller,
+		    const char *cgroup, const char *file, char **value);
 
 	/* memory */
 	int (*get_memory_stats_fd)(struct cgroup_ops *ops, const char *cgroup);
