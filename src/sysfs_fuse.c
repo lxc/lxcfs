@@ -393,8 +393,7 @@ __lxcfs_fuse_ops int sys_readdir(const char *path, void *buf,
 		return 0;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU:
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
-		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dirent_filler(filler, path, "online", buf,  0) != 0)
+		    dir_filler(filler, buf, "..",	0) != 0)
 			return -ENOENT;
 		return filler_sys_devices_system_cpu(path, buf, filler);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBDIR:
