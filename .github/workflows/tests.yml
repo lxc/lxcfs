@@ -102,3 +102,48 @@ jobs:
 
           echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/live-upgrade-test.sh "${NEW_LXCFS_TREE}"
+
+  buffer-truncation-test:
+    name: Buffer truncation regression (issue 694)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq gcc libfuse3-dev meson pkg-config uuid-runtime
+
+      - name: Build with tiny buffer reserve
+        env:
+          CC: gcc
+        run: |
+          echo "::group::Building LXCFS with BUF_RESERVE_SIZE=16"
+
+          # Build with a deliberately tiny buffer reserve to force the
+          # realloc path.  Without the dynamic realloc fix, the existing
+          # tests will fail with "Write to cache was truncated".
+          meson setup build \
+              -Ddocs=false \
+              -Dtests=true \
+              -Dmocks=true \
+              -Dinit-script=systemd \
+              -Dprefix=/usr \
+              -Db_sanitize=address,undefined \
+              -Dc_args='-DBUF_RESERVE_SIZE=16'
+          meson compile -C build
+
+          echo "::endgroup::"
+
+      - name: Test
+        env:
+          CC: gcc
+          LIBFUSE: fuse3
+        run: |
+          echo "::group::Running the testsuite with tiny buffer"
+
+          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
+          echo "::endgroup::"
