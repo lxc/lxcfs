@@ -548,6 +548,31 @@ static bool cgfsng_get(struct cgroup_ops *ops, const char *controller,
 	return *value != NULL;
 }
 
+static bool cgfsng_get_walkup_to_root(struct cgroup_ops *ops, const char *controller,
+		       const char *cgroup, const char *file, char **value)
+{
+	__do_free char *path = NULL;
+	struct hierarchy *h;
+	int ret;
+
+	h = ops->get_hierarchy(ops, controller);
+	if (!h)
+		return false;
+
+	path = must_make_path_relative(cgroup, NULL);
+	ret = cgroup_walkup_to_root(ops->cgroup2_root_fd, h->fd, path, file, value);
+	if (ret < 0)
+		return false;
+
+	if (ret == 1) {
+		*value = strdup("");
+		if (!*value)
+			return false;
+	}
+
+	return true;
+}
+
 static int cgfsng_get_memory(struct cgroup_ops *ops, const char *cgroup,
 			     const char *file, char **value)
 {
@@ -1130,6 +1155,7 @@ struct cgroup_ops *cgfsng_ops_init(void)
 
 	cgfsng_ops->num_hierarchies = cgfsng_num_hierarchies;
 	cgfsng_ops->get = cgfsng_get;
+	cgfsng_ops->get_walkup_to_root = cgfsng_get_walkup_to_root;
 	cgfsng_ops->get_hierarchies = cgfsng_get_hierarchies;
 	cgfsng_ops->get_hierarchy = cgfsng_get_hierarchy;
 	cgfsng_ops->driver = "cgfsng";

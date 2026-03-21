@@ -456,7 +456,7 @@ static bool read_cpu_cfs_param(const char *cg, const char *param, int64_t *value
 	if (ret < 0 || (size_t)ret >= sizeof(file))
 		return false;
 
-	if (!cgroup_ops->get(cgroup_ops, "cpu", cg, file, &str))
+	if (!cgroup_ops->get_walkup_to_root(cgroup_ops, "cpu", cg, file, &str))
 		return false;
 
 	return sscanf(str, first ? "%" PRId64 : "%*d %" PRId64, value) == 1;
