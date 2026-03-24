@@ -2094,7 +2094,7 @@ static void notify_poll(psi_trigger_t *t)
 		return;
 	}
 
-	lxcfs_debug("thread %d sends FUSE_NOTIFY_POLL", gettid());
+	lxcfs_debug("thread %d sends FUSE_NOTIFY_POLL", (int)syscall(SYS_gettid));
 
 	/* send FUSE_NOTIFY_POLL to the kernel */
 	fuse_notify_poll(t->ph);
@@ -2125,7 +2125,7 @@ static void *poll_thread(void *arg)
 		goto exit;
 	}
 
-	lxcfs_debug("thread %d is going to poll", gettid());
+	lxcfs_debug("thread %d is going to poll", (int)syscall(SYS_gettid));
 
 again:
 #ifndef PSITRIGGERTEST
@@ -2162,7 +2162,7 @@ again:
 		goto exit;
 	}
 
-	lxcfs_debug("thread %d has done with poll-ing %d %x", gettid(), n, t->pfd.revents);
+	lxcfs_debug("thread %d has done with poll-ing %d %x", (int)syscall(SYS_gettid), n, t->pfd.revents);
 
 	if (n > 0)
 		notify_poll(t);
