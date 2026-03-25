@@ -32,7 +32,6 @@
 #include "proc_cpuview.h"
 
 #include "bindings.h"
-#include "cgroup_fuse.h"
 #include "cpuset_parse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"

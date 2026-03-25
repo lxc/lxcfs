@@ -32,7 +32,6 @@
 #include "proc_loadavg.h"
 
 #include "bindings.h"
-#include "cgroup_fuse.h"
 #include "cgroups/cgroup.h"
 #include "cgroups/cgroup_utils.h"
 #include "memory_utils.h"

@@ -198,8 +198,6 @@ liblxcfs_sources = files(
     'src/cgroups/cgroup.h',
     'src/cgroups/cgroup_utils.c',
     'src/cgroups/cgroup_utils.h',
-    'src/cgroup_fuse.c',
-    'src/cgroup_fuse.h',
     'src/cpuset_parse.c',
     'src/cpuset_parse.h',
     'src/lxcfs.c',
