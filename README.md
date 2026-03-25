@@ -64,8 +64,7 @@ containers making use of it.
 ## Building
 
 In order to build LXCFS install fuse and the fuse development headers according
-to your distro. LXCFS prefers `fuse3` but does work with new enough `fuse2`
-versions:
+to your distro. LXCFS requires `fuse3`:
 
     git clone git://github.com/lxc/lxcfs
     cd lxcfs

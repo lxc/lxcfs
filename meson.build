@@ -162,15 +162,6 @@ if fuse_version == '3' or fuse_version == 'auto'
     endif
 endif
 
-if fuse_version == '2' or (not libfuse.found() and fuse_version == 'auto')
-    libfuse = dependency('fuse', version: '>= 2.6')
-    if libfuse.found()
-        conf.set10('HAVE_FUSE', true)
-        conf.set('FUSE_USE_VERSION', 26)
-        conf.set10('HAVE_FUSE_RETURNS_DT_TYPE', true)
-    endif
-endif
-
 if not libfuse.found()
 	error('no usable fuse version found')
 endif
