@@ -692,7 +692,7 @@ static bool cgfsng_can_use_memory_feature(struct cgroup_ops *ops,
 				continue;
 
 			if (dent->d_type == DT_DIR) {
-				__do_free char *path;
+				__do_free char *path = NULL;
 
 				path = must_make_path_relative(dent->d_name, file, NULL);
 
