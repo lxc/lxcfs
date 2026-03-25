@@ -345,11 +345,7 @@ DEF_LIB_FS_OP(sys  , releasedir)
 
 static bool cgroup_is_enabled = false;
 
-#if HAVE_FUSE3
 static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_info *fi)
-#else
-static int lxcfs_getattr(const char *path, struct stat *sb)
-#endif
 {
 	int ret;
 	struct timespec now;
@@ -420,13 +416,8 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 	return -ENOENT;
 }
 
-#if HAVE_FUSE3
 static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
-#else
-static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-			 off_t offset, struct fuse_file_info *fi)
-#endif
 {
 	int ret;
 	enum lxcfs_virt_t type;
@@ -723,11 +714,7 @@ int lxcfs_mkdir(const char *path, mode_t mode)
 	return -EPERM;
 }
 
-#if HAVE_FUSE3
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
-#else
-int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
-#endif
 {
 	int ret;
 
@@ -752,11 +739,7 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid)
  * really make sense for cgroups.  So just return 0 always but do
  * nothing.
  */
-#if HAVE_FUSE3
 int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
-#else
-int lxcfs_truncate(const char *path, off_t newsize)
-#endif
 {
 	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0)
 		return 0;
@@ -781,11 +764,7 @@ int lxcfs_rmdir(const char *path)
 	return -EPERM;
 }
 
-#if HAVE_FUSE3
 int lxcfs_chmod(const char *path, mode_t mode, struct fuse_file_info *fi)
-#else
-int lxcfs_chmod(const char *path, mode_t mode)
-#endif
 {
 	int ret;
 
@@ -805,7 +784,6 @@ int lxcfs_chmod(const char *path, mode_t mode)
 	return -ENOENT;
 }
 
-#if HAVE_FUSE3
 static void fuse_intr_sighandler(int sig)
 {
 	(void) sig;
@@ -839,22 +817,15 @@ static int fuse_init_intr_signal(int signum)
 
 	return 0;
 }
-#endif
 
-#if HAVE_FUSE3
 static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
-#else
-static void *lxcfs_init(struct fuse_conn_info *conn)
-#endif
 {
 	if (do_lxcfs_fuse_init() < 0)
 		return NULL;
 
-#if HAVE_FUSE3
 	cfg->direct_io = 1;
 	cfg->intr = 1;
 	cfg->intr_signal = LXCFS_INTR_SIGNAL;
-#endif
 
 	return fuse_get_context()->private_data;
 }
@@ -878,20 +849,11 @@ const struct fuse_operations lxcfs_ops = {
 	.truncate	= lxcfs_truncate,
 	.write		= lxcfs_write,
 	.readlink	= lxcfs_readlink,
-#if HAVE_FUSE3
 	.poll		= lxcfs_poll,
-#endif
 
 	.create		= NULL,
 	.destroy	= NULL,
-#if !HAVE_FUSE3
-	.fgetattr	= NULL,
-#endif
 	.fsyncdir	= NULL,
-#if !HAVE_FUSE3
-	.ftruncate	= NULL,
-	.getdir		= NULL,
-#endif
 	.getxattr	= NULL,
 	.link		= NULL,
 	.listxattr	= NULL,
@@ -902,9 +864,6 @@ const struct fuse_operations lxcfs_ops = {
 	.statfs		= NULL,
 	.symlink	= NULL,
 	.unlink		= NULL,
-#if !HAVE_FUSE3
-	.utime		= NULL,
-#endif
 };
 
 static void usage(void)
@@ -1024,9 +983,6 @@ int main(int argc, char *argv[])
 	char *pidfile = NULL, *token = NULL;
 	char pidfile_buf[PATH_MAX + sizeof(PID_FILE)] = {};
 	bool debug = false, foreground = false;
-#if !HAVE_FUSE3
-	bool nonempty = false;
-#endif
 	bool load_use = false;
 	/*
 	 * what we pass to fuse_main is:
@@ -1168,9 +1124,6 @@ int main(int argc, char *argv[])
 
 			/* default with fuse3 */
 			if (strcmp(token, "nonempty") == 0) {
-				#if !HAVE_FUSE3
-				nonempty = true;
-				#endif
 				continue;
 			}
 
@@ -1187,20 +1140,6 @@ int main(int argc, char *argv[])
 		lxcfs_error("Failed to copy fuse argument \"allow_other,entry_timeout=0.5,attr_timeout=0.5\"");
 		goto out;
 	}
-
-#if !HAVE_FUSE3
-	if (nonempty) {
-		if (append_comma_separate(&new_fuse_opts, "nonempty")) {
-			lxcfs_error("Failed to copy fuse argument \"nonempty\"");
-			goto out;
-		}
-	}
-
-	if (append_comma_separate(&new_fuse_opts, "direct_io")) {
-		lxcfs_error("Failed to copy fuse argument \"direct_io\"");
-		goto out;
-	}
-#endif
 
 	/*
 	 * We can't use default_permissions since we still support systems that
@@ -1225,12 +1164,10 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-#if HAVE_FUSE3
 	if (fuse_init_intr_signal(LXCFS_INTR_SIGNAL)) {
 		lxcfs_error("Failed to install fuse interrupt signal handler");
 		goto out;
 	}
-#endif
 
 	if (install_signal_handler(SIG_NOTIFY_POLL_WAKEUP, sig_noop_handler)) {
 		lxcfs_error("%s - Failed to install SIG_NOTIFY_POLL_WAKEUP signal handler", strerror(errno));
