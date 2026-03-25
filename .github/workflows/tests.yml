@@ -15,9 +15,6 @@ jobs:
         compiler:
           - gcc
           - clang
-        fuse:
-          - fuse
-          - fuse3
         os:
           - ubuntu-22.04
           - ubuntu-24.04
@@ -32,13 +29,12 @@ jobs:
         uses: ./.github/actions/build
         with:
           compiler: ${{ matrix.compiler }}
-          fuse: ${{ matrix.fuse }}
           os: ${{ matrix.os }}
 
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
-          LIBFUSE: ${{ matrix.fuse }}
+          LIBFUSE: fuse3
         run: |
           echo "::group::Running the testsuite"
 
@@ -54,8 +50,6 @@ jobs:
       matrix:
         compiler:
           - gcc
-        fuse:
-          - fuse3
         os:
           - ubuntu-24.04
         branch:
@@ -71,7 +65,6 @@ jobs:
         uses: ./.github/actions/build
         with:
           compiler: ${{ matrix.compiler }}
-          fuse: ${{ matrix.fuse }}
           os: ${{ matrix.os }}
 
       - name: Build upstream head version
@@ -88,7 +81,7 @@ jobs:
       - name: Test
         env:
           CC: ${{ matrix.compiler }}
-          LIBFUSE: ${{ matrix.fuse }}
+          LIBFUSE: fuse3
           WORKSPACE_PATH: ${{ github.workspace }}
         run: |
           UPSTREAM_LXCFS_TREE=$(realpath ${WORKSPACE_PATH}/../upstream-lxcfs)

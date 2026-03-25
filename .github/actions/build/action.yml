@@ -3,8 +3,6 @@ description: Install dependencies and build the codebase
 inputs:
   compiler:
     required: true
-  fuse:
-    required: true
   os:
     required: true
 
@@ -19,7 +17,7 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -qq \
             ${{ inputs.compiler }} \
-            lib${{ inputs.fuse }}-dev \
+            libfuse3-dev \
             meson \
             pkg-config \
             uuid-runtime
