@@ -873,7 +873,7 @@ int main(int argc, char *argv[])
 
 	opts->swap_off = false;
 	opts->zswap_off = false;
-	opts->use_pidfd = false;
+	opts->use_pidfd = true;
 	opts->use_cfs = false;
 	opts->psi_poll_on = false;
 	opts->version = 4;
@@ -882,7 +882,7 @@ int main(int argc, char *argv[])
 		switch (c) {
 		case 0:
 			if (strcmp(long_options[idx].name, "enable-pidfd") == 0)
-				opts->use_pidfd = true;
+				lxcfs_info("--enable-pidfd option is deprecated. This behavior is now default.");
 			else if (strcmp(long_options[idx].name, "enable-cfs") == 0)
 				opts->use_cfs = true;
 			else if (strcmp(long_options[idx].name, "enable-psi-poll") == 0)
