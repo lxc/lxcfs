@@ -47,7 +47,6 @@
 #define BASEDIR "/lxcfs/controllers"
 #define ROOTDIR "/lxcfs/root"
 
-static bool can_use_pidfd;
 static bool can_use_swap;
 static bool can_use_zswap;
 static bool can_use_sys_cpu;
@@ -133,7 +132,6 @@ struct pidns_init_store {
 	ino_t ino;     /* inode number for /proc/$pid/ns/pid */
 	pid_t initpid; /* the pid of nit in that ns */
 	int init_pidfd;
-	int64_t ctime; /* the time at which /proc/$initpid was created */
 	struct pidns_init_store *next;
 	int64_t lastcheck;
 };
@@ -203,46 +201,23 @@ define_interruptible_lock(pthread_rwlock_t, rwlock_wrlock, pthread_rwlock_timedw
 #define LXCFS_PROC_PID_LEN \
 	(STRLITERALLEN("/proc/") + INTTYPE_TO_STRLEN(uint64_t) + +1)
 
-static int initpid_still_valid_pidfd(struct pidns_init_store *entry)
-{
-	int ret;
-
-	if (entry->init_pidfd < 0)
-		return ret_errno(ENOSYS);
-
-	ret = pidfd_send_signal(entry->init_pidfd, 0, NULL, 0);
-	if (ret < 0) {
-		if (errno == ENOSYS)
-			return ret_errno(ENOSYS);
-
-		return 0;
-	}
-
-	return 1;
-}
-
-static int initpid_still_valid_stat(struct pidns_init_store *entry)
-{
-	struct stat st;
-	char path[LXCFS_PROC_PID_LEN];
-
-	snprintf(path, sizeof(path), "/proc/%d", entry->initpid);
-	if (stat(path, &st) || entry->ctime != st.st_ctime)
-		return 0;
-
-	return 1;
-}
-
 /* Must be called under store_lock */
 static bool initpid_still_valid(struct pidns_init_store *entry)
 {
 	int ret;
 
-	ret = initpid_still_valid_pidfd(entry);
-	if (ret < 0)
-		ret = initpid_still_valid_stat(entry);
+	if (entry->init_pidfd < 0)
+		return false;
 
-	return ret == 1;
+	ret = pidfd_send_signal(entry->init_pidfd, 0, NULL, 0);
+	if (ret < 0) {
+		if (errno == ENOSYS)
+			lxcfs_error("pidfd_send_signal() failed: %s", strerror(errno));
+
+		return false;
+	}
+
+	return true;
 }
 
 /* Must be called under store_lock */
@@ -340,30 +315,22 @@ static void save_initpid(ino_t pidns_inode, pid_t pid)
 {
 	__do_free struct pidns_init_store *entry = NULL;
 	__do_close int pidfd = -EBADF;
-	const struct lxcfs_opts *opts = fuse_get_context()->private_data;
-	char path[LXCFS_PROC_PID_LEN];
-	struct stat st;
 	int ino_hash;
 
-	if (opts && opts->use_pidfd && can_use_pidfd) {
-		pidfd = pidfd_open(pid, 0);
-		if (pidfd < 0)
-			return;
-	}
-
-	snprintf(path, sizeof(path), "/proc/%d", pid);
-	if (stat(path, &st))
+	pidfd = pidfd_open(pid, 0);
+	if (pidfd < 0) {
+		lxcfs_error("pidfd_open(%d, 0) failed: %s", pid, strerror(errno));
 		return;
+	}
 
 	entry = zalloc(sizeof(*entry));
 	if (!entry)
 		return;
 
 	ino_hash = HASH(pidns_inode);
-	*entry = (struct pidns_init_store){
+	*entry = (struct pidns_init_store) {
 		.ino		= pidns_inode,
 		.initpid	= pid,
-		.ctime		= st.st_ctime,
 		.next		= pidns_hash_table[ino_hash],
 		.lastcheck	= time(NULL),
 		.init_pidfd	= move_fd(pidfd),
@@ -974,8 +941,10 @@ void lxcfslib_init(void)
 
 	pidfd = pidfd_open(pid, 0);
 	if (pidfd >= 0 && pidfd_send_signal(pidfd, 0, NULL, 0) == 0) {
-		can_use_pidfd = true;
 		lxcfs_info("Kernel supports pidfds");
+	} else {
+		log_exit("LXCFS doesn't run on kernels without pidfd support");
+		goto broken_upgrade;
 	}
 
 	cgroup = get_pid_cgroup(pid, "memory");

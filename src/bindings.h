@@ -134,7 +134,7 @@ struct file_info {
 
 struct lxcfs_opts {
 	bool swap_off;
-	bool use_pidfd;
+	bool use_pidfd; /* deprecated; we assume it is TRUE */
 	bool use_cfs;
 	/*
 	 * Ideally we'd version by size but because of backwards compatability
@@ -182,7 +182,7 @@ static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 			return liblxcfs_can_use_swap();
 		return false;
 	case LXCFS_PIDFD_ON:
-		return opts->use_pidfd;
+		return true;
 	case LXCFS_CFS_ON:
 		return opts->use_cfs;
 	case LXCFS_ZSWAP_ON:
