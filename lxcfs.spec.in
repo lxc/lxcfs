@@ -46,11 +46,6 @@ LXCFS is a simple userspace filesystem designed to work around some current limi
 	--with-init-script=%{init_script}
 %{make_build}
 
-#Modify mount hook command if running on RHEL 7 to skip cgroup mounts for stability reasons.
-%if 0%{?rhel} == 7
-sed -i 's/\/lxc.mount.hook/\/lxc.mount.hook --skip-cgroup-mounts/g' share/00-lxcfs.conf
-%endif
-
 %install
 [ %{buildroot} != "/" ] && rm -rf %{buildroot}
 make install DESTDIR=%{buildroot}

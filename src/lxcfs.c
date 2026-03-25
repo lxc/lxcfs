@@ -263,21 +263,18 @@ static int do_##type##_##fsop(LIB_FS_##fsop##_OP_ARGS_TYPE)	\
 
 #define LIB_FS_getattr_OP_ARGS_TYPE const char *path, struct stat *sb
 #define LIB_FS_getattr_OP_ARGS	    path, sb
-DEF_LIB_FS_OP(cg   , getattr)
 DEF_LIB_FS_OP(proc , getattr)
 DEF_LIB_FS_OP(sys  , getattr)
 
 #define LIB_FS_read_OP_ARGS_TYPE	const char *path, char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_read_OP_ARGS		path, buf, size, offset, fi
-DEF_LIB_FS_OP(cg   , read)
 DEF_LIB_FS_OP(proc , read)
 DEF_LIB_FS_OP(sys  , read)
 
 #define LIB_FS_write_OP_ARGS_TYPE	const char *path, const char *buf, size_t size, \
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_write_OP_ARGS		path, buf, size, offset, fi
-DEF_LIB_FS_OP(cg   , write)
 DEF_LIB_FS_OP(proc , write)
 DEF_LIB_FS_OP(sys  , write)
 
@@ -286,26 +283,9 @@ DEF_LIB_FS_OP(sys  , write)
 #define LIB_FS_poll_OP_ARGS		path, fi, ph, reventsp
 DEF_LIB_FS_OP(proc , poll)
 
-#define LIB_FS_mkdir_OP_ARGS_TYPE	const char *path, mode_t mode
-#define LIB_FS_mkdir_OP_ARGS		path, mode
-DEF_LIB_FS_OP(cg, mkdir)
-
-#define LIB_FS_chown_OP_ARGS_TYPE	const char *path, uid_t uid, gid_t gid
-#define LIB_FS_chown_OP_ARGS		path, uid, gid
-DEF_LIB_FS_OP(cg, chown)
-
-#define LIB_FS_rmdir_OP_ARGS_TYPE	const char *path
-#define LIB_FS_rmdir_OP_ARGS		path
-DEF_LIB_FS_OP(cg, rmdir)
-
-#define LIB_FS_chmod_OP_ARGS_TYPE	const char *path, mode_t mode
-#define LIB_FS_chmod_OP_ARGS		path, mode
-DEF_LIB_FS_OP(cg, chmod)
-
 #define LIB_FS_readdir_OP_ARGS_TYPE	const char *path, void *buf, fuse_fill_dir_t filler, \
 					off_t offset, struct fuse_file_info *fi
 #define LIB_FS_readdir_OP_ARGS		path, buf, filler, offset, fi
-DEF_LIB_FS_OP(cg   , readdir)
 DEF_LIB_FS_OP(proc , readdir)
 DEF_LIB_FS_OP(sys  , readdir)
 
@@ -315,35 +295,28 @@ DEF_LIB_FS_OP(sys  , readlink)
 
 #define LIB_FS_open_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_open_OP_ARGS		path, fi
-DEF_LIB_FS_OP(cg   , open)
 DEF_LIB_FS_OP(proc , open)
 DEF_LIB_FS_OP(sys  , open)
 
 #define LIB_FS_access_OP_ARGS_TYPE	const char *path, int mode
 #define LIB_FS_access_OP_ARGS		path, mode
-DEF_LIB_FS_OP(cg   , access)
 DEF_LIB_FS_OP(proc , access)
 DEF_LIB_FS_OP(sys  , access)
 
 #define LIB_FS_opendir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_opendir_OP_ARGS		path, fi
-DEF_LIB_FS_OP(cg   , opendir)
 DEF_LIB_FS_OP(proc , opendir)
 DEF_LIB_FS_OP(sys  , opendir)
 
 #define LIB_FS_release_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_release_OP_ARGS		path, fi
-DEF_LIB_FS_OP(cg   , release)
 DEF_LIB_FS_OP(proc , release)
 DEF_LIB_FS_OP(sys  , release)
 
 #define LIB_FS_releasedir_OP_ARGS_TYPE	const char *path, struct fuse_file_info *fi
 #define LIB_FS_releasedir_OP_ARGS		path, fi
-DEF_LIB_FS_OP(cg   , releasedir)
 DEF_LIB_FS_OP(proc , releasedir)
 DEF_LIB_FS_OP(sys  , releasedir)
-
-static bool cgroup_is_enabled = false;
 
 static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_info *fi)
 {
@@ -359,13 +332,6 @@ static int lxcfs_getattr(const char *path, struct stat *sb, struct fuse_file_inf
 		sb->st_mode = S_IFDIR | 00755;
 		sb->st_nlink = 2;
 		return 0;
-	}
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_getattr(path, sb);
-		down_users();
-		return ret;
 	}
 
 	if (strncmp(path, "/proc", 5) == 0) {
@@ -391,13 +357,6 @@ static int lxcfs_opendir(const char *path, struct fuse_file_info *fi)
 
 	if (strcmp(path, "/") == 0)
 		return 0;
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_opendir(path, fi);
-		down_users();
-		return ret;
-	}
 
 	if (strncmp(path, "/proc", 5) == 0) {
 		up_users();
@@ -428,18 +387,10 @@ static int lxcfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		if (dir_filler(filler, buf, ".", 0) != 0 ||
 		    dir_filler(filler, buf, "..", 0) != 0 ||
 		    dir_filler(filler, buf, "proc", 0) != 0 ||
-		    dir_filler(filler, buf, "sys", 0) != 0 ||
-		    (cgroup_is_enabled && dir_filler(filler, buf, "cgroup", 0) != 0))
+		    dir_filler(filler, buf, "sys", 0) != 0)
 			return -ENOMEM;
 
 		return 0;
-	}
-
-	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
-		up_users();
-		ret = do_cg_readdir(path, buf, filler, offset, fi);
-		down_users();
-		return ret;
 	}
 
 	if (LXCFS_TYPE_PROC(type)) {
@@ -466,13 +417,6 @@ static int lxcfs_access(const char *path, int mode)
 	if (strcmp(path, "/") == 0 && (mode & W_OK) == 0)
 		return 0;
 
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_access(path, mode);
-		down_users();
-		return ret;
-	}
-
 	if (strncmp(path, "/proc", 5) == 0) {
 		up_users();
 		ret = do_proc_access(path, mode);
@@ -496,13 +440,6 @@ static int lxcfs_releasedir(const char *path, struct fuse_file_info *fi)
 	enum lxcfs_virt_t type;
 
 	type = file_info_type(fi);
-
-	if (LXCFS_TYPE_CGROUP(type)) {
-		up_users();
-		ret = do_cg_releasedir(path, fi);
-		down_users();
-		return ret;
-	}
 
 	if (LXCFS_TYPE_SYS(type)) {
 		up_users();
@@ -530,13 +467,6 @@ static int lxcfs_open(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
 
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_open(path, fi);
-		down_users();
-		return ret;
-	}
-
 	if (strncmp(path, "/proc", 5) == 0) {
 		up_users();
 		ret = do_proc_open(path, fi);
@@ -561,13 +491,6 @@ static int lxcfs_read(const char *path, char *buf, size_t size, off_t offset,
 	enum lxcfs_virt_t type;
 
 	type = file_info_type(fi);
-
-	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
-		up_users();
-		ret = do_cg_read(path, buf, size, offset, fi);
-		down_users();
-		return ret;
-	}
 
 	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
@@ -596,13 +519,6 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 	enum lxcfs_virt_t type;
 
 	type = file_info_type(fi);
-
-	if (cgroup_is_enabled && LXCFS_TYPE_CGROUP(type)) {
-		up_users();
-		ret = do_cg_write(path, buf, size, offset, fi);
-		down_users();
-		return ret;
-	}
 
 	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
@@ -668,13 +584,6 @@ static int lxcfs_release(const char *path, struct fuse_file_info *fi)
 
 	type = file_info_type(fi);
 
-	if (LXCFS_TYPE_CGROUP(type)) {
-		up_users();
-		ret = do_cg_release(path, fi);
-		down_users();
-		return ret;
-	}
-
 	if (LXCFS_TYPE_PROC(type)) {
 		up_users();
 		ret = do_proc_release(path, fi);
@@ -702,29 +611,11 @@ static int lxcfs_fsync(const char *path, int datasync, struct fuse_file_info *fi
 
 int lxcfs_mkdir(const char *path, mode_t mode)
 {
-	int ret;
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_mkdir(path, mode);
-		down_users();
-		return ret;
-	}
-
 	return -EPERM;
 }
 
 int lxcfs_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
 {
-	int ret;
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_chown(path, uid, gid);
-		down_users();
-		return ret;
-	}
-
 	if (strncmp(path, "/proc", 5) == 0)
 		return -EPERM;
 
@@ -741,9 +632,6 @@ int lxcfs_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *f
  */
 int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
 {
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0)
-		return 0;
-
 	if (strncmp(path, "/sys", 4) == 0)
 		return 0;
 
@@ -752,29 +640,11 @@ int lxcfs_truncate(const char *path, off_t newsize, struct fuse_file_info *fi)
 
 int lxcfs_rmdir(const char *path)
 {
-	int ret;
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_rmdir(path);
-		down_users();
-		return ret;
-	}
-
 	return -EPERM;
 }
 
 int lxcfs_chmod(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-	int ret;
-
-	if (cgroup_is_enabled && strncmp(path, "/cgroup", 7) == 0) {
-		up_users();
-		ret = do_cg_chmod(path, mode);
-		down_users();
-		return ret;
-	}
-
 	if (strncmp(path, "/proc", 5) == 0)
 		return -EPERM;
 
@@ -869,7 +739,7 @@ const struct fuse_operations lxcfs_ops = {
 static void usage(void)
 {
 	lxcfs_info("Usage: lxcfs <directory>\n");
-	lxcfs_info("lxcfs is a FUSE-based proc, sys and cgroup virtualizing filesystem\n");
+	lxcfs_info("lxcfs is a FUSE-based proc, sys virtualizing filesystem\n");
 	lxcfs_info("Options :");
 	lxcfs_info("  -d, --debug          Run lxcfs with debugging enabled");
 	lxcfs_info("  -f, --foreground     Run lxcfs in the foreground");
@@ -882,7 +752,6 @@ static void usage(void)
 	lxcfs_info("  -v, --version        Print lxcfs version");
 	lxcfs_info("  --enable-cfs         Enable CPU virtualization via CPU shares");
 	lxcfs_info("  --enable-pidfd       Use pidfd for process tracking");
-	lxcfs_info("  --enable-cgroup      Enable cgroup emulation code");
 	lxcfs_info("  --runtime-dir=DIR    Path to use as the runtime directory.");
 	lxcfs_info("                       Default is %s", DEFAULT_RUNTIME_PATH);
 	exit(EXIT_FAILURE);
@@ -934,7 +803,6 @@ static const struct option long_options[] = {
 
 	{"enable-cfs",		no_argument,		0,	  0	},
 	{"enable-pidfd",	no_argument,		0,	  0	},
-	{"enable-cgroup",	no_argument,		0,	  0	},
 	{"enable-psi-poll",	no_argument,		0,	  0	},
 
 	{"pidfile",		required_argument,	0,	'p'	},
@@ -1017,8 +885,6 @@ int main(int argc, char *argv[])
 				opts->use_pidfd = true;
 			else if (strcmp(long_options[idx].name, "enable-cfs") == 0)
 				opts->use_cfs = true;
-			else if (strcmp(long_options[idx].name, "enable-cgroup") == 0)
-				cgroup_is_enabled = true;
 			else if (strcmp(long_options[idx].name, "enable-psi-poll") == 0)
 				opts->psi_poll_on = true;
 			else if (strcmp(long_options[idx].name, "runtime-dir") == 0)

@@ -17,7 +17,6 @@
 
 #include "lxcfs_fuse.h"
 
-#include "cgroup_fuse.h"
 #include "macro.h"
 #include "proc_cpuview.h"
 #include "proc_fuse.h"

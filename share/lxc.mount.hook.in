@@ -1,16 +1,5 @@
 #!/bin/sh -e
 
-# Parse command flags
-while [ ! $# -eq 0 ]
-do
-	case "$1" in
-		--skip-cgroup-mounts )
-			SKIP_CGROUP_MOUNTS=1
-			;;
-	esac
-	shift
-done
-
 # We're dealing with mount entries, so expand any symlink
 LXC_ROOTFS_MOUNT=$(readlink -f "${LXC_ROOTFS_MOUNT}")
 
@@ -50,64 +39,6 @@ if touch "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs"; then
     rm "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/lxcfs"
 else
     exit 0
-fi
-
-# Skip mounting cgroup tree if requested.
-if [ "${SKIP_CGROUP_MOUNTS}" = "1" ]; then
-        exit 0
-fi
-
-# /sys/fs/cgroup files
-if [ -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup" ]; then
-    if [ -d {{LXCFSTARGETDIR}}/cgroup ]; then
-        # Cleanup existing mounts
-        for entry in "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup"/*; do
-            DEST=$(basename "$entry")
-
-            if [ "${DEST}" = "cgmanager" ]; then
-                continue
-            fi
-
-            if [ ! -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" ]; then
-                continue
-            fi
-
-            while grep -q "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo; do
-                grep "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" /proc/self/mountinfo | cut -d' ' -f5 | while read -r line; do
-                     [ -e "${line}" ] || continue
-                     umount -l "${line}" || true
-                done
-            done
-
-            rm -Rf "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
-        done
-
-        # Mount the new entries
-        for entry in {{LXCFSTARGETDIR}}/cgroup/*; do
-            DEST=$(basename "$entry")
-            if [ "$DEST" = "name=systemd" ]; then
-                DEST="systemd"
-            fi
-
-            if [ ! -d "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}" ]; then
-                mkdir "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
-            fi
-
-            mount -n --bind "$entry" "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${DEST}"
-
-            # make sure that cpu,cpuacct shows up as cpu and cpuacct
-            # separately, else systemd is unhappy
-            if echo "$DEST" | grep -q ","; then
-                arr=$(echo "$DEST" | tr "," "\n")
-                for single in $arr
-                do
-                    if [ ! -L "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${single}" ]; then
-                        ln -s "$DEST" "${LXC_ROOTFS_MOUNT}/sys/fs/cgroup/${single}"
-                    fi
-                done
-            fi
-        done
-    fi
 fi
 
 exit 0
