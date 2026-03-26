@@ -21,34 +21,6 @@
 #include "cgroup.h"
 #include "cgroup_utils.h"
 
-int get_cgroup_version(char *line)
-{
-	if (is_cgroupfs_v1(line))
-		return CGROUP_SUPER_MAGIC;
-
-	if (is_cgroupfs_v2(line))
-		return CGROUP2_SUPER_MAGIC;
-
-	return 0;
-}
-
-bool is_cgroupfs_v1(char *line)
-{
-	char *p = strstr(line, " - ");
-	if (!p)
-		return false;
-	return strncmp(p, " - cgroup ", 10) == 0;
-}
-
-bool is_cgroupfs_v2(char *line)
-{
-	char *p = strstr(line, " - ");
-	if (!p)
-		return false;
-
-	return strncmp(p, " - cgroup2 ", 11) == 0;
-}
-
 int unified_cgroup_hierarchy(void)
 {
 
@@ -63,23 +35,6 @@ int unified_cgroup_hierarchy(void)
 		return CGROUP2_SUPER_MAGIC;
 
 	return 0;
-}
-
-bool is_cgroup_fd(int fd)
-{
-
-	int ret;
-	struct statfs fs;
-
-	ret = fstatfs(fd, &fs);
-	if (ret)
-		return false;
-
-	if (is_fs_type(&fs, CGROUP2_SUPER_MAGIC) ||
-	    is_fs_type(&fs, CGROUP_SUPER_MAGIC))
-		return true;
-
-	return false;
 }
 
 bool is_cgroup2_fd(int fd)
@@ -190,23 +145,6 @@ char *lxc_string_join(const char *sep, const char **parts, bool use_as_prefix)
 	}
 
 	return result;
-}
-
-int lxc_count_file_lines(const char *fn)
-{
-	__do_fclose FILE *f = NULL;
-	__do_free char *line = NULL;
-	size_t sz = 0;
-	int n = 0;
-
-	f = fopen_cloexec(fn, "r");
-	if (!f)
-		return -1;
-
-	while (getline(&line, &sz, f) != -1)
-		n++;
-
-	return n;
 }
 
 bool dir_exists(const char *path)
@@ -578,80 +516,6 @@ char *cg_unified_get_current_cgroup(pid_t pid)
 	base_cgroup = base_cgroup + 3;
 	return copy_to_eol(base_cgroup);
 }
-
-/* cgline: pointer to character after the first ':' in a line in a \n-terminated
- * /proc/self/cgroup file. Check whether controller c is present.
- */
-static bool controller_in_clist(char *cgline, const char *c)
-{
-	__do_free char *tmp = NULL;
-	char *tok, *eol;
-	size_t len;
-
-	eol = strchr(cgline, ':');
-	if (!eol)
-		return false;
-
-	len = eol - cgline;
-	tmp = must_realloc(NULL, len + 1);
-	memcpy(tmp, cgline, len);
-	tmp[len] = '\0';
-
-	lxc_iterate_parts(tok, tmp, ",")
-		if (strcmp(tok, c) == 0)
-			return true;
-
-	return false;
-}
-
-/* @basecginfo is a copy of /proc/$$/cgroup. Return the current cgroup for
- * @controller.
- */
-char *cg_hybrid_get_current_cgroup(char *basecginfo, const char *controller, int type)
-{
-	char *p = basecginfo;
-
-	for (;;) {
-		bool is_cgv2_base_cgroup = false;
-
-		/* cgroup v2 entry in "/proc/<pid>/cgroup": "0::/some/path" */
-		if ((type == CGROUP2_SUPER_MAGIC) && (*p == '0'))
-			is_cgv2_base_cgroup = true;
-
-		p = strchr(p, ':');
-		if (!p)
-			return NULL;
-		p++;
-
-		if (is_cgv2_base_cgroup || (controller && controller_in_clist(p, controller))) {
-			p = strchr(p, ':');
-			if (!p)
-				return NULL;
-			p++;
-			return copy_to_eol(p);
-		}
-
-		p = strchr(p, '\n');
-		if (!p)
-			return NULL;
-		p++;
-	}
-}
-
-char *cg_legacy_get_current_cgroup(pid_t pid, const char *controller)
-{
-	__do_free char *basecginfo = NULL;
-	char path[STRLITERALLEN("/proc//cgroup") + INTTYPE_TO_STRLEN(pid_t) + 1];
-
-	snprintf(path, sizeof(path), "/proc/%d/cgroup", pid > 0 ? pid : 1);
-	basecginfo = read_file(path);
-	if (!basecginfo)
-		return ret_set_errno(NULL, ENOMEM);
-
-	return cg_hybrid_get_current_cgroup(basecginfo, controller,
-					    CGROUP_SUPER_MAGIC);
-}
-
 
 char *readat_file(int dirfd, const char *path)
 {

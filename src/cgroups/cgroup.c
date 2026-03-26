@@ -104,7 +104,7 @@ char *get_pid_cgroup(pid_t pid, const char *contrl)
 	if (pure_unified_layout(cgroup_ops))
 		return cg_unified_get_current_cgroup(pid);
 
-	return cg_legacy_get_current_cgroup(pid, contrl);
+	return NULL;
 }
 
 /*
