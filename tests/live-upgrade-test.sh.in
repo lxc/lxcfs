@@ -6,6 +6,8 @@ set -eu
 
 [ $(id -u) -eq 0 ]
 
+grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
+
 NEW_LXCFS_TREE=$1
 
 echo "LXCFS trees:"
