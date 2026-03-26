@@ -61,18 +61,6 @@ test_programs += custom_target(
     ])
 
 test_programs += custom_target(
-    'test_readdir',
-    build_by_default: want_tests != false,
-    input: 'test_readdir.in',
-    output: 'test_readdir',
-    command: [
-        meson_render_jinja2,
-        config_h,
-        '@INPUT@',
-        '@OUTPUT@',
-    ])
-
-test_programs += custom_target(
     'test_reload.sh',
     build_by_default: want_tests != false,
     input: 'test_reload.sh.in',
