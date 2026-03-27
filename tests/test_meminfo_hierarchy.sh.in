@@ -4,12 +4,69 @@
 set -eu
 [ -n "${DEBUG:-}" ] && set -x
 
-LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
+[ "$(id -u)" -eq 0 ]
 
-cg1=$(uuidgen).$$
-cg2=$(uuidgen).$$
+grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
+
+[ -d /sys/fs/cgroup ]
+
+LXCFSDIR=${LXCFSDIR:-/var/lib/incus-lxcfs}
+mempath=/sys/fs/cgroup
+
+#
+# We are going to make the following cgroup tree:
+# root
+#   |
+#   |_ cg1 (+memory, limit 500 MiB)
+#       |
+#       |_ cg2 (+memory, limit 600 MiB)
+#           |
+#           |_ cg3 (+memory, limit max, cgroup namespace root cgroup)
+#               |
+#               |_ init.scope -> init process
+#               |
+#               |_ cg4 (+memory, limit 400 MiB)
+#                   |
+#                   |_ cg5 (+memory, limit max)
+#                       |
+#                       |_ cg6 (+memory, limit 900 MiB)
+#                           |
+#                           |_ cg7 -> process requesting ${LXCFSDIR}/proc/meminfo
+#
+# This tree mimics what we can have with systemd & system container.
+#
+# LXCFS should completely ignore everything under cg3, and then go up the tree
+# and determine that effective memory limit for the container is 500 MiB.
+#
+# To achive this for process sitting in cg7, LXCFS should:
+# 1. Find init process of the container
+# 2. Determine its cgroup (cg1/cg2/cg3/init.scope)
+# 3. Find container's cgroup (cg1/cg2/cg3)
+# 4. Go up the tree and find minimal limit -> 500 MiB
+#
+
+if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+	LOCKFILE_CT_INIT_READY="$(mktemp)"
+	export LOCKFILE_CT_INIT_READY
+	LOCKFILE_PARENT_LEFT_CGROUP="$(mktemp)"
+	export LOCKFILE_PARENT_LEFT_CGROUP
+
+	cg1="$(uuidgen).$$"
+	export cg1
+	export cg2=2
+	export cg3=3
+	export cg4=4
+	export cg5=5
+	export cg6=6
+	export cg7=7
+fi
 
 cleanup() {
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		rm -f "${LOCKFILE_CT_INIT_READY}" "${LOCKFILE_PARENT_LEFT_CGROUP}"
+		find "${mempath}/${cg1}" -depth -type d -exec rmdir {} + 2>/dev/null || true
+	fi
+
 	if [ $FAILED -eq 1 ]; then
 		exit 1
 	fi
@@ -19,33 +76,112 @@ cleanup() {
 FAILED=1
 trap cleanup EXIT HUP INT TERM
 
-[ ! -d /sys/fs/cgroup ] && exit 0
-echo "==> Setting up cgroup"
-mempath=/sys/fs/cgroup/
+if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+	echo "==> Setting up cgroups"
 
-memory_limit_file=memory.max
-tasks_file=cgroup.procs
+	find "${mempath}/${cg1}" -depth -type d -exec rmdir {} + 2>/dev/null || true
 
-rmdir ${mempath}/${cg1} 2>/dev/null || true
-rmdir ${mempath}/${cg2} 2>/dev/null || true
+	mkdir -p "${mempath}/${cg1}/${cg2}/${cg3}/${cg4}/${cg5}/${cg6}/${cg7}"
 
-echo "==> Testing /proc/meminfo with limit"
-mkdir ${mempath}/${cg1}
-echo 500000000 > ${mempath}/${cg1}/${memory_limit_file}
-echo 1 > ${mempath}/${cg1}/${tasks_file}
-m1=$(awk '/^MemTotal:/ { print $2 }' ${LXCFSDIR}/proc/meminfo)
+	echo $((500*256*4096)) > "${mempath}/${cg1}/memory.max"
+	echo '+memory' > "${mempath}/${cg1}/cgroup.subtree_control"
 
-# temporary move to the root cgroup because of
-# "no internal process" constraint
-echo 1 > ${mempath}/${tasks_file}
-echo '+memory' > ${mempath}/${cg1}/cgroup.subtree_control
+	echo $((600*256*4096)) > "${mempath}/${cg1}/${cg2}/memory.max"
+	echo '+memory' > "${mempath}/${cg1}/${cg2}/cgroup.subtree_control"
+
+	# no limit on cg3
+
+	# Let's put current process into cg1/cg2/cg3
+	# and create cgroup namespace, so cg3 becomes cgroup tree
+	# root in that namespace.
+	OLD_TEST_CGROUP=$(awk -F: '{ print $3 }' /proc/$$/cgroup)
+	echo $$ > "${mempath}/${cg1}/${cg2}/${cg3}/cgroup.procs"
+
+	LXCFS_TEST_IN_CT=1 unshare -C -fmp --mount-proc "$0" &
+	UNSHARE_PID=$!
+
+	# wait until unshare spawns init process
+	while [ ! -s "${LOCKFILE_CT_INIT_READY}" ]; do sleep 0.1; done
+
+	# we must escape cg1/cg2/cg3, otherwise it won't be possible
+	# to enable memory controller for child cgroups
+	echo $UNSHARE_PID > "${mempath}/${OLD_TEST_CGROUP}/cgroup.procs"
+	echo $$ > "${mempath}/${OLD_TEST_CGROUP}/cgroup.procs"
+
+	# signal init process that we have left cgroup
+	# and it can do its job to setup everything inside
+	echo "done" > "${LOCKFILE_PARENT_LEFT_CGROUP}"
+
+	wait $UNSHARE_PID
+	FAILED=$?
+	exit 0
+fi
+
+echo "done" > "${LOCKFILE_CT_INIT_READY}"
+while [ ! -s "${LOCKFILE_PARENT_LEFT_CGROUP}" ]; do sleep 0.1; done
+
+# assume that we are init process in PID namespace
+[ $$ -eq 1 ]
+
+#
+# If we reach this point, it means that current process is sitting in
+# PID/MNT/CGROUP namespace and "root" cgroup is ${mempath}/${cg1}/${cg2}/${cg3}
+# Now we need to unmount host cgroupfs and mount our own to see cgroup-namespaced
+# cgroupfs view.
+#
+
+umount -l /sys/fs/cgroup
+mount -t cgroup2 cgroup2 -o nsdelegate,memory_recursiveprot /sys/fs/cgroup
+
+# Let's move init process to the init.scope cgroup.
+# We can't keep init process in the root cgroup (cg1/cg2/cg3), because
+# we can't enable memory controller in it until there is a process sitting.
+# See "No Internal Process Constraint" rule in kernel doc.
+mkdir "${mempath}/init.scope"
+echo 1 > "${mempath}/init.scope/cgroup.procs"
+# Finally, we can enable memory controller in root cgroup of the container (cg1/cg2/cg3)
+cat ${mempath}/cgroup.procs
+echo '+memory' > "${mempath}/cgroup.subtree_control"
+
+echo $((400*256*4096)) > "${mempath}/${cg4}/memory.max"
+echo '+memory' > "${mempath}/${cg4}/cgroup.subtree_control"
+
+# no limit on cg5
+echo '+memory' > "${mempath}/${cg4}/${cg5}/cgroup.subtree_control"
+
+echo $((900*256*4096)) > "${mempath}/${cg4}/${cg5}/${cg6}/memory.max"
+echo '+memory' > "${mempath}/${cg4}/${cg5}/${cg6}/cgroup.subtree_control"
+
+echo "==> Reading /proc/meminfo from init process's cgroup"
+
+# awk sits in the same cgroup as init process
+mem_total_init=$(awk '/^MemTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+
+echo "==> Confirming that limit is correct"
+# While a limit on the container's root cgroup
+# is set too "max", we expect to get 500 MiB, because LXCFS
+# goes up the cgroup tree and tries to find a minimal value.
+[ "$mem_total_init" -eq 512000 ]
 
 echo "==> Testing /proc/meminfo with sub-cgroup"
-mkdir ${mempath}/${cg1}/${cg2}
-echo 1 > ${mempath}/${cg1}/${cg2}/${tasks_file}
-m2=$(awk '/^MemTotal:/ { print $2 }' ${LXCFSDIR}/proc/meminfo)
+
+read_memtotal_in_cg() {
+	cg="$1"
+	shift
+
+	sh -c "$(cat <<EOF
+		set -eu
+		echo \$\$ > "$cg/cgroup.procs"
+		awk '/^MemTotal:/ { print \$2 }' "${LXCFSDIR}/proc/meminfo"
+EOF
+	)"
+}
+
+# A process, requesting asking LXCFS will be sitting in some nested
+# cgroup *under* cg3 (like it usually happens in systemd-based systems).
+mem_total_ct_process=$(read_memtotal_in_cg "${mempath}/${cg4}/${cg5}/${cg6}/${cg7}")
 
 echo "==> Confirming same limits"
-[ $m1 -eq $m2 ]
+[ "$mem_total_init" -eq "$mem_total_ct_process" ]
 
 FAILED=0

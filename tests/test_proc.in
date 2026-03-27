@@ -35,9 +35,7 @@ echo 1 > ${hierarchy_path}/lxcfs_test_proc/cgroup.procs
 
 echo '+cpu +cpuset +memory' > ${hierarchy_path}/cgroup.subtree_control
 
-memory_limit_file=memory.max
-
-echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/${memory_limit_file}
+echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/memory.max
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test that readdir on /proc basically works
