@@ -4,15 +4,14 @@
 set -eu
 [ -n "${DEBUG:-}" ] && set -x
 
-[ $(id -u) -eq 0 ]
+[ "$(id -u)" -eq 0 ]
 
-cmdline=$(realpath $0)
-topdir={{LXCFS_BUILD_ROOT}}
+topdir="{{LXCFS_BUILD_ROOT}}"
 
-testdir=`mktemp -t -d libs.XXX`
-installdir=`mktemp -t -d libs.XXX`
+testdir=$(mktemp -t -d libs.XXX)
+installdir=$(mktemp -t -d libs.XXX)
 pidfile=$(mktemp)
-libdir=${installdir}/{{LIBDIR}}
+libdir="${installdir}/{{LIBDIR}}"
 bindir=${installdir}/usr/bin
 lxcfspid=-1
 FAILED=1
@@ -21,14 +20,14 @@ cleanup() {
   if [ ${lxcfspid} -ne -1 ]; then
     kill -9 ${lxcfspid}
     count=1
-    while [ -d ${testdir}/proc -a $count -lt 5 ]; do
+    while [ -d "${testdir}"/proc ] && [ $count -lt 5 ]; do
       sleep 1
     done
-    umount -l ${testdir}
+    umount -l "${testdir}"
   fi
-  rm -rf ${testdir} ${installdir}
+  rm -rf "${testdir}" "${installdir}"
   rm -f /tmp/lxcfs-iwashere
-  rm -f ${pidfile}
+  rm -f "${pidfile}"
   if [ ${FAILED} -eq 1 ]; then
     echo "liblxcfs.so reload test FAILED"
   else
@@ -39,21 +38,21 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 echo "==> Installing lxcfs to temporary path"
-cd {{LXCFS_BUILD_ROOT}}
+cd "$topdir"
 DESTDIR=${installdir} meson install
 if [ -n "${LD_LIBRARY_PATH:-}" ]; then
     export LD_LIBRARY_PATH="${libdir}:${LD_LIBRARY_PATH}"
 else
-    export LD_LIBRARY_PATH=${libdir}
+    export LD_LIBRARY_PATH="${libdir}"
 fi
 
 echo "==> Spawning lxcfs"
-${bindir}/lxcfs -p ${pidfile} ${testdir} &
+"${bindir}"/lxcfs -p "${pidfile}" "${testdir}" &
 
 lxcfspid=$!
 
 count=1
-while [ ! -d ${testdir}/proc ]; do
+while [ ! -d "${testdir}"/proc ]; do
   [ $count -lt 5 ]
   sleep 1
   count=$((count+1))
@@ -62,15 +61,15 @@ done
 rm -f /tmp/lxcfs-iwashere
 
 echo "==> Testing that lxcfs is functional"
-cat ${testdir}/proc/uptime
+cat "${testdir}"/proc/uptime
 
 [ ! -f /tmp/lxcfs-iwashere ]
-rm -f ${libdir}/liblxcfs.so* ${libdir}/liblxcfs.la
-cp {{LXCFS_BUILD_ROOT}}/liblxcfstest.so ${libdir}/liblxcfs.so
+rm -f "${libdir}"/liblxcfs.so* "${libdir}"/liblxcfs.la
+cp "$topdir/liblxcfstest.so" "${libdir}"/liblxcfs.so
 
 kill -USR1 ${lxcfspid}
 sleep 1
-cat ${testdir}/proc/uptime
+cat "${testdir}"/proc/uptime
 sleep 1
 [ -f /tmp/lxcfs-iwashere ]
 
