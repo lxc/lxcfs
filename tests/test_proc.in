@@ -14,7 +14,7 @@ trap cleanup EXIT HUP INT TERM
 
 LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
 
-if ! mountpoint -q ${LXCFSDIR}; then
+if ! mountpoint -q "${LXCFSDIR}"; then
     echo "lxcfs isn't mounted on ${LXCFSDIR}"
     exit 1
 fi
@@ -40,31 +40,31 @@ echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test that readdir on /proc basically works
 echo "==> Testing directory listing on /proc"
-ls -l ${LXCFSDIR}/proc | grep uptime
-ls -l ${LXCFSDIR}/proc | grep cpuinfo
-ls -l ${LXCFSDIR}/proc | grep stat
-ls -l ${LXCFSDIR}/proc | grep meminfo
+ls -l "${LXCFSDIR}"/proc | grep uptime
+ls -l "${LXCFSDIR}"/proc | grep cpuinfo
+ls -l "${LXCFSDIR}"/proc | grep stat
+ls -l "${LXCFSDIR}"/proc | grep meminfo
 
 # Test uptime
 echo "==> Testing /proc/uptime"
-grep -Eq "^0.[0-9]{2} 0.[0-9]{2}$" ${LXCFSDIR}/proc/uptime
+grep -Eq "^0.[0-9]{2} 0.[0-9]{2}$" "${LXCFSDIR}"/proc/uptime
 
 # Test cpuinfo
 echo "==> Testing /proc/cpuinfo"
-[ "$(grep "^processor" ${LXCFSDIR}/proc/cpuinfo | wc -l)" = "1" ]
-grep -q "^processor.*0$" ${LXCFSDIR}/proc/cpuinfo || grep -q "^processor 0:.*" ${LXCFSDIR}/proc/cpuinfo
+[ "$(grep "^processor" "${LXCFSDIR}"/proc/cpuinfo | wc -l)" = "1" ]
+grep -q "^processor.*0$" "${LXCFSDIR}"/proc/cpuinfo || grep -q "^processor 0:.*" "${LXCFSDIR}"/proc/cpuinfo
 
 echo "==> Testing /sys/devices/system/cpu/online"
-[ "$(cat ${LXCFSDIR}/sys/devices/system/cpu/online)" = "$(cat ${cpupath}/lxcfs_test_proc/cpuset.cpus)" ]
+[ "$(cat "${LXCFSDIR}"/sys/devices/system/cpu/online)" = "$(cat ${cpupath}/lxcfs_test_proc/cpuset.cpus)" ]
 
 # Test stat
 echo "==> Testing /proc/stat"
-[ "$(grep "^cpu" ${LXCFSDIR}/proc/stat | wc -l)" = "2" ]
+[ "$(grep "^cpu" "${LXCFSDIR}"/proc/stat | wc -l)" = "2" ]
 
 # Test stat integrity — verify the output is well-formed and never truncated.
 # This catches the bug reported in https://github.com/lxc/lxcfs/issues/694
 echo "==> Testing /proc/stat integrity"
-stat_content=$(cat ${LXCFSDIR}/proc/stat)
+stat_content=$(cat "${LXCFSDIR}"/proc/stat)
 # Must start with "cpu " aggregate line
 echo "$stat_content" | head -1 | grep -q "^cpu "
 # Must contain standard non-cpu lines (these appear after cpu lines)
@@ -75,18 +75,18 @@ echo "$stat_content" | grep -q "^processes "
 # Read /proc/stat repeatedly — must never return empty
 echo "==> Testing /proc/stat repeated reads"
 for i in $(seq 1 100); do
-    bytes=$(cat ${LXCFSDIR}/proc/stat | wc -c)
+    bytes=$(cat "${LXCFSDIR}"/proc/stat | wc -c)
     [ "$bytes" -gt 0 ] || (echo "FAIL: /proc/stat returned empty on read $i" && exit 1)
 done
 
 # Test meminfo
 echo "==> Testing /proc/meminfo"
-grep -q "^MemTotal.*65536 kB$" ${LXCFSDIR}/proc/meminfo
+grep -q "^MemTotal.*65536 kB$" "${LXCFSDIR}"/proc/meminfo
 
 # We don't support PSI triggers virtualization with old libfuse
 if [ "$LIBFUSE" != "fuse" ]; then
     echo "==> Testing /proc/pressure/{cpu, io, memory}"
-    {{LXCFS_BUILD_ROOT}}/tests/test-psi-triggers-poll ${LXCFSDIR}
+    "{{LXCFS_BUILD_ROOT}}"/tests/test-psi-triggers-poll "${LXCFSDIR}"
 fi
 
 PASS=1

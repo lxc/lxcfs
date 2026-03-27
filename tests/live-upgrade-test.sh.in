@@ -4,7 +4,7 @@
 set -eu
 [ -n "${DEBUG:-}" ] && set -x
 
-[ $(id -u) -eq 0 ]
+[ "$(id -u)" -eq 0 ]
 
 grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
 
@@ -15,26 +15,27 @@ pwd
 echo "${NEW_LXCFS_TREE}"
 
 # Run lxcfs testsuite
-export LXCFSDIR=$(mktemp -d)
+LXCFSDIR=$(mktemp -d)
+export LXCFSDIR
 pidfile=$(mktemp)
 export LXCFSPID=-1
 
-cmdline=$(realpath $0)
-dirname=$(dirname ${cmdline})
+cmdline=$(realpath "$0")
+dirname=$(dirname "${cmdline}")
 
 FAILED=1
 UNSHARE=1
 cleanup() {
 	echo "=> Cleaning up"
 	set +e
-	if [ $LXCFSPID -ne -1 ]; then
-		kill -9 $LXCFSPID
+	if [ "$LXCFSPID" -ne -1 ]; then
+		kill -9 "$LXCFSPID"
 	fi
-	if [ ${LXCFSDIR} != "/var/lib/lxcfs" ]; then
-		umount -l ${LXCFSDIR}
-		rmdir ${LXCFSDIR}
+	if [ "${LXCFSDIR}" != "/var/lib/lxcfs" ]; then
+		umount -l "${LXCFSDIR}"
+		rmdir "${LXCFSDIR}"
 	fi
-	rm -f ${pidfile}
+	rm -f "${pidfile}"
 	if [ ${FAILED} -eq 1 ]; then
 		echo "=> FAILED at $TESTCASE"
 		exit 1
@@ -53,20 +54,20 @@ if [ -x ${lxcfs} ]; then
 		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}"
 	fi
 	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
-	${lxcfs} --enable-psi-poll -p ${pidfile} ${LXCFSDIR} &
+	${lxcfs} --enable-psi-poll -p "${pidfile}" "${LXCFSDIR}" &
 	LXCFSPID=$!
 else
 	UNSHARE=0
 	LXCFSPID=$(cat "{{DEFAULT_RUNTIME_PATH}}/lxcfs.pid")
 	echo "=> Re-using host lxcfs"
-	rmdir $LXCFSDIR
+	rmdir "$LXCFSDIR"
 	export LXCFSDIR=/var/lib/lxcfs
 fi
 
 trap cleanup EXIT HUP INT TERM
 
 count=1
-while ! mountpoint -q $LXCFSDIR; do
+while ! mountpoint -q "$LXCFSDIR"; do
 	sleep 1s
 	if [ $count -gt 5 ]; then
 		echo "lxcfs failed to start"
@@ -80,28 +81,28 @@ RUNTEST() {
 	echo "=> Running ${TESTCASE}"
 
 	if [ "${UNSHARE:-1}" != "0" ]; then
-		unshare -fmp --mount-proc $*
+		unshare -fmp --mount-proc "$*"
 	else
-		$*
+		"$*"
 	fi
 }
 
 RUNTESTS() {
 	TESTCASE="test_proc"
-	RUNTEST ${dirname}/test_proc
+	RUNTEST "${dirname}"/test_proc
 	TESTCASE="test_read_proc.sh"
-	RUNTEST ${dirname}/test_read_proc.sh
+	RUNTEST "${dirname}"/test_read_proc.sh
 	TESTCASE="cpusetrange"
-	RUNTEST ${dirname}/test-cpusetrange
+	RUNTEST "${dirname}"/test-cpusetrange
 	TESTCASE="meminfo hierarchy"
-	UNSHARE=0 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
+	UNSHARE=0 RUNTEST "${dirname}"/test_meminfo_hierarchy.sh
 
 	TESTCASE="SIGUSR2 virtualization mode switching"
 	echo "==> Switching to non-virtualization mode"
-	kill -USR2 $LXCFSPID
-	RUNTEST ${dirname}/test_sigusr2.sh
+	kill -USR2 "$LXCFSPID"
+	RUNTEST "${dirname}"/test_sigusr2.sh
 	echo "==> Switching to virtualization mode"
-	kill -USR2 $LXCFSPID
+	kill -USR2 "$LXCFSPID"
 }
 
 echo ""
@@ -113,20 +114,20 @@ TESTCASE="liblxcfs reloading (with upgrade)"
 rm -f /tmp/lxcfs-iwashere
 
 echo "==> Ensure that lxcfs is functional BEFORE reload"
-cat ${LXCFSDIR}/proc/uptime
+cat "${LXCFSDIR}"/proc/uptime
 
 libdir="{{LXCFS_BUILD_ROOT}}"
 
 [ ! -f /tmp/lxcfs-iwashere ]
 rm -f ${libdir}/liblxcfs.so ${libdir}/liblxcfs.la
-cp ${NEW_LXCFS_TREE}/build/liblxcfstest.so ${libdir}/liblxcfs.so
+cp "${NEW_LXCFS_TREE}"/build/liblxcfstest.so ${libdir}/liblxcfs.so
 
 echo "==> Reload liblxcfs"
-kill -USR1 $LXCFSPID
+kill -USR1 "$LXCFSPID"
 sleep 1
 
 echo "==> Ensure that lxcfs is functional AFTER reload"
-cat ${LXCFSDIR}/proc/uptime
+cat "${LXCFSDIR}"/proc/uptime
 sleep 1
 [ -f /tmp/lxcfs-iwashere ]
 
@@ -135,7 +136,7 @@ echo "=> Running tests AFTER reload"
 RUNTESTS
 
 # Check for any defunct processes - children we didn't reap
-n=`ps -ef | grep lxcfs | grep defunct | wc -l`
-[ $n = 0 ]
+n=$(ps -ef | grep lxcfs | grep defunct | wc -l)
+[ "$n" = 0 ]
 
 FAILED=0
