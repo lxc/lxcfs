@@ -20,15 +20,6 @@
 #include "../macro.h"
 #include "../memory_utils.h"
 
-/* Retrieve the cgroup version of a given entry from /proc/<pid>/mountinfo. */
-extern int get_cgroup_version(char *line);
-
-/* Check if given entry from /proc/<pid>/mountinfo is a cgroupfs v1 mount. */
-extern bool is_cgroupfs_v1(char *line);
-
-/* Check if given entry from /proc/<pid>/mountinfo is a cgroupfs v2 mount. */
-extern bool is_cgroupfs_v2(char *line);
-
 /* Given a v1 hierarchy @mountpoint and base @path, verify that we can create
  * directories underneath it.
  */
@@ -54,7 +45,6 @@ extern bool is_fs_type(const struct statfs *fs, fs_type_magic magic_val);
 
 extern char *lxc_string_join(const char *sep, const char **parts,
 			     bool use_as_prefix);
-extern int lxc_count_file_lines(const char *fn);
 
 extern bool dir_exists(const char *path);
 
@@ -67,11 +57,7 @@ extern char *read_file(const char *fnam);
 extern char *readat_file(int fd, const char *path);
 extern char *read_file_strip_newline(const char *fnam);
 extern char *cg_unified_get_current_cgroup(pid_t pid);
-extern char *cg_hybrid_get_current_cgroup(char *basecginfo,
-					  const char *controller, int type);
-extern char *cg_legacy_get_current_cgroup(pid_t pid, const char *controller);
 extern bool mkdir_p(const char *dir, mode_t mode);
-extern bool is_cgroup_fd(int fd);
 extern bool is_cgroup2_fd(int fd);
 
 static inline int openat_safe(int fd, const char *path)

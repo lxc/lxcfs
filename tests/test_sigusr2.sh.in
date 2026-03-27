@@ -19,31 +19,15 @@ if ! mountpoint -q ${LXCFSDIR}; then
     exit 1
 fi
 
-IS_CGROUP_V2=0
-grep -qF 'cgroup cgroup' /proc/1/mountinfo || IS_CGROUP_V2=1
+echo "==> Setting up cgroup in lxcfs_test_proc"
+[ ! -d /sys/fs/cgroup ] && exit 0
 
-if [ "$IS_CGROUP_V2" = "1" ]; then
-    echo "==> Setting up cgroup in lxcfs_test_proc"
-    [ ! -d /sys/fs/cgroup ] && exit 0
+mempath=/sys/fs/cgroup
+rmdir ${mempath}/lxcfs_test_proc 2>/dev/null || true
+mkdir ${mempath}/lxcfs_test_proc
 
-    mempath=/sys/fs/cgroup
-    rmdir ${mempath}/lxcfs_test_proc 2>/dev/null || true
-    mkdir ${mempath}/lxcfs_test_proc
-
-    memory_limit_file=memory.max
-    tasks_file=cgroup.procs
-else
-    echo "==> Setting up memory cgroup in lxcfs_test_proc"
-    [ ! -d /sys/fs/cgroup/memory ] && exit 0
-
-    initmemory=$(awk -F: '/memory/ { print $3 }' /proc/1/cgroup)
-    mempath=/sys/fs/cgroup/memory/${initmemory}
-    rmdir ${mempath}/lxcfs_test_proc 2>/dev/null || true
-    mkdir ${mempath}/lxcfs_test_proc
-
-    memory_limit_file=memory.limit_in_bytes
-    tasks_file=tasks
-fi
+memory_limit_file=memory.max
+tasks_file=cgroup.procs
 
 echo 1 > ${mempath}/lxcfs_test_proc/${tasks_file}
 echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/${memory_limit_file}

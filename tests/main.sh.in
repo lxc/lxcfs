@@ -6,6 +6,8 @@ set -eu
 
 [ $(id -u) -eq 0 ]
 
+grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
+
 # Run lxcfs testsuite
 export LXCFSDIR=$(mktemp -d)
 pidfile=$(mktemp)
@@ -78,8 +80,6 @@ RUNTEST() {
 	fi
 }
 
-TESTCASE="Stress readdir"
-RUNTEST ${dirname}/test_readdir
 TESTCASE="test_proc"
 RUNTEST ${dirname}/test_proc
 TESTCASE="test_read_proc.sh"
@@ -87,7 +87,7 @@ RUNTEST ${dirname}/test_read_proc.sh
 TESTCASE="cpusetrange"
 RUNTEST ${dirname}/test-cpusetrange
 TESTCASE="meminfo hierarchy"
-RUNTEST ${dirname}/test_meminfo_hierarchy.sh
+UNSHARE=0 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
 TESTCASE="liblxcfs reloading"
 UNSHARE=0 RUNTEST ${dirname}/test_reload.sh
 TESTCASE="SIGUSR2 virtualization mode switching"

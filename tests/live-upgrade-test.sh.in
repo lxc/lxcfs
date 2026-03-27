@@ -6,6 +6,8 @@ set -eu
 
 [ $(id -u) -eq 0 ]
 
+grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
+
 NEW_LXCFS_TREE=$1
 
 echo "LXCFS trees:"
@@ -85,8 +87,6 @@ RUNTEST() {
 }
 
 RUNTESTS() {
-	TESTCASE="Stress readdir"
-	RUNTEST ${dirname}/test_readdir
 	TESTCASE="test_proc"
 	RUNTEST ${dirname}/test_proc
 	TESTCASE="test_read_proc.sh"
@@ -94,7 +94,7 @@ RUNTESTS() {
 	TESTCASE="cpusetrange"
 	RUNTEST ${dirname}/test-cpusetrange
 	TESTCASE="meminfo hierarchy"
-	RUNTEST ${dirname}/test_meminfo_hierarchy.sh
+	UNSHARE=0 RUNTEST ${dirname}/test_meminfo_hierarchy.sh
 
 	TESTCASE="SIGUSR2 virtualization mode switching"
 	echo "==> Switching to non-virtualization mode"
