@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 test_programs += custom_target(
+    'lib.sh',
+    build_by_default: want_tests != false,
+    input: 'lib.sh.in',
+    output: 'lib.sh',
+    command: [
+        meson_render_jinja2,
+        config_h,
+        '@INPUT@',
+        '@OUTPUT@',
+    ])
+
+test_programs += custom_target(
    'main.sh',
     build_by_default: want_tests != false,
     input: 'main.sh.in',
