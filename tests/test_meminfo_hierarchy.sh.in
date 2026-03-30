@@ -4,32 +4,36 @@
 set -eu
 [ -n "${DEBUG:-}" ] && set -x
 
-[ "$(id -u)" -eq 0 ]
+[ "$(id -u)" -eq 0 ] || { echo "Error: test should be run as root" >&2; exit 1; }
 
-grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup '
+grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup ' || { echo "Error: cgroup2 is expected" >&2; exit 1; }
 
-[ -d /sys/fs/cgroup ]
+[ -d /sys/fs/cgroup ] || { echo "Error: cgroupfs must be accessible at /sys/fs/cgroup" >&2; exit 1; }
 
 LXCFSDIR=${LXCFSDIR:-/var/lib/incus-lxcfs}
 mempath=/sys/fs/cgroup
+
+# Test requires at least 256 MiB of swap to function
+system_swap_size=$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)
+[ "$system_swap_size" -ge "$((256 * 1024))" ] || { echo "Error: swap < 256 MiB" >&2; exit 1; }
 
 #
 # We are going to make the following cgroup tree:
 # root
 #   |
-#   |_ cg1 (+memory, limit 500 MiB)
+#   |_ cg1 (+memory, limit 500 MiB, swap 256 MiB)
 #       |
-#       |_ cg2 (+memory, limit 600 MiB)
+#       |_ cg2 (+memory, limit 600 MiB, swap 300 MiB)
 #           |
 #           |_ cg3 (+memory, limit max, cgroup namespace root cgroup)
 #               |
 #               |_ init.scope -> init process
 #               |
-#               |_ cg4 (+memory, limit 400 MiB)
+#               |_ cg4 (+memory, limit 400 MiB, swap 200 MiB)
 #                   |
 #                   |_ cg5 (+memory, limit max)
 #                       |
-#                       |_ cg6 (+memory, limit 900 MiB)
+#                       |_ cg6 (+memory, limit 900 MiB, swap 450 MiB)
 #                           |
 #                           |_ cg7 -> process requesting ${LXCFSDIR}/proc/meminfo
 #
@@ -84,9 +88,11 @@ if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
 	mkdir -p "${mempath}/${cg1}/${cg2}/${cg3}/${cg4}/${cg5}/${cg6}/${cg7}"
 
 	echo $((500*256*4096)) > "${mempath}/${cg1}/memory.max"
+	echo $((256*256*4096)) > "${mempath}/${cg1}/memory.swap.max"
 	echo '+memory' > "${mempath}/${cg1}/cgroup.subtree_control"
 
 	echo $((600*256*4096)) > "${mempath}/${cg1}/${cg2}/memory.max"
+	echo $((300*256*4096)) > "${mempath}/${cg1}/${cg2}/memory.swap.max"
 	echo '+memory' > "${mempath}/${cg1}/${cg2}/cgroup.subtree_control"
 
 	# no limit on cg3
@@ -144,44 +150,50 @@ cat ${mempath}/cgroup.procs
 echo '+memory' > "${mempath}/cgroup.subtree_control"
 
 echo $((400*256*4096)) > "${mempath}/${cg4}/memory.max"
+echo $((200*256*4096)) > "${mempath}/${cg4}/memory.swap.max"
 echo '+memory' > "${mempath}/${cg4}/cgroup.subtree_control"
 
 # no limit on cg5
 echo '+memory' > "${mempath}/${cg4}/${cg5}/cgroup.subtree_control"
 
 echo $((900*256*4096)) > "${mempath}/${cg4}/${cg5}/${cg6}/memory.max"
+echo $((450*256*4096)) > "${mempath}/${cg4}/${cg5}/${cg6}/memory.swap.max"
 echo '+memory' > "${mempath}/${cg4}/${cg5}/${cg6}/cgroup.subtree_control"
 
 echo "==> Reading /proc/meminfo from init process's cgroup"
 
 # awk sits in the same cgroup as init process
 mem_total_init=$(awk '/^MemTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_init=$(awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
 
 echo "==> Confirming that limit is correct"
 # While a limit on the container's root cgroup
 # is set too "max", we expect to get 500 MiB, because LXCFS
 # goes up the cgroup tree and tries to find a minimal value.
 [ "$mem_total_init" -eq 512000 ]
+[ "$swap_total_init" -eq 262144 ]
 
 echo "==> Testing /proc/meminfo with sub-cgroup"
 
-read_memtotal_in_cg() {
+do_in_cg() {
 	cg="$1"
 	shift
 
-	sh -c "$(cat <<EOF
+	sh -c '
 		set -eu
-		echo \$\$ > "$cg/cgroup.procs"
-		awk '/^MemTotal:/ { print \$2 }' "${LXCFSDIR}/proc/meminfo"
-EOF
-	)"
+		echo $$ > "$1/cgroup.procs"
+		shift
+		exec "$@"
+	' _ "$cg" "$@"
 }
 
 # A process, requesting asking LXCFS will be sitting in some nested
 # cgroup *under* cg3 (like it usually happens in systemd-based systems).
-mem_total_ct_process=$(read_memtotal_in_cg "${mempath}/${cg4}/${cg5}/${cg6}/${cg7}")
+mem_total_ct_process=$(do_in_cg "${mempath}/${cg4}/${cg5}/${cg6}/${cg7}" awk '/^MemTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_ct_process=$(do_in_cg "${mempath}/${cg4}/${cg5}/${cg6}/${cg7}" awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
 
 echo "==> Confirming same limits"
 [ "$mem_total_init" -eq "$mem_total_ct_process" ]
+[ "$swap_total_init" -eq "$swap_total_ct_process" ]
 
 FAILED=0
