@@ -1,0 +1,106 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+check_requirements() {
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		[ "$(id -u)" -eq 0 ] || { echo "Error: test should be run as root" >&2; exit 1; }
+
+		# a naive but simple check if we are inside user namespace
+		[ "$(readlink /proc/1/ns/user)" = "$(readlink /proc/self/ns/user)" ] || { echo "Error: test should be run in init_user_ns" >&2; exit 1; }
+
+		grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup ' || { echo "Error: cgroup2 is expected" >&2; exit 1; }
+
+		[ -d /sys/fs/cgroup ] || { echo "Error: cgroupfs must be accessible at /sys/fs/cgroup" >&2; exit 1; }
+	fi
+}
+
+init_cgroups() {
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		LXCFS_TEST_LOCKFILE_CT_INIT_READY="$(mktemp)"
+		export LXCFS_TEST_LOCKFILE_CT_INIT_READY
+		LXCFS_TEST_LOCKFILE_PARENT_LEFT_CGROUP="$(mktemp)"
+		export LXCFS_TEST_LOCKFILE_PARENT_LEFT_CGROUP
+
+		cg1="$(uuidgen).$$"
+		export cg1
+		export cg2=2
+		export cg3=3
+		export cg4=4
+		export cg5=5
+		export cg6=6
+		export cg7=7
+	fi
+}
+
+clean_cgroups() {
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		rm -f "${LXCFS_TEST_LOCKFILE_CT_INIT_READY}" "${LXCFS_TEST_LOCKFILE_PARENT_LEFT_CGROUP}"
+		find "/sys/fs/cgroup/${cg1}" -depth -type d -exec rmdir {} + 2>/dev/null || true
+	fi
+}
+
+setup_container() {
+	cgroups_setup_callback="$1"
+	shift
+
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		echo "==> Setting up cgroups"
+
+		find "/sys/fs/cgroup/${cg1}" -depth -type d -exec rmdir {} + 2>/dev/null || true
+
+		mkdir -p "/sys/fs/cgroup/${cg1}/${cg2}/${cg3}/${cg4}/${cg5}/${cg6}/${cg7}"
+
+		cgroups_setup_callback
+
+		# no limit on cg3
+
+		# Let's put current process into cg1/cg2/cg3
+		# and create cgroup namespace, so cg3 becomes cgroup tree
+		# root in that namespace.
+		OLD_TEST_CGROUP=$(awk -F: '{ print $3 }' /proc/$$/cgroup)
+		echo $$ > "/sys/fs/cgroup/${cg1}/${cg2}/${cg3}/cgroup.procs"
+
+		LXCFS_TEST_IN_CT=1 unshare -C -fmp --mount-proc "$0" &
+		UNSHARE_PID=$!
+
+		# wait until unshare spawns init process
+		while [ ! -s "${LXCFS_TEST_LOCKFILE_CT_INIT_READY}" ]; do sleep 0.1; done
+
+		# we must escape cg1/cg2/cg3, otherwise it won't be possible
+		# to enable memory controller for child cgroups
+		echo $UNSHARE_PID > "/sys/fs/cgroup/${OLD_TEST_CGROUP}/cgroup.procs"
+		echo $$ > "/sys/fs/cgroup/${OLD_TEST_CGROUP}/cgroup.procs"
+
+		# signal init process that we have left cgroup
+		# and it can do its job to setup everything inside
+		echo "done" > "${LXCFS_TEST_LOCKFILE_PARENT_LEFT_CGROUP}"
+
+		wait $UNSHARE_PID
+		FAILED=$?
+		exit 0
+	fi
+
+	echo "done" > "${LXCFS_TEST_LOCKFILE_CT_INIT_READY}"
+	while [ ! -s "${LXCFS_TEST_LOCKFILE_PARENT_LEFT_CGROUP}" ]; do sleep 0.1; done
+
+	# assume that we are init process in PID namespace
+	[ $$ -eq 1 ]
+}
+
+do_in_cg() {
+	cg="$1"
+	shift
+
+	sh -c '
+		set -eu
+		echo $$ > "$1/cgroup.procs"
+		shift
+		exec "$@"
+	' _ "$cg" "$@"
+}
+
+shell_breakpoint() {
+	# we have to reopen stdin
+	exec 0<>/proc/self/fd/1
+	sh || true
+}

@@ -1,0 +1,143 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+. "$(dirname "$0")/lib.sh"
+
+check_requirements
+
+if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+	# Test requires at least 4 cpus
+	[ "$(nproc)" -ge "4" ] || { echo "Error: nproc < 4" >&2; exit 1; }
+fi
+
+LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
+
+#
+# We are going to make the following cgroup tree:
+# root
+#   |
+#   |_ cg1 (+cpuset, cpus 0,2,3)
+#       |
+#       |_ cg2 (+cpuset, 0,1,2,3)
+#           |
+#           |_ cg3 (+cpuset, limit max, cgroup namespace root cgroup)
+#               |
+#               |_ init.scope -> init process
+#               |
+#               |_ cg4 (+cpuset, 0,2)
+#                   |
+#                   |_ cg5 (+cpuset, limit max)
+#                       |
+#                       |_ cg6 (+cpuset, cpus 0,1,2,3)
+#                           |
+#                           |_ cg7 -> process requesting ${LXCFSDIR}/proc/meminfo
+#
+# This tree mimics what we can have with systemd & system container.
+#
+# LXCFS should completely ignore everything under cg3, and then go up the tree
+# and determine that effective cpu limit for the container is 3 CPUs.
+#
+# To achive this for process sitting in cg7, LXCFS should:
+# 1. Find init process of the container
+# 2. Determine its cgroup (cg1/cg2/cg3/init.scope)
+# 3. Find container's cgroup (cg1/cg2/cg3)
+# 4. Go up the tree and find minimal limit -> 3 CPUs
+#
+
+init_cgroups
+
+cleanup() {
+	clean_cgroups
+
+	if [ $FAILED -eq 1 ]; then
+		exit 1
+	fi
+	exit 0
+}
+
+FAILED=1
+trap cleanup EXIT HUP INT TERM
+
+cgroups_setup_callback() {
+	# Configure cgroup limits from the "host" side
+	echo '0,2,3' > "/sys/fs/cgroup/${cg1}/cpuset.cpus"
+	echo '+cpuset' > "/sys/fs/cgroup/${cg1}/cgroup.subtree_control"
+
+	echo '0,1,2,3' > "/sys/fs/cgroup/${cg1}/${cg2}/cpuset.cpus"
+	echo '+cpuset' > "/sys/fs/cgroup/${cg1}/${cg2}/cgroup.subtree_control"
+}
+
+#
+# This will create MNT/PID/CGROUP namespaces and re-execute (!) current script
+# inside.
+#
+setup_container cgroups_setup_callback
+
+#
+# If we reach this point, it means that current process is sitting in
+# PID/MNT/CGROUP namespace and "root" cgroup is /sys/fs/cgroup/${cg1}/${cg2}/${cg3}
+# Now we need to unmount host cgroupfs and mount our own to see cgroup-namespaced
+# cgroupfs view.
+#
+
+umount -l /sys/fs/cgroup
+mount -t cgroup2 cgroup2 -o nsdelegate,memory_recursiveprot /sys/fs/cgroup
+
+# Let's move init process to the init.scope cgroup.
+# We can't keep init process in the root cgroup (cg1/cg2/cg3), because
+# we can't enable cpuset controller in it until there is a process sitting.
+# See "No Internal Process Constraint" rule in kernel doc.
+mkdir "/sys/fs/cgroup/init.scope"
+echo 1 > "/sys/fs/cgroup/init.scope/cgroup.procs"
+# Finally, we can enable cpuset controller in root cgroup of the container (cg1/cg2/cg3)
+cat /sys/fs/cgroup/cgroup.procs
+echo '+cpuset' > "/sys/fs/cgroup/cgroup.subtree_control"
+
+echo '0,2' > "/sys/fs/cgroup/${cg4}/cpuset.cpus"
+echo '+cpuset' > "/sys/fs/cgroup/${cg4}/cgroup.subtree_control"
+
+# no limit on cg5
+echo '+cpuset' > "/sys/fs/cgroup/${cg4}/${cg5}/cgroup.subtree_control"
+
+echo '0,1,2,3' > "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/cpuset.cpus"
+echo '+cpuset' > "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/cgroup.subtree_control"
+
+echo "==> Reading nproc from init process's cgroup"
+
+# nproc uses sched_getaffinity() and LXCFS can affect its result
+nproc_init=$(nproc)
+
+echo "==> Confirming that nproc value is correct"
+
+[ "$nproc_init" -eq 3 ]
+
+echo "==> Reading nproc from within sub-cgroup"
+
+nproc_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" nproc)
+
+echo "==> Confirming that nproc value is correct"
+
+# We expect 2, not 3, because nproc uses sched_getaffinity(), and we have
+# '0,2' set in cg4.
+[ "$nproc_ct_process" -eq 2 ]
+
+echo "==> Reading /proc/stat from init process's cgroup"
+
+cpus_num_init=$(grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+
+echo "==> Confirming that CPU number in /proc/stat is correct"
+
+[ "$cpus_num_init" -eq 3 ]
+
+echo "==> Reading /proc/stat from within sub-cgroup"
+
+cpus_num_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+
+echo "==> Confirming that CPU number in /proc/stat is correct"
+
+[ "$cpus_num_init" -eq "$cpus_num_ct_process" ]
+
+FAILED=0
