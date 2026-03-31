@@ -8,9 +8,11 @@ set -eu
 
 check_requirements
 
-# Test requires at least 256 MiB of swap to function
-system_swap_size=$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)
-[ "$system_swap_size" -ge "$((256 * 1024))" ] || { echo "Error: swap < 256 MiB" >&2; exit 1; }
+if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+	# Test requires at least 256 MiB of swap to function
+	system_swap_size=$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)
+	[ "$system_swap_size" -ge "$((256 * 1024))" ] || { echo "Error: swap < 256 MiB" >&2; exit 1; }
+fi
 
 LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
 

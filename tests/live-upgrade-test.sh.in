@@ -96,6 +96,8 @@ RUNTESTS() {
 	RUNTEST "${dirname}"/test-cpusetrange
 	TESTCASE="meminfo hierarchy"
 	UNSHARE=0 RUNTEST "${dirname}"/test_meminfo_hierarchy.sh
+	TESTCASE="cpuset hierarchy"
+	UNSHARE=0 RUNTEST "${dirname}"/test_cpuset_hierarchy.sh
 
 	TESTCASE="SIGUSR2 virtualization mode switching"
 	echo "==> Switching to non-virtualization mode"

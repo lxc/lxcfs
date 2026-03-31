@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: LGPL-2.1+
 
 check_requirements() {
-	[ "$(id -u)" -eq 0 ] || { echo "Error: test should be run as root" >&2; exit 1; }
+	if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+		[ "$(id -u)" -eq 0 ] || { echo "Error: test should be run as root" >&2; exit 1; }
 
-	# a naive but simple check if we are inside user namespace
-	[ "$(readlink /proc/1/ns/user)" = "$(readlink /proc/self/ns/user)" ] || { echo "Error: test should be run in init_user_ns" >&2; exit 1; }
+		# a naive but simple check if we are inside user namespace
+		[ "$(readlink /proc/1/ns/user)" = "$(readlink /proc/self/ns/user)" ] || { echo "Error: test should be run in init_user_ns" >&2; exit 1; }
 
-	grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup ' || { echo "Error: cgroup2 is expected" >&2; exit 1; }
+		grep -F 'cgroup2 cgroup2' /proc/1/mountinfo | grep -qF ' /sys/fs/cgroup ' || { echo "Error: cgroup2 is expected" >&2; exit 1; }
 
-	[ -d /sys/fs/cgroup ] || { echo "Error: cgroupfs must be accessible at /sys/fs/cgroup" >&2; exit 1; }
+		[ -d /sys/fs/cgroup ] || { echo "Error: cgroupfs must be accessible at /sys/fs/cgroup" >&2; exit 1; }
+	fi
 }
 
 init_cgroups() {
