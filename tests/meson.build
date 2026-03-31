@@ -61,6 +61,18 @@ test_programs += custom_target(
     ])
 
 test_programs += custom_target(
+    'test_cpu_cfs_hierarchy.sh',
+    build_by_default: want_tests != false,
+    input: 'test_cpu_cfs_hierarchy.sh.in',
+    output: 'test_cpu_cfs_hierarchy.sh',
+    command: [
+        meson_render_jinja2,
+        config_h,
+        '@INPUT@',
+        '@OUTPUT@',
+    ])
+
+test_programs += custom_target(
    'test_proc',
     build_by_default: want_tests != false,
     input: 'test_proc.in',

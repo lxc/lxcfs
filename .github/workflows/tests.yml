@@ -43,6 +43,12 @@ jobs:
 
           echo "::endgroup::"
 
+          echo "::group::Running the testsuite with --enable-cfs"
+
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" lxcfs_enable_cfs=1 build/tests/main.sh
+
+          echo "::endgroup::"
+
   upgrade-test:
     name: Upgrade test
     strategy:

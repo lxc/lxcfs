@@ -47,8 +47,8 @@ if [ -x ${lxcfs} ]; then
 	else
 		export LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}"
 	fi
-	echo "=> Spawning ${lxcfs} ${LXCFSDIR}"
-	${lxcfs} --enable-psi-poll -p "${pidfile}" "${LXCFSDIR}" &
+	echo "=> Spawning ${lxcfs} ${lxcfs_enable_cfs:+--enable-cfs} ${LXCFSDIR}"
+	${lxcfs} --enable-psi-poll ${lxcfs_enable_cfs:+--enable-cfs} -p "${pidfile}" "${LXCFSDIR}" &
 	LXCFSPID=$!
 else
 	UNSHARE=0
@@ -91,6 +91,10 @@ TESTCASE="meminfo hierarchy"
 UNSHARE=0 RUNTEST "${dirname}"/test_meminfo_hierarchy.sh
 TESTCASE="cpuset hierarchy"
 UNSHARE=0 RUNTEST "${dirname}"/test_cpuset_hierarchy.sh
+if [ -n "${lxcfs_enable_cfs:-}" ]; then
+	TESTCASE="cpu cfs hierarchy"
+	UNSHARE=0 RUNTEST "${dirname}"/test_cpu_cfs_hierarchy.sh
+fi
 TESTCASE="liblxcfs reloading"
 UNSHARE=0 RUNTEST "${dirname}"/test_reload.sh
 TESTCASE="SIGUSR2 virtualization mode switching"

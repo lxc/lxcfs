@@ -1,0 +1,127 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+. "$(dirname "$0")/lib.sh"
+
+check_requirements
+
+if [ -z "${LXCFS_TEST_IN_CT:-}" ]; then
+	# Test requires at least 4 cpus
+	[ "$(nproc)" -ge "4" ] || { echo "Error: nproc < 4" >&2; exit 1; }
+fi
+
+LXCFSDIR=${LXCFSDIR:-/var/lib/lxcfs}
+
+#
+# We are going to make the following cgroup tree:
+# root
+#   |
+#   |_ cg1 (+cpu, cpu.max '300000 100000')
+#       |
+#       |_ cg2 (+cpu, cpu.max '400000 100000')
+#           |
+#           |_ cg3 (+cpu, limit max, cgroup namespace root cgroup)
+#               |
+#               |_ init.scope -> init process
+#               |
+#               |_ cg4 (+cpu, cpu.max '200000 100000')
+#                   |
+#                   |_ cg5 (+cpu, limit max)
+#                       |
+#                       |_ cg6 (+cpu, cpu.max '400000 100000')
+#                           |
+#                           |_ cg7 -> process requesting ${LXCFSDIR}/proc/meminfo
+#
+# This tree mimics what we can have with systemd & system container.
+#
+# LXCFS should completely ignore everything under cg3, and then go up the tree
+# and determine that effective cpu limit for the container is 3 CPUs.
+#
+# To achive this for process sitting in cg7, LXCFS should:
+# 1. Find init process of the container
+# 2. Determine its cgroup (cg1/cg2/cg3/init.scope)
+# 3. Find container's cgroup (cg1/cg2/cg3)
+# 4. Go up the tree and find minimal limit -> 3 CPUs
+#
+
+init_cgroups
+
+cleanup() {
+	clean_cgroups
+
+	if [ $FAILED -eq 1 ]; then
+		exit 1
+	fi
+	exit 0
+}
+
+FAILED=1
+trap cleanup EXIT HUP INT TERM
+
+cgroups_setup_callback() {
+	# Configure cgroup limits from the "host" side
+	echo '300000 100000' > "/sys/fs/cgroup/${cg1}/cpu.max"
+	echo '+cpu' > "/sys/fs/cgroup/${cg1}/cgroup.subtree_control"
+
+	echo '400000 100000' > "/sys/fs/cgroup/${cg1}/${cg2}/cpu.max"
+	echo '+cpu' > "/sys/fs/cgroup/${cg1}/${cg2}/cgroup.subtree_control"
+
+	# TODO: remove after fixing https://github.com/lxc/lxcfs/issues/688
+	echo '300000 100000' > "/sys/fs/cgroup/${cg1}/${cg2}/${cg3}/cpu.max"
+}
+
+#
+# This will create MNT/PID/CGROUP namespaces and re-execute (!) current script
+# inside.
+#
+setup_container cgroups_setup_callback
+
+#
+# If we reach this point, it means that current process is sitting in
+# PID/MNT/CGROUP namespace and "root" cgroup is /sys/fs/cgroup/${cg1}/${cg2}/${cg3}
+# Now we need to unmount host cgroupfs and mount our own to see cgroup-namespaced
+# cgroupfs view.
+#
+
+umount -l /sys/fs/cgroup
+mount -t cgroup2 cgroup2 -o nsdelegate,memory_recursiveprot /sys/fs/cgroup
+
+# Let's move init process to the init.scope cgroup.
+# We can't keep init process in the root cgroup (cg1/cg2/cg3), because
+# we can't enable cpu controller in it until there is a process sitting.
+# See "No Internal Process Constraint" rule in kernel doc.
+mkdir "/sys/fs/cgroup/init.scope"
+echo 1 > "/sys/fs/cgroup/init.scope/cgroup.procs"
+# Finally, we can enable cpu controller in root cgroup of the container (cg1/cg2/cg3)
+cat /sys/fs/cgroup/cgroup.procs
+echo '+cpu' > "/sys/fs/cgroup/cgroup.subtree_control"
+
+echo '200000 100000' > "/sys/fs/cgroup/${cg4}/cpu.max"
+echo '+cpu' > "/sys/fs/cgroup/${cg4}/cgroup.subtree_control"
+
+# no limit on cg5
+echo '+cpu' > "/sys/fs/cgroup/${cg4}/${cg5}/cgroup.subtree_control"
+
+echo '400000 100000' > "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/cpu.max"
+echo '+cpu' > "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/cgroup.subtree_control"
+
+echo "==> Reading /proc/stat from init process's cgroup"
+
+cpus_num_init=$(grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+
+echo "==> Confirming that CPU number in /proc/stat is correct"
+
+[ "$cpus_num_init" -eq 3 ]
+
+echo "==> Reading /proc/stat from within sub-cgroup"
+
+cpus_num_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+
+echo "==> Confirming that CPU number in /proc/stat is correct"
+
+[ "$cpus_num_init" -eq "$cpus_num_ct_process" ]
+
+FAILED=0
