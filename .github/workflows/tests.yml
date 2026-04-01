@@ -38,7 +38,6 @@ jobs:
         run: |
           echo "::group::Running the testsuite"
 
-          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
 
           echo "::endgroup::"
@@ -48,6 +47,47 @@ jobs:
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" lxcfs_enable_cfs=1 build/tests/main.sh
 
           echo "::endgroup::"
+
+  codecov:
+    name: Codecov
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Build LXCFS
+        uses: ./.github/actions/build
+        with:
+          compiler: gcc
+          os: ubuntu-24.04
+          coverage: true
+
+      - name: Test
+        env:
+          CC: ${{ matrix.compiler }}
+          LIBFUSE: fuse3
+        run: |
+          echo "::group::Running the testsuite"
+
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
+
+          echo "::endgroup::"
+
+          echo "::group::Running the testsuite with --enable-cfs"
+
+          sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" lxcfs_enable_cfs=1 build/tests/main.sh
+
+          echo "::endgroup::"
+
+          ninja -C build coverage
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   upgrade-test:
     name: Upgrade test
@@ -99,7 +139,6 @@ jobs:
           cd $UPSTREAM_LXCFS_TREE
           [ -f build/tests/live-upgrade-test.sh ] || exit 0
 
-          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/live-upgrade-test.sh "${NEW_LXCFS_TREE}"
 
   buffer-truncation-test:
@@ -142,7 +181,6 @@ jobs:
         run: |
           echo "::group::Running the testsuite with tiny buffer"
 
-          echo 1 | sudo tee /sys/fs/cgroup/cpuset/cgroup.clone_children || true
           sudo -E PATH="${PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" build/tests/main.sh
 
           echo "::endgroup::"

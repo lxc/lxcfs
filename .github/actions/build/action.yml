@@ -5,6 +5,9 @@ inputs:
     required: true
   os:
     required: true
+  coverage:
+    required: false
+    default: false
 
 runs:
   using: "composite"
@@ -21,6 +24,10 @@ runs:
             meson \
             pkg-config \
             uuid-runtime
+
+        if [ "${{ inputs.coverage }}" = "true" ]; then
+            sudo apt-get install -qq lcov
+        fi
 
         echo "::endgroup::"
 
@@ -49,7 +56,8 @@ runs:
             -Dmocks=true \
             -Dinit-script=systemd \
             -Dprefix=/usr \
-            -Db_sanitize=address,undefined
+            -Db_sanitize=${{ inputs.coverage == 'true' && 'none' || 'address,undefined' }} \
+            -Db_coverage=${{ inputs.coverage }}
         meson compile -C build
 
         echo "::endgroup::"
