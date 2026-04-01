@@ -18,12 +18,12 @@ FAILED=1
 
 cleanup() {
   if [ ${lxcfspid} -ne -1 ]; then
-    kill -9 ${lxcfspid}
+    kill -TERM ${lxcfspid}
     count=1
     while [ -d "${testdir}"/proc ] && [ $count -lt 5 ]; do
       sleep 1
     done
-    umount -l "${testdir}"
+    umount -l "${testdir}" || true
   fi
   rm -rf "${testdir}" "${installdir}"
   rm -f /tmp/lxcfs-iwashere

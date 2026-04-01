@@ -23,7 +23,7 @@ cleanup() {
 	echo "=> Cleaning up"
 	set +e
 	if [ "$LXCFSPID" -ne -1 ]; then
-		kill -9 "$LXCFSPID"
+		kill -TERM "$LXCFSPID"
 	fi
 	if [ "${LXCFSDIR}" != "/var/lib/lxcfs" ]; then
 		umount -l "${LXCFSDIR}"
