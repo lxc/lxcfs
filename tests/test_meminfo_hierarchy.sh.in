@@ -114,26 +114,30 @@ echo "==> Reading /proc/meminfo from init process's cgroup"
 
 # awk sits in the same cgroup as init process
 mem_total_init=$(awk '/^MemTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
-swap_total_init=$(awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_init_meminfo=$(awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_init_swaps=$(awk 'NR > 1 { print $3 }' "${LXCFSDIR}/proc/swaps")
 
 echo "==> Confirming that limit is correct"
 # While a limit on the container's root cgroup
 # is set too "max", we expect to get 500 MiB, because LXCFS
 # goes up the cgroup tree and tries to find a minimal value.
 [ "$mem_total_init" -eq 512000 ]
-[ "$swap_total_init" -eq 262144 ]
+[ "$swap_total_init_meminfo" -eq 262144 ]
+[ "$swap_total_init_swaps" -eq 262144 ]
 
 echo "==> Testing /proc/meminfo with sub-cgroup"
 
 # A process, requesting asking LXCFS will be sitting in some nested
 # cgroup *under* cg3 (like it usually happens in systemd-based systems).
 mem_total_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" awk '/^MemTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
-swap_total_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_ct_process_meminfo=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" awk '/^SwapTotal:/ { print $2 }' "${LXCFSDIR}/proc/meminfo")
+swap_total_ct_process_swaps=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" awk 'NR > 1 { print $3 }' "${LXCFSDIR}/proc/swaps")
 
 #shell_breakpoint
 
 echo "==> Confirming same limits"
 [ "$mem_total_init" -eq "$mem_total_ct_process" ]
-[ "$swap_total_init" -eq "$swap_total_ct_process" ]
+[ "$swap_total_ct_process_meminfo" -eq "$swap_total_ct_process_swaps" ]
+[ "$swap_total_init_meminfo" -eq "$swap_total_ct_process_meminfo" ]
 
 FAILED=0
