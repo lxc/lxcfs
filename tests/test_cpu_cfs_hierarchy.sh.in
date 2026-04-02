@@ -68,9 +68,6 @@ cgroups_setup_callback() {
 
 	echo '400000 100000' > "/sys/fs/cgroup/${cg1}/${cg2}/cpu.max"
 	echo '+cpu' > "/sys/fs/cgroup/${cg1}/${cg2}/cgroup.subtree_control"
-
-	# TODO: remove after fixing https://github.com/lxc/lxcfs/issues/688
-	echo '300000 100000' > "/sys/fs/cgroup/${cg1}/${cg2}/${cg3}/cpu.max"
 }
 
 #
