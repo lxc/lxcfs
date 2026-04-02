@@ -14,9 +14,9 @@
 /*
  * Helper functions for cpuset_in-set
  */
-static char *cpuset_nexttok(const char *c)
+static const char *cpuset_nexttok(const char *c)
 {
-	char *r;
+	const char *r;
 
 	if (!strlen(c))
 		return NULL;
