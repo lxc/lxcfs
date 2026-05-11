@@ -700,7 +700,7 @@ static void *lxcfs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 	return fuse_get_context()->private_data;
 }
 
-const struct fuse_operations lxcfs_ops = {
+struct fuse_operations lxcfs_ops = {
 	.access		= lxcfs_access,
 	.chmod		= lxcfs_chmod,
 	.chown		= lxcfs_chown,
@@ -719,7 +719,6 @@ const struct fuse_operations lxcfs_ops = {
 	.truncate	= lxcfs_truncate,
 	.write		= lxcfs_write,
 	.readlink	= lxcfs_readlink,
-	.poll		= lxcfs_poll,
 
 	.create		= NULL,
 	.destroy	= NULL,
@@ -1051,6 +1050,9 @@ int main(int argc, char *argv[])
 
 	if (load_use && start_loadavg() != 0)
 		goto out;
+
+	if (opts->psi_poll_on)
+		lxcfs_ops.poll = lxcfs_poll;
 
 	if (!fuse_main(fuse_argc, fuse_argv, &lxcfs_ops, opts))
 		ret = EXIT_SUCCESS;
