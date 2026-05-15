@@ -540,8 +540,23 @@ int lxcfs_write(const char *path, const char *buf, size_t size, off_t offset,
 int lxcfs_poll(const char *path, struct fuse_file_info *fi,
 	       struct fuse_pollhandle *ph, unsigned *reventsp)
 {
+	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = fc->private_data;
 	int ret;
 	enum lxcfs_virt_t type;
+
+	/*
+	 * Note, that if fuse daemon returns ENOSYS once, then
+	 * kernel caches this result in fm->fc->no_poll and never
+	 * sends FUSE_POLL again. It is not a problem for us now,
+	 * because we only need poll() for PSI.
+	 *
+	 * See #726 on GitHub.
+	 */
+	if (!opts->psi_poll_on) {
+		fuse_pollhandle_destroy(ph);
+		return -ENOSYS;
+	}
 
 	type = file_info_type(fi);
 
