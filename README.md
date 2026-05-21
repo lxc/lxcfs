@@ -87,6 +87,16 @@ The recommended command to run lxcfs is:
 A container runtime wishing to use `LXCFS` should then bind mount the
 approriate files into the correct places on container startup.
 
+### Overriding the cgroup used for virtualization
+
+When `LXCFS` can't resolve the calling process to the cgroup you want to
+virtualize against, you can pin virtualization to a specific cgroup path:
+
+    sudo lxcfs --cgroup-override=/my-service.slice/my-cgroup /var/lib/lxcfs
+
+The override applies to procfs/sysfs virtualization and uses the provided
+cgroup path instead of resolving it from the caller's PID.
+
 ### LXC
 In order to use lxcfs with systemd-based containers, you can either use
 LXC 1.1 in which case it should work automatically, or otherwise, copy

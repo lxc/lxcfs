@@ -996,18 +996,13 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cg = get_pid_cgroup(initpid, "cpuset");
+	cg = resolve_virtualized_cgroup(opts, fc->pid, "cpuset");
 	if (!cg)
 		return read_file_fuse("proc/cpuinfo", buf, size, d);
-	prune_init_slice(cg);
-	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	cpu_cg = resolve_virtualized_cgroup(opts, fc->pid, "cpu");
 	if (!cpu_cg)
 		return read_file_fuse("proc/cpuinfo", buf, size, d);
-	prune_init_slice(cpu_cg);
+
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
 		return 0;

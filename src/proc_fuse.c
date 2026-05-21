@@ -496,6 +496,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	__do_free char *cgroup = NULL, *memusage_str = NULL,
 		 *memswusage_str = NULL, *memswpriority_str = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0,
@@ -526,14 +527,9 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 		return total_len;
 	}
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "memory");
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, "memory");
 	if (!cgroup)
 		return read_file_fuse("/proc/swaps", buf, size, d);
-	prune_init_slice(cgroup);
 
 	ret = get_min_memlimit(cgroup, false, &memlimit);
 	if (ret < 0)
@@ -654,6 +650,7 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	struct lxcfs_diskstats stats = {};
 	/* helper fields */
@@ -687,14 +684,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cg = get_pid_cgroup(initpid, "blkio");
+	cg = resolve_virtualized_cgroup(opts, fc->pid, "blkio");
 	if (!cg)
 		return read_file_fuse("/proc/diskstats", buf, size, d);
-	prune_init_slice(cg);
 
 	ret = cgroup_ops->get_io_serviced(cgroup_ops, cg, &io_serviced_str);
 	if (ret < 0) {
@@ -864,18 +856,14 @@ static inline void iwashere(void)
  */
 static double get_reaper_busy(pid_t task)
 {
+	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	__do_free char *cgroup = NULL, *usage_str = NULL;
 	uint64_t usage = 0;
-	pid_t initpid;
 
-	initpid = lookup_initpid_in_store(task);
-	if (initpid <= 0)
-		return 0;
-
-	cgroup = get_pid_cgroup(initpid, "cpuacct");
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, "cpuacct");
 	if (!cgroup)
 		return 0;
-	prune_init_slice(cgroup);
 
 	if (!cgroup_ops->get(cgroup_ops, "cpuacct", cgroup, "cpuacct.usage", &usage_str))
 		return 0;
@@ -1095,26 +1083,26 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	cache = d->buf + CPUALL_MAX_SIZE;
 	cache_size = d->buflen - CPUALL_MAX_SIZE;
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
+	if (!(opts && opts->version >= 5 && opts->cgroup_override[0])) {
+		/*
+		 * when container run with host pid namespace initpid == 1, cgroup will "/"
+		 * we should return host os's /proc contents.
+		 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
+		 */
+		pid_t initpid = lookup_initpid_in_store(fc->pid);
+		if (initpid <= 1 || is_shared_pidns(initpid))
+			initpid = fc->pid;
+		if (initpid == 1)
+			return read_file_fuse("/proc/stat", buf, size, d);
+	}
 
-	/*
-	 * when container run with host pid namespace initpid == 1, cgroup will "/"
-	 * we should return host os's /proc contents.
-	 * in some case cpuacct_usage.all in "/" will larger then /proc/stat
-	 */
-	if (initpid == 1)
-		return read_file_fuse("/proc/stat", buf, size, d);
-
-	cg = get_pid_cgroup(initpid, "cpuset");
+	cg = resolve_virtualized_cgroup(opts, fc->pid, "cpuset");
 	if (!cg)
 		return read_file_fuse("/proc/stat", buf, size, d);
-	prune_init_slice(cg);
-	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	cpu_cg = resolve_virtualized_cgroup(opts, fc->pid, "cpu");
 	if (!cpu_cg)
 		return read_file_fuse("/proc/stat", buf, size, d);
-	prune_init_slice(cpu_cg);
+
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
 		return 0;
@@ -1409,6 +1397,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	bool wants_swap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_SWAP_ON);
 	bool wants_zswap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_ZSWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
@@ -1443,15 +1432,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	pid_t initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "memory");
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, "memory");
 	if (!cgroup)
 		return read_file_fuse("/proc/meminfo", buf, size, d);
-
-	prune_init_slice(cgroup);
 
 	/* memory limits */
 	ret = cgroup_ops->get_memory_current(cgroup_ops, cgroup, &memusage_str);
@@ -1654,11 +1637,11 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	__do_close int fd = -EBADF;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	size_t linelen = 0, total_len = 0;
 	char *cache;
 	size_t cache_size;
-	pid_t initpid;
 
 	if (offset) {
 		size_t left;
@@ -1682,15 +1665,9 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, "memory");
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, "memory");
 	if (!cgroup)
 		return read_file_fuse("/proc/slabinfo", buf, size, d);
-
-	prune_init_slice(cgroup);
 
 	fd = cgroup_ops->get_memory_slabinfo_fd(cgroup_ops, cgroup);
 	if (fd < 0)
@@ -1729,6 +1706,7 @@ static int proc_pressure_read(char *buf, size_t size, off_t offset,
 	__do_fclose FILE *f = NULL;
 	__do_close int fd = -EBADF;
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	size_t linelen = 0, total_len = 0;
 	char *cache;
@@ -1736,7 +1714,6 @@ static int proc_pressure_read(char *buf, size_t size, off_t offset,
 	char *fallback_path;
 	char *controller;
 	int (*get_pressure_fd)(struct cgroup_ops *ops, const char *cgroup);
-	pid_t initpid;
 
 	if (offset) {
 		size_t left;
@@ -1780,15 +1757,9 @@ static int proc_pressure_read(char *buf, size_t size, off_t offset,
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, controller);
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, controller);
 	if (!cgroup)
 		return read_file_fuse(fallback_path, buf, size, d);
-
-	prune_init_slice(cgroup);
 
 	fd = get_pressure_fd(cgroup_ops, cgroup);
 	if (fd < 0)
@@ -1967,6 +1938,7 @@ static int proc_psi_trigger_write(const char *path, const char *buf, size_t size
 				off_t offset, struct fuse_file_info *fi)
 {
 	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = fc->private_data;
 	bool psi_virtualization_enabled = lxcfs_has_opt(fc->private_data, LXCFS_PSI_POLL_ON);
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 	__do_free psi_trigger_t *t = NULL;
@@ -1974,7 +1946,6 @@ static int proc_psi_trigger_write(const char *path, const char *buf, size_t size
 	__do_close int fd = -EBADF;
 	char *controller;
 	int (*get_pressure_fd)(struct cgroup_ops *ops, const char *cgroup);
-	pid_t initpid;
 	char tmpbuf[32];
 	size_t tmpbuf_size;
 	bool psi_full;
@@ -2050,15 +2021,9 @@ static int proc_psi_trigger_write(const char *path, const char *buf, size_t size
 		return -EINVAL;
 	}
 
-	initpid = lookup_initpid_in_store(fc->pid);
-	if (initpid <= 1 || is_shared_pidns(initpid))
-		initpid = fc->pid;
-
-	cgroup = get_pid_cgroup(initpid, controller);
+	cgroup = resolve_virtualized_cgroup(opts, fc->pid, controller);
 	if (!cgroup)
 		return -EIO;
-
-	prune_init_slice(cgroup);
 
 	fd = get_pressure_fd(cgroup_ops, cgroup);
 	if (fd < 0)

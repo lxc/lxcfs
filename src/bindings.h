@@ -145,6 +145,12 @@ struct lxcfs_opts {
 	char runtime_path[PATH_MAX];
 	bool zswap_off;
 	bool psi_poll_on;
+	/*
+	 * When set, all procfs/sysfs virtualization uses this cgroup path
+	 * instead of resolving it from the calling process's PID.
+	 * Added in opts version 5.
+	 */
+	char cgroup_override[PATH_MAX];
 };
 
 typedef enum lxcfs_opt_t {
@@ -167,6 +173,21 @@ extern bool liblxcfs_memory_is_cgroupv2(void);
 extern bool liblxcfs_can_use_sys_cpu(void);
 extern bool liblxcfs_has_versioned_opts(void);
 extern __u32 liblxcfs_personality(void);
+
+/*
+ * resolve_virtualized_cgroup - Resolve the cgroup path used for
+ * procfs/sysfs virtualization.
+ *
+ * If --cgroup-override is set, returns a copy of that override path.
+ * Otherwise, resolves the cgroup from the requester's effective init PID
+ * for the given controller and normalizes the result for virtualization.
+ *
+ * Returns a newly allocated string on success, NULL on failure.
+ * Caller must free the returned string.
+ */
+extern char *resolve_virtualized_cgroup(struct lxcfs_opts *opts,
+				        pid_t requester_pid,
+				        const char *controller);
 
 static inline bool lxcfs_has_opt(struct lxcfs_opts *opts, lxcfs_opt_t opt)
 {

@@ -5,9 +5,54 @@ set -eu
 [ -n "${DEBUG:-}" ] && set -x
 
 PASS=0
+OVERRIDE_LXCFSDIR=
+OVERRIDE_PIDFILE=
+OVERRIDE_LXCFSPID=
 
 cleanup() {
+    if [ -n "${OVERRIDE_LXCFSPID}" ]; then
+        kill -9 ${OVERRIDE_LXCFSPID} 2>/dev/null || true
+    fi
+    if [ -n "${OVERRIDE_LXCFSDIR}" ] && mountpoint -q ${OVERRIDE_LXCFSDIR}; then
+        umount -l ${OVERRIDE_LXCFSDIR} 2>/dev/null || true
+    fi
+    if [ -n "${OVERRIDE_LXCFSDIR}" ]; then
+        rmdir ${OVERRIDE_LXCFSDIR} 2>/dev/null || true
+    fi
+    if [ -n "${OVERRIDE_PIDFILE}" ]; then
+        rm -f ${OVERRIDE_PIDFILE}
+    fi
     [ "$PASS" = "1" ] || (echo FAIL && exit 1)
+}
+
+join_cgroup_path() {
+    base=$1
+    child=$2
+
+    if [ "${base}" = "/" ]; then
+        printf '/%s' "${child}"
+    else
+        printf '%s/%s' "${base}" "${child}"
+    fi
+}
+
+spawn_override_lxcfs() {
+    override_cgroup=$1
+    count=1
+
+    OVERRIDE_LXCFSDIR=$(mktemp -d)
+    OVERRIDE_PIDFILE=$(mktemp)
+    {{LXCFS_BUILD_ROOT}}/lxcfs -f --enable-psi-poll --cgroup-override "${override_cgroup}" -p ${OVERRIDE_PIDFILE} ${OVERRIDE_LXCFSDIR} &
+    OVERRIDE_LXCFSPID=$!
+
+    while ! mountpoint -q ${OVERRIDE_LXCFSDIR}; do
+        sleep 1
+        if [ ${count} -gt 5 ]; then
+            echo "override lxcfs failed to start"
+            exit 1
+        fi
+        count=$((count + 1))
+    done
 }
 
 trap cleanup EXIT HUP INT TERM
@@ -30,12 +75,16 @@ mempath=${hierarchy_path}
 
 rmdir ${hierarchy_path}/lxcfs_test_proc 2>/dev/null || true
 mkdir ${hierarchy_path}/lxcfs_test_proc
+rmdir ${hierarchy_path}/lxcfs_test_proc_override 2>/dev/null || true
+mkdir ${hierarchy_path}/lxcfs_test_proc_override
+override_cgroup=/lxcfs_test_proc_override
 
 echo 1 > ${hierarchy_path}/lxcfs_test_proc/cgroup.procs
 
 echo '+cpu +cpuset +memory' > ${hierarchy_path}/cgroup.subtree_control
 
 echo $((64*1024*1024)) > ${mempath}/lxcfs_test_proc/memory.max
+echo $((32*1024*1024)) > ${mempath}/lxcfs_test_proc_override/memory.max
 echo 0 > ${cpupath}/lxcfs_test_proc/cpuset.cpus
 
 # Test that readdir on /proc basically works
@@ -82,6 +131,12 @@ done
 # Test meminfo
 echo "==> Testing /proc/meminfo"
 grep -q "^MemTotal.*65536 kB$" "${LXCFSDIR}"/proc/meminfo
+
+if [ -x {{LXCFS_BUILD_ROOT}}/lxcfs ]; then
+    echo "==> Testing --cgroup-override"
+    spawn_override_lxcfs "${override_cgroup}"
+    grep -q "^MemTotal.*32768 kB$" ${OVERRIDE_LXCFSDIR}/proc/meminfo
+fi
 
 # We don't support PSI triggers virtualization with old libfuse
 if [ "$LIBFUSE" != "fuse" ]; then
