@@ -30,6 +30,7 @@ static char *api_extensions[] = {
 	"cpuview_daemon",
 	"loadavg_daemon",
 	"pidfds",
+	"sys_cpu_masks",
 };
 
 static size_t nr_api_extensions = sizeof(api_extensions) / sizeof(*api_extensions);

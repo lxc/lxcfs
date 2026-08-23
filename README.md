@@ -20,6 +20,9 @@ such as:
 /proc/pressure/cpu
 /proc/pressure/memory
 /sys/devices/system/cpu/online
+/sys/devices/system/cpu/possible
+/sys/devices/system/cpu/present
+/sys/devices/system/cpu/offline
 ```
 
 are container aware such that the values displayed (e.g. in `/proc/uptime`)
