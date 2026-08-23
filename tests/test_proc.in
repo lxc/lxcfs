@@ -62,11 +62,10 @@ echo "==> Testing configured and present CPU masks"
 [ "$(cat "${LXCFSDIR}"/sys/devices/system/cpu/present)" = "$(cat ${cpupath}/lxcfs_test_proc/cpuset.cpus)" ]
 [ -z "$(cat "${LXCFSDIR}"/sys/devices/system/cpu/offline)" ]
 
-# Keep the host cpuN directories visible. This matches Linux CPU hotplug
-# semantics and the upstream decision in commit 0a0948b62d9d.
-host_cpu_dirs=$(find /sys/devices/system/cpu -maxdepth 1 -type d -name 'cpu[0-9]*' | wc -l)
+# Keep directory enumeration consistent with the virtual CPU masks. GNU
+# nproc --all counts these entries rather than reading possible.
 lxcfs_cpu_dirs=$(find "${LXCFSDIR}"/sys/devices/system/cpu -maxdepth 1 -type d -name 'cpu[0-9]*' | wc -l)
-[ "${lxcfs_cpu_dirs}" = "${host_cpu_dirs}" ]
+[ "${lxcfs_cpu_dirs}" = "1" ]
 
 # Test stat
 echo "==> Testing /proc/stat"

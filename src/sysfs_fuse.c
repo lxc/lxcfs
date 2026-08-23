@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <sched.h>
@@ -166,17 +167,69 @@ static int sys_devices_system_cpu_mask_getsize(const char *path)
         return do_cpuset_read(cg, cpu_cg, buf, buflen);
 }
 
+static int sys_devices_system_cpu_count(void)
+{
+	__do_free char *cg = NULL, *cpu_cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
+	pid_t initpid;
+
+	if (!cgroup_ops->can_use_cpuview(cgroup_ops) || !opts || !opts->use_cfs)
+		return 0;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return 0;
+	prune_init_slice(cg);
+
+	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	if (!cpu_cg)
+		return 0;
+	prune_init_slice(cpu_cg);
+
+	return max_cpu_count(cg, cpu_cg);
+}
+
+static bool is_cpu_directory(const char *name, int *cpu)
+{
+	char *end = NULL;
+	long value;
+
+	if (strncmp(name, "cpu", STRLITERALLEN("cpu")) != 0 ||
+	    !isdigit((unsigned char)name[STRLITERALLEN("cpu")]))
+		return false;
+
+	errno = 0;
+	value = strtol(name + STRLITERALLEN("cpu"), &end, 10);
+	if (errno != 0 || !end || *end != '\0' || value > INT_MAX)
+		return false;
+
+	*cpu = (int)value;
+	return true;
+}
+
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
 					 fuse_fill_dir_t filler)
 {
 	__do_closedir DIR *dirp = NULL;
 	struct dirent *dirent;
+	int cpu_count;
 
 	dirp = opendir(path);
 	if (!dirp)
 		return -ENOENT;
 
+	cpu_count = sys_devices_system_cpu_count();
 	while ((dirent = readdir(dirp))) {
+		int cpu;
+
+		if (cpu_count > 0 && is_cpu_directory(dirent->d_name, &cpu) && cpu >= cpu_count)
+			continue;
+
 		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
