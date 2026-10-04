@@ -493,7 +493,7 @@ static bool get_min_cpu_count_cfs(const char *cgroup, double *rv)
 			}
 		}
 
-		char *parent = dirname(cur_sg); // walk up
+		char *parent = gnu_dirname(cur_sg); // walk up
 		if (strcmp(parent, ".") == 0) break; // in this case parent != cur_sg
 	} while (strcmp(cur_sg, "/") != 0);
 	return got;
