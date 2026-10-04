@@ -91,4 +91,6 @@ extern size_t strlcpy(char *, const char *, size_t);
 extern size_t strlcat(char *d, const char *s, size_t n);
 #endif
 
+extern char *gnu_dirname(char *path);
+
 #endif /* __LXCFS_UTILS_H */
