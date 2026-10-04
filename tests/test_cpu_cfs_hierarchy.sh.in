@@ -107,7 +107,8 @@ echo '+cpu' > "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/cgroup.subtree_control"
 
 echo "==> Reading /proc/stat from init process's cgroup"
 
-cpus_num_init=$(grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+stat_init=$(timeout 10 cat "${LXCFSDIR}/proc/stat")
+cpus_num_init=$(printf "%s\n" "$stat_init" | grep "^cpu[0-9]" | wc -l)
 
 echo "==> Confirming that CPU number in /proc/stat is correct"
 
@@ -115,7 +116,8 @@ echo "==> Confirming that CPU number in /proc/stat is correct"
 
 echo "==> Reading /proc/stat from within sub-cgroup"
 
-cpus_num_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" grep "^cpu[0-9]" "${LXCFSDIR}/proc/stat" | wc -l)
+stat_ct_process=$(do_in_cg "/sys/fs/cgroup/${cg4}/${cg5}/${cg6}/${cg7}" timeout 10 cat "${LXCFSDIR}/proc/stat")
+cpus_num_ct_process=$(printf "%s\n" "$stat_ct_process" | grep "^cpu[0-9]" | wc -l)
 
 echo "==> Confirming that CPU number in /proc/stat is correct"
 
