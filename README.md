@@ -20,11 +20,17 @@ such as:
 /proc/pressure/cpu
 /proc/pressure/memory
 /sys/devices/system/cpu/online
+/sys/devices/system/cpu/possible
+/sys/devices/system/cpu/present
+/sys/devices/system/cpu/offline
 ```
 
 are container aware such that the values displayed (e.g. in `/proc/uptime`)
 really reflect how long the container is running and not how long the host is
 running.
+
+When CPU virtualization is enabled, the `cpuN` directory enumeration follows
+the same virtual CPU count so libc and tools such as `nproc --all` agree.
 
 Prior to the implementation of cgroup namespaces by Serge Hallyn `LXCFS` also
 provided a container aware `cgroupfs` tree. It took care that the container

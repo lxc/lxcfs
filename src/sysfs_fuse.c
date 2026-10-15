@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <sched.h>
@@ -73,9 +74,17 @@ static int do_cpuset_read(char *cg, char *cpu_cg, char *buf, size_t buflen)
         return total_len;
 }
 
-static int sys_devices_system_cpu_online_read(char *buf, size_t size,
-					      off_t offset,
-					      struct fuse_file_info *fi)
+static bool is_virtual_cpu_mask(const char *path)
+{
+	return strcmp(path, "/sys/devices/system/cpu/online") == 0 ||
+	       strcmp(path, "/sys/devices/system/cpu/possible") == 0 ||
+	       strcmp(path, "/sys/devices/system/cpu/present") == 0 ||
+	       strcmp(path, "/sys/devices/system/cpu/offline") == 0;
+}
+
+static int sys_devices_system_cpu_mask_read(const char *path, char *buf,
+					    size_t size, off_t offset,
+					    struct fuse_file_info *fi)
 {
 	__do_free char *cg = NULL, *cpu_cg = NULL;
 	struct fuse_context *fc = fuse_get_context();
@@ -106,13 +115,19 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 
 	cg = get_pid_cgroup(initpid, "cpuset");
 	if (!cg)
-		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+		return read_file_fuse(path, buf, size, d);
 	prune_init_slice(cg);
 	cpu_cg = get_pid_cgroup(initpid, "cpu");
 	if (!cpu_cg)
-		return read_file_fuse("/sys/devices/system/cpu/online", buf, size, d);
+		return read_file_fuse(path, buf, size, d);
 	prune_init_slice(cpu_cg);
-	total_len = do_cpuset_read(cg, cpu_cg, d->buf, d->buflen);
+
+	if (strcmp(path, "/sys/devices/system/cpu/offline") == 0)
+		total_len = snprintf(d->buf, d->buflen, "\n");
+	else
+		total_len = do_cpuset_read(cg, cpu_cg, d->buf, d->buflen);
+	if (total_len < 0 || (size_t)total_len >= (size_t)d->buflen)
+		return log_error(0, "Failed to write to cache");
 
 	d->size = (int)total_len;
 	d->cached = 1;
@@ -125,7 +140,7 @@ static int sys_devices_system_cpu_online_read(char *buf, size_t size,
 	return total_len;
 }
 
-static int sys_devices_system_cpu_online_getsize(const char *path)
+static int sys_devices_system_cpu_mask_getsize(const char *path)
 {
         __do_free char *cg = NULL, *cpu_cg = NULL;
         struct fuse_context *fc = fuse_get_context();
@@ -146,7 +161,55 @@ static int sys_devices_system_cpu_online_getsize(const char *path)
         prune_init_slice(cg);
         prune_init_slice(cpu_cg);
 
+        if (strcmp(path, "/sys/devices/system/cpu/offline") == 0)
+                return 1;
+
         return do_cpuset_read(cg, cpu_cg, buf, buflen);
+}
+
+static int sys_devices_system_cpu_count(void)
+{
+	__do_free char *cg = NULL, *cpu_cg = NULL;
+	struct fuse_context *fc = fuse_get_context();
+	struct lxcfs_opts *opts = (struct lxcfs_opts *)fc->private_data;
+	pid_t initpid;
+
+	if (!cgroup_ops->can_use_cpuview(cgroup_ops) || !opts || !opts->use_cfs)
+		return 0;
+
+	initpid = lookup_initpid_in_store(fc->pid);
+	if (initpid <= 1 || is_shared_pidns(initpid))
+		initpid = fc->pid;
+
+	cg = get_pid_cgroup(initpid, "cpuset");
+	if (!cg)
+		return 0;
+	prune_init_slice(cg);
+
+	cpu_cg = get_pid_cgroup(initpid, "cpu");
+	if (!cpu_cg)
+		return 0;
+	prune_init_slice(cpu_cg);
+
+	return max_cpu_count(cg, cpu_cg);
+}
+
+static bool is_cpu_directory(const char *name, int *cpu)
+{
+	char *end = NULL;
+	long value;
+
+	if (strncmp(name, "cpu", STRLITERALLEN("cpu")) != 0 ||
+	    !isdigit((unsigned char)name[STRLITERALLEN("cpu")]))
+		return false;
+
+	errno = 0;
+	value = strtol(name + STRLITERALLEN("cpu"), &end, 10);
+	if (errno != 0 || !end || *end != '\0' || value > INT_MAX)
+		return false;
+
+	*cpu = (int)value;
+	return true;
 }
 
 static int filler_sys_devices_system_cpu(const char *path, void *buf,
@@ -154,12 +217,19 @@ static int filler_sys_devices_system_cpu(const char *path, void *buf,
 {
 	__do_closedir DIR *dirp = NULL;
 	struct dirent *dirent;
+	int cpu_count;
 
 	dirp = opendir(path);
 	if (!dirp)
 		return -ENOENT;
 
+	cpu_count = sys_devices_system_cpu_count();
 	while ((dirent = readdir(dirp))) {
+		int cpu;
+
+		if (cpu_count > 0 && is_cpu_directory(dirent->d_name, &cpu) && cpu >= cpu_count)
+			continue;
+
 		if (dirent_fillerat(filler, dirp, dirent, buf, 0) != 0)
 			return -ENOENT;
 	}
@@ -231,8 +301,8 @@ static int sys_getattr_legacy(const char *path, struct stat *sb)
 		return 0;
 	}
 
-	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		sb->st_size = sys_devices_system_cpu_online_getsize(path);
+	if (is_virtual_cpu_mask(path)) {
+		sb->st_size = sys_devices_system_cpu_mask_getsize(path);
 		sb->st_mode = S_IFREG | 00444;
 		sb->st_nlink = 1;
 		return 0;
@@ -271,8 +341,8 @@ __lxcfs_fuse_ops int sys_getattr(const char *path, struct stat *sb)
 	}
 
 	if (S_ISREG(st_mode) || S_ISLNK(st_mode)) {
-                if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
-                        sb->st_size = sys_devices_system_cpu_online_getsize(path);
+		if (is_virtual_cpu_mask(path))
+			sb->st_size = sys_devices_system_cpu_mask_getsize(path);
                 else
                         sb->st_size = get_sysfile_size(path);
 		sb->st_mode = st_mode;
@@ -340,7 +410,10 @@ static int sys_readdir_legacy(const char *path, void *buf, fuse_fill_dir_t fille
 	if (strcmp(path, "/sys/devices/system/cpu") == 0) {
 		if (dir_filler(filler, buf, ".",	0) != 0 ||
 		    dir_filler(filler, buf, "..",	0) != 0 ||
-		    dirent_filler(filler, path, "online", buf,  0) != 0)
+		    dirent_filler(filler, path, "online", buf,  0) != 0 ||
+		    dirent_filler(filler, path, "possible", buf, 0) != 0 ||
+		    dirent_filler(filler, path, "present", buf, 0) != 0 ||
+		    dirent_filler(filler, path, "offline", buf, 0) != 0)
 			return -ENOENT;
 
 		return 0;
@@ -441,8 +514,8 @@ static int sys_open_legacy(const char *path, struct fuse_file_info *fi)
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM;
 	if (strcmp(path, "/sys/devices/system/cpu") == 0)
 		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU;
-	if (strcmp(path, "/sys/devices/system/cpu/online") == 0)
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
+	if (is_virtual_cpu_mask(path))
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_MASK;
 	if (type == -1)
 		return -ENOENT;
 
@@ -478,8 +551,8 @@ __lxcfs_fuse_ops int sys_open(const char *path, struct fuse_file_info *fi)
 	if (!liblxcfs_can_use_sys_cpu())
 		return sys_open_legacy(path, fi);
 
-	if (strcmp(path, "/sys/devices/system/cpu/online") == 0) {
-		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE;
+	if (is_virtual_cpu_mask(path)) {
+		type = LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_MASK;
 	} else if (strncmp(path, "/sys/devices/system/cpu/",
 			   STRLITERALLEN("/sys/devices/system/cpu/")) == 0) {
 		int ret;
@@ -600,12 +673,11 @@ static int sys_read_legacy(const char *path, char *buf, size_t size,
 	struct file_info *f = INTTYPE_TO_PTR(fi->fh);
 
 	switch (f->type) {
-	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_MASK:
 		if (liblxcfs_functional())
-			return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+			return sys_devices_system_cpu_mask_read(path, buf, size, offset, fi);
 
-		return read_file_fuse_with_offset(LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE_PATH,
-						  buf, size, offset, f);
+		return read_file_fuse_with_offset(path, buf, size, offset, f);
 	case LXC_TYPE_SYS_DEVICES:
 		break;
 	case LXC_TYPE_SYS_DEVICES_SYSTEM:
@@ -629,8 +701,8 @@ __lxcfs_fuse_ops int sys_read(const char *path, char *buf, size_t size,
 		return sys_read_legacy(path, buf, size, offset, fi);
 
 	switch (f->type) {
-	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_ONLINE:
-		return sys_devices_system_cpu_online_read(buf, size, offset, fi);
+	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_MASK:
+		return sys_devices_system_cpu_mask_read(path, buf, size, offset, fi);
 	case LXC_TYPE_SYS_DEVICES_SYSTEM_CPU_SUBFILE:
 		return read_file_fuse_with_offset(path, buf, size, offset, f);
 	}
