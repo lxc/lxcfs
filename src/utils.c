@@ -457,6 +457,19 @@ again:
 	return ret;
 }
 
+#ifdef READFAULTTEST
+bool lxcfs_read_fault(const char *name)
+{
+	const char *armed;
+
+	armed = getenv("LXCFS_READ_FAULT");
+	if (!armed)
+		return false;
+
+	return strcmp(armed, name) == 0;
+}
+#endif
+
 static void *must_realloc(void *orig, size_t sz)
 {
 	void *ret;

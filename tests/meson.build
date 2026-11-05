@@ -97,6 +97,18 @@ test_programs += custom_target(
     ])
 
 test_programs += custom_target(
+    'test_read_fault.sh',
+    build_by_default: want_tests != false,
+    input: 'test_read_fault.sh.in',
+    output: 'test_read_fault.sh',
+    command: [
+        meson_render_jinja2,
+        config_h,
+        '@INPUT@',
+        '@OUTPUT@',
+    ])
+
+test_programs += custom_target(
     'test_reload.sh',
     build_by_default: want_tests != false,
     input: 'test_reload.sh.in',

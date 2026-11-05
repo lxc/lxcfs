@@ -82,12 +82,14 @@ done
 # A read that fails internally must not be reported as a clean EOF. The loop
 # above cannot catch that on its own: the failure needs signal traffic in the
 # reading task so that the FUSE worker thread gets interrupted.
-echo "==> Testing /proc/stat reads under signal interruption"
-"{{LXCFS_BUILD_ROOT}}"/tests/test-read-interrupted "${LXCFSDIR}"/proc/stat 20000
-echo "==> Testing /proc/cpuinfo reads under signal interruption"
-"{{LXCFS_BUILD_ROOT}}"/tests/test-read-interrupted "${LXCFSDIR}"/proc/cpuinfo 20000
-echo "==> Testing /proc/meminfo reads under signal interruption"
-"{{LXCFS_BUILD_ROOT}}"/tests/test-read-interrupted "${LXCFSDIR}"/proc/meminfo 20000
+#
+# Covers every file whose read handler returns an error code, so that all of
+# them get exercised through the full read, partial-read and offset paths.
+for procfile in stat cpuinfo meminfo diskstats slabinfo swaps uptime loadavg; do
+    echo "==> Testing /proc/${procfile} reads under signal interruption"
+    "{{LXCFS_BUILD_ROOT}}"/tests/test-read-interrupted \
+        "${LXCFSDIR}/proc/${procfile}" 20000
+done
 
 # Test meminfo
 echo "==> Testing /proc/meminfo"

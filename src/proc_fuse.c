@@ -1131,10 +1131,16 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/stat", buf, size, d);
 	prune_init_slice(cpu_cg);
 	cpuset = get_cpuset(cg);
+	if (lxcfs_read_fault("stat_cpuset"))
+		free_disarm(cpuset);
 	if (!cpuset)
 		return log_error(-EIO, "proc_stat_read failed to read cpuset for cgroup %s", cg);
 
 	f = fopen_cached("/proc/stat", "re", &fopen_cache);
+	if (f && lxcfs_read_fault("stat_fopen")) {
+		fclose(f);
+		f = NULL;
+	}
 	if (!f)
 		return log_error(-EIO, "proc_stat_read failed to open the host's /proc/stat");
 

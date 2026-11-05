@@ -57,6 +57,78 @@ static ssize_t read_once(const char *path, char *buf, size_t buflen, int *saved_
 	return bytes_read;
 }
 
+/*
+ * Verify the read handlers never answer a request with a zero-length result
+ * that is really a failure. A short read is fine as long as it is followed by
+ * more data or a genuine EOF; what must not happen is 0 bytes at offset 0 while
+ * the file is supposed to have content.
+ *
+ * This also walks the file with small buffers and from several offsets, which
+ * exercises the offset/partial-read paths of the handlers rather than just the
+ * single full read done by the loop in main().
+ */
+static int check_partial_reads(const char *path)
+{
+	char buf[64];
+	off_t offset;
+	ssize_t first;
+	int fd;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		fprintf(stderr, "FAIL: cannot open %s: %s\n", path, strerror(errno));
+		return -1;
+	}
+
+	first = read(fd, buf, sizeof(buf));
+	if (first <= 0) {
+		fprintf(stderr,
+			"FAIL: %s returned %zd bytes for a %zu byte request at offset 0\n",
+			path, first, sizeof(buf));
+		close(fd);
+		return -1;
+	}
+
+	/* Walk the rest of the file in small chunks; must terminate at EOF. */
+	for (;;) {
+		ssize_t n = read(fd, buf, sizeof(buf));
+
+		if (n == 0)
+			break;
+
+		if (n < 0) {
+			fprintf(stderr, "FAIL: %s read error while walking: %s\n",
+				path, strerror(errno));
+			close(fd);
+			return -1;
+		}
+	}
+	close(fd);
+
+	/* Re-read from a few offsets; a non-zero offset must not yield an error. */
+	for (offset = 1; offset <= 16; offset *= 4) {
+		ssize_t n;
+
+		fd = open(path, O_RDONLY | O_CLOEXEC);
+		if (fd < 0) {
+			fprintf(stderr, "FAIL: cannot reopen %s: %s\n", path, strerror(errno));
+			return -1;
+		}
+
+		n = pread(fd, buf, sizeof(buf), offset);
+		if (n < 0) {
+			fprintf(stderr, "FAIL: %s pread at offset %lld failed: %s\n",
+				path, (long long)offset, strerror(errno));
+			close(fd);
+			return -1;
+		}
+		close(fd);
+	}
+
+	printf("%s: partial/offset reads ok (first read %zd bytes)\n", path, first);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	char buf[8192];
@@ -73,6 +145,9 @@ int main(int argc, char *argv[])
 	path = argv[1];
 	if (argc > 2)
 		iterations = atol(argv[2]);
+
+	if (check_partial_reads(path) < 0)
+		exit(EXIT_FAILURE);
 
 	/*
 	 * Deliberately no SA_RESTART: we want the signal to interrupt the
