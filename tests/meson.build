@@ -145,3 +145,10 @@ test_programs += executable(
     include_directories: config_include,
     install: false,
     build_by_default: want_tests != false)
+
+test_programs += executable(
+    'test-read-interrupted',
+    'test_read_interrupted.c',
+    include_directories: config_include,
+    install: false,
+    build_by_default: want_tests != false)

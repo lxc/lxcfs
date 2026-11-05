@@ -64,6 +64,7 @@ extern FILE *fopen_cached(const char *path, const char *mode,
 extern FILE *fdopen_cached(int fd, const char *mode, void **caller_freed_buffer);
 extern DIR *opendir_flags(const char *path, int oflags);
 extern ssize_t write_nointr(int fd, const void *buf, size_t count);
+extern ssize_t read_nointr(int fd, void *buf, size_t count);
 extern int safe_uint64(const char *numstr, uint64_t *converted, int base);
 extern int safe_uint32(const char *numstr, uint32_t *converted, int base);
 extern char *trim_whitespace_in_place(char *buffer);

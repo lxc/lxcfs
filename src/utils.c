@@ -334,6 +334,7 @@ bool try_realloc_proc_buf(struct file_info *d, const char *path)
 int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d)
 {
 	__do_free char *line = NULL;
+	__do_free void *fopen_cache = NULL;
 	__do_fclose FILE *f = NULL;
 	size_t linelen = 0, total_len = 0;
 	char *cache;
@@ -341,22 +342,28 @@ int read_file_fuse(const char *path, char *buf, size_t size, struct file_info *d
 
 	/* Realloc if the file has grown since open(). */
 	if (!try_realloc_proc_buf(d, path))
-		return 0;
+		return -ENOMEM;
 	cache = d->buf;
 	cache_size = d->buflen;
 
-	f = fopen(path, "re");
+	/*
+	 * fopen_cached() slurps the file via read_nointr() and then hands out
+	 * a memory stream, so the getline() loop below cannot be aborted by
+	 * EINTR. A plain fopen() here would make this function return a short
+	 * or empty result whenever the FUSE worker thread gets interrupted.
+	 */
+	f = fopen_cached(path, "re", &fopen_cache);
 	if (!f)
-		return 0;
+		return log_error(-EIO, "Failed to open %s", path);
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
 
 		l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0)
-			return log_error(0, "Failed to write cache");
+			return log_error(-EIO, "Failed to write cache");
 		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
+			return log_error(-EIO, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -439,7 +446,7 @@ again:
 	return 0;
 }
 
-static ssize_t read_nointr(int fd, void *buf, size_t count)
+ssize_t read_nointr(int fd, void *buf, size_t count)
 {
 	ssize_t ret;
 again:

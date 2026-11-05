@@ -72,17 +72,32 @@ struct memory_stat {
 
 static off_t get_procfile_size(const char *path)
 {
-	__do_fclose FILE *f = NULL;
-	__do_free char *line = NULL;
-	size_t len = 0;
-	ssize_t sz, answer = 0;
+	__do_close int fd = -EBADF;
+	off_t answer = 0;
 
-	f = fopen(path, "re");
-	if (!f)
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
 		return 0;
 
-	while ((sz = getline(&line, &len, f)) != -1)
-		answer += sz;
+	/*
+	 * Use read_nointr() rather than stdio: getline() does not restart on
+	 * EINTR, and this runs on a FUSE worker thread which is interrupted
+	 * whenever the reading task gets a signal. Returning a short size
+	 * here would under-allocate file_info->buf.
+	 */
+	for (;;) {
+		char buf[4096];
+		ssize_t bytes_read;
+
+		bytes_read = read_nointr(fd, buf, sizeof(buf));
+		if (bytes_read < 0)
+			return 0;
+
+		if (bytes_read == 0)
+			break;
+
+		answer += bytes_read;
+	}
 
 	return answer;
 }
@@ -587,7 +602,7 @@ static int proc_swaps_read(char *buf, size_t size, off_t offset,
 	}
 
 	if (total_len < 0 || l < 0)
-		return log_error(0, "Failed writing to cache");
+		return log_error(-EIO, "Failed writing to cache");
 
 	d->cached = 1;
 	d->size = (int)total_len;
@@ -829,9 +844,9 @@ static int proc_diskstats_read(char *buf, size_t size, off_t offset,
 
 		l = snprintf(cache, cache_size, "%s", lbuf);
 		if (l < 0)
-			return log_error(0, "Failed to write cache");
+			return log_error(-EIO, "Failed to write cache");
 		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
+			return log_error(-EIO, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -1117,15 +1132,15 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	prune_init_slice(cpu_cg);
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
-		return 0;
+		return log_error(-EIO, "proc_stat_read failed to read cpuset for cgroup %s", cg);
 
 	f = fopen_cached("/proc/stat", "re", &fopen_cache);
 	if (!f)
-		return 0;
+		return log_error(-EIO, "proc_stat_read failed to open the host's /proc/stat");
 
 	/* Skip first system cpu line. */
 	if (getline(&line, &linelen, f) < 0)
-		return log_error(0, "proc_stat_read read first line failed");
+		return log_error(-EIO, "proc_stat_read read first line failed");
 
 	/*
 	 * Read cpuacct.usage_all for all CPUs.
@@ -1134,9 +1149,22 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 	 */
 	if (read_cpuacct_usage_all(cg, cpuset, &cg_cpu_usage, &cg_cpu_usage_size) == 0) {
 		if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs) {
-			total_len = cpuview_proc_stat(cg, cpu_cg, cpuset, cg_cpu_usage,
-						      cg_cpu_usage_size, f,
-						      d->buf, d->buflen);
+			int cpuview_len;
+
+			cpuview_len = cpuview_proc_stat(cg, cpu_cg, cpuset,
+							cg_cpu_usage,
+							cg_cpu_usage_size, f,
+							d->buf, d->buflen);
+			/*
+			 * A successful render always emits at least the "cpu "
+			 * aggregate line, so <= 0 means we failed. Do not fall
+			 * through to out: with total_len == 0, that would report
+			 * an empty /proc/stat to the caller instead of an error.
+			 */
+			if (cpuview_len <= 0)
+				return log_error(-EIO, "proc_stat_read failed to render the cpuview for cgroup %s", cg);
+
+			total_len = cpuview_len;
 			goto out;
 		}
 	} else {
@@ -1163,9 +1191,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 			/* not a ^cpuN line containing a number N, just print it */
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
-				return log_error(0, "Failed to write cache");
+				return log_error(-EIO, "Failed to write cache");
 			if ((size_t)l >= cache_size)
-				return log_error(0, "Write to cache was truncated");
+				return log_error(-EIO, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -1220,9 +1248,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 
 			l = snprintf(cache, cache_size, "cpu%d%s", cpu_to_render, c);
 			if (l < 0)
-				return log_error(0, "Failed to write cache");
+				return log_error(-EIO, "Failed to write cache");
 			if ((size_t)l >= cache_size)
-				return log_error(0, "Write to cache was truncated");
+				return log_error(-EIO, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -1252,9 +1280,9 @@ static int proc_stat_read(char *buf, size_t size, off_t offset,
 				     cpu_to_render, cg_cpu_usage[physcpu].user,
 				     cg_cpu_usage[physcpu].system, new_idle);
 			if (l < 0)
-				return log_error(0, "Failed to write cache");
+				return log_error(-EIO, "Failed to write cache");
 			if ((size_t)l >= cache_size)
-				return log_error(0, "Write to cache was truncated");
+				return log_error(-EIO, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -1628,9 +1656,9 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 
 		l = snprintf(cache, cache_size, "%s", printme);
 		if (l < 0)
-			return log_error(0, "Failed to write cache");
+			return log_error(-EIO, "Failed to write cache");
 		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
+			return log_error(-EIO, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -1703,9 +1731,9 @@ static int proc_slabinfo_read(char *buf, size_t size, off_t offset,
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0)
-			return log_error(0, "Failed to write cache");
+			return log_error(-EIO, "Failed to write cache");
 		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
+			return log_error(-EIO, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -1801,9 +1829,9 @@ static int proc_pressure_read(char *buf, size_t size, off_t offset,
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l = snprintf(cache, cache_size, "%s", line);
 		if (l < 0)
-			return log_error(0, "Failed to write cache");
+			return log_error(-EIO, "Failed to write cache");
 		if ((size_t)l >= cache_size)
-			return log_error(0, "Write to cache was truncated");
+			return log_error(-EIO, "Write to cache was truncated");
 
 		cache += l;
 		cache_size -= l;
@@ -1829,7 +1857,7 @@ static int proc_read_with_personality(int (*do_proc_read)(char *, size_t, off_t,
 	int ret, read_ret;
 
 	if (get_task_personality(fc->pid, &caller_personality) < 0)
-		return log_error(0, "Failed to get caller process (pid: %d) personality", fc->pid);
+		return log_error(-EIO, "Failed to get caller process (pid: %d) personality", fc->pid);
 
 	/* do we need to change thread personality? */
 	change_personality = host_personality != caller_personality;
@@ -1837,7 +1865,7 @@ static int proc_read_with_personality(int (*do_proc_read)(char *, size_t, off_t,
 	if (change_personality) {
 		ret = personality(caller_personality);
 		if (ret == -1)
-			return log_error(0, "Call to personality(%d) failed: %s\n",
+			return log_error(-EIO, "Call to personality(%d) failed: %s\n",
 				caller_personality, strerror(errno));
 
 		lxcfs_debug("task (tid: %d) personality was changed %d -> %d\n",
@@ -1849,7 +1877,7 @@ static int proc_read_with_personality(int (*do_proc_read)(char *, size_t, off_t,
 	if (change_personality) {
 		ret = personality(host_personality);
 		if (ret == -1)
-			return log_error(0, "Call to personality(%d) failed: %s\n",
+			return log_error(-EIO, "Call to personality(%d) failed: %s\n",
 				host_personality, strerror(errno));
 
 		lxcfs_debug("task (tid: %d) personality was restored %d -> %d\n",
