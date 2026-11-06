@@ -95,6 +95,8 @@ if [ -n "${lxcfs_enable_cfs:-}" ]; then
 	TESTCASE="cpu cfs hierarchy"
 	UNSHARE=0 RUNTEST "${dirname}"/test_cpu_cfs_hierarchy.sh
 fi
+TESTCASE="read fault handling"
+UNSHARE=0 RUNTEST "${dirname}"/test_read_fault.sh
 TESTCASE="liblxcfs reloading"
 UNSHARE=0 RUNTEST "${dirname}"/test_reload.sh
 TESTCASE="SIGUSR2 virtualization mode switching"

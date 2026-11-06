@@ -1010,7 +1010,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	prune_init_slice(cpu_cg);
 	cpuset = get_cpuset(cg);
 	if (!cpuset)
-		return 0;
+		return log_error(-EIO, "proc_cpuinfo_read failed to read cpuset for cgroup %s", cg);
 
 	if (cgroup_ops->can_use_cpuview(cgroup_ops) && opts && opts->use_cfs)
 		use_view = true;
@@ -1021,7 +1021,7 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 	f = fopen_cached("/proc/cpuinfo", "re", &fopen_cache);
 	if (!f)
-		return 0;
+		return log_error(-EIO, "proc_cpuinfo_read failed to open the host's /proc/cpuinfo");
 
 	while (getline(&line, &linelen, f) != -1) {
 		ssize_t l;
@@ -1046,9 +1046,9 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				curcpu++;
 				l = snprintf(cache, cache_size, "processor	: %d\n", curcpu);
 				if (l < 0)
-					return log_error(0, "Failed to write cache");
+					return log_error(-EIO, "Failed to write cache");
 				if ((size_t)l >= cache_size)
-					return log_error(0, "Write to cache was truncated");
+					return log_error(-EIO, "Write to cache was truncated");
 				cache += l;
 				cache_size -= l;
 				total_len += l;
@@ -1071,9 +1071,9 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 
 			l = snprintf(cache, cache_size, "processor %d:%s", curcpu, p);
 			if (l < 0)
-				return log_error(0, "Failed to write cache");
+				return log_error(-EIO, "Failed to write cache");
 			if ((size_t)l >= cache_size)
-				return log_error(0, "Write to cache was truncated");
+				return log_error(-EIO, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;
@@ -1084,9 +1084,9 @@ int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		if (am_printing) {
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0)
-				return log_error(0, "Failed to write cache");
+				return log_error(-EIO, "Failed to write cache");
 			if ((size_t)l >= cache_size)
-				return log_error(0, "Write to cache was truncated");
+				return log_error(-EIO, "Write to cache was truncated");
 
 			cache += l;
 			cache_size -= l;

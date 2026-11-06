@@ -27,6 +27,27 @@
 
 #define RESTRICTED_PERSONALITY_ACCESS_POLICY "Due to restricted personality access policy, reading proc files from containers is not permitted"
 
+/*
+ * Fault injection for the read paths, compiled in only with -Dmocks=true.
+ *
+ * The error paths below are hard to reach in a test: they need a read of a
+ * procfs or cgroup file to fail, which in production happens when a FUSE
+ * worker thread is interrupted. Setting LXCFS_READ_FAULT=<name> makes the
+ * matching call site fail on demand so that the error handling can be
+ * exercised deterministically.
+ *
+ * Returns true when the named fault is armed.
+ */
+#ifdef READFAULTTEST
+extern bool lxcfs_read_fault(const char *name);
+#else
+static inline bool lxcfs_read_fault(const char *name)
+{
+	(void)name;
+	return false;
+}
+#endif
+
 struct file_info;
 
 __attribute__((__format__(__printf__, 4, 5))) extern char *must_strcat(char **src, size_t *sz, size_t *asz, const char *format, ...);
@@ -64,6 +85,7 @@ extern FILE *fopen_cached(const char *path, const char *mode,
 extern FILE *fdopen_cached(int fd, const char *mode, void **caller_freed_buffer);
 extern DIR *opendir_flags(const char *path, int oflags);
 extern ssize_t write_nointr(int fd, const void *buf, size_t count);
+extern ssize_t read_nointr(int fd, void *buf, size_t count);
 extern int safe_uint64(const char *numstr, uint64_t *converted, int base);
 extern int safe_uint32(const char *numstr, uint32_t *converted, int base);
 extern char *trim_whitespace_in_place(char *buffer);

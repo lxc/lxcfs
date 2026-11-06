@@ -1,0 +1,101 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1+
+
+# Verify that a failing read is reported as an error and not as end-of-file.
+#
+# The error paths in the read handlers are only reachable when an internal
+# read fails, which in production happens when a FUSE worker thread is
+# interrupted. That is timing-dependent and cannot be triggered reliably from
+# a test, so this uses the fault injection compiled in with -Dmocks=true
+# (LXCFS_READ_FAULT) to reach them deterministically.
+#
+# What must hold for every injected fault:
+#   - read() must not return 0 at offset 0 (that would mean "empty file")
+#   - the caller must see an error, i.e. cat(1) must fail
+#   - LXCFS must say something about it in its log
+
+set -eu
+[ -n "${DEBUG:-}" ] && set -x
+
+if [ -z "{{LXCFS_READ_FAULT_SUPPORTED}}" ]; then
+    echo "==> Fault injection not built in (needs -Dmocks=true), skipping"
+    exit 0
+fi
+
+PASS=0
+LXCFSPID=-1
+MNT=""
+LOG=""
+
+cleanup() {
+    set +e
+    [ "$LXCFSPID" != "-1" ] && kill -9 "$LXCFSPID" 2>/dev/null
+    if [ -n "$MNT" ]; then
+        fusermount3 -u "$MNT" 2>/dev/null || fusermount -u "$MNT" 2>/dev/null
+        rmdir "$MNT" 2>/dev/null
+    fi
+    [ -n "$LOG" ] && rm -f "$LOG"
+    [ "$PASS" = "1" ] || { echo "=> FAILED"; exit 1; }
+    echo "=> PASSED"
+    exit 0
+}
+trap cleanup EXIT HUP INT TERM
+
+lxcfs="{{LXCFS_BUILD_ROOT}}/lxcfs"
+[ -x "$lxcfs" ] || { echo "==> $lxcfs not built, skipping"; PASS=1; exit 0; }
+
+# fault name -> file it affects
+for spec in "stat_cpuset:stat" "stat_fopen:stat"; do
+    fault=$(echo "$spec" | cut -d: -f1)
+    file=$(echo "$spec" | cut -d: -f2)
+
+    MNT=$(mktemp -d)
+    LOG=$(mktemp)
+
+    echo "==> Injecting fault '$fault', expecting /proc/$file to report an error"
+
+    LXCFS_READ_FAULT="$fault" \
+    LD_LIBRARY_PATH="{{LXCFS_BUILD_ROOT}}:${LD_LIBRARY_PATH:-}" \
+        "$lxcfs" -p "${MNT}.pid" "$MNT" >"$LOG" 2>&1 &
+    LXCFSPID=$!
+
+    i=0
+    while ! mountpoint -q "$MNT"; do
+        i=$((i + 1))
+        [ "$i" -gt 20 ] && { echo "FAIL: lxcfs did not start"; cat "$LOG"; exit 1; }
+        sleep 0.5
+    done
+
+    # 1) a failed read must not look like an empty file
+    bytes=$(dd if="$MNT/proc/$file" bs=4096 count=1 2>/dev/null | wc -c) || true
+    if [ "$bytes" != "0" ]; then
+        echo "FAIL: expected the read to fail, but got $bytes bytes"
+        exit 1
+    fi
+
+    # 2) and the caller must actually see an error
+    if cat "$MNT/proc/$file" >/dev/null 2>&1; then
+        echo "FAIL: cat succeeded on a read that was supposed to fail;" \
+             "the handler returned 0 (EOF) instead of a negative errno"
+        exit 1
+    fi
+    echo "    ok: cat reports an error instead of an empty file"
+
+    # 3) and LXCFS must have logged it
+    if ! grep -qiE "failed|error" "$LOG"; then
+        echo "FAIL: nothing logged for fault '$fault'; this path is silent"
+        cat "$LOG"
+        exit 1
+    fi
+    echo "    ok: LXCFS logged the failure"
+
+    kill -9 "$LXCFSPID" 2>/dev/null
+    LXCFSPID=-1
+    fusermount3 -u "$MNT" 2>/dev/null || fusermount -u "$MNT" 2>/dev/null
+    rmdir "$MNT" 2>/dev/null
+    rm -f "$LOG" "${MNT}.pid"
+    MNT=""
+    LOG=""
+done
+
+PASS=1

@@ -79,6 +79,18 @@ for i in $(seq 1 100); do
     [ "$bytes" -gt 0 ] || (echo "FAIL: /proc/stat returned empty on read $i" && exit 1)
 done
 
+# A read that fails internally must not be reported as a clean EOF. The loop
+# above cannot catch that on its own: the failure needs signal traffic in the
+# reading task so that the FUSE worker thread gets interrupted.
+#
+# Covers every file whose read handler returns an error code, so that all of
+# them get exercised through the full read, partial-read and offset paths.
+for procfile in stat cpuinfo meminfo diskstats slabinfo swaps uptime loadavg; do
+    echo "==> Testing /proc/${procfile} reads under signal interruption"
+    "{{LXCFS_BUILD_ROOT}}"/tests/test-read-interrupted \
+        "${LXCFSDIR}/proc/${procfile}" 20000
+done
+
 # Test meminfo
 echo "==> Testing /proc/meminfo"
 grep -q "^MemTotal.*65536 kB$" "${LXCFSDIR}"/proc/meminfo

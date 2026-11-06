@@ -520,31 +520,47 @@ char *cg_unified_get_current_cgroup(pid_t pid)
 char *readat_file(int dirfd, const char *path)
 {
 	__do_close int fd = -EBADF;
-	__do_free char *line = NULL;
-	__do_fclose FILE *f = NULL;
-	char *buf = NULL;
-	size_t len = 0, fulllen = 0;
-	ssize_t linelen;
+	__do_free char *buf = NULL;
+	size_t fulllen = 0;
 
 	fd = openat(dirfd, path, O_NOFOLLOW | O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return NULL;
 
-	f = fdopen(fd, "re");
-	if (!f)
-		return NULL;
-	/* Transfer ownership of fd */
-	move_fd(fd);
+	/*
+	 * Use read_nointr() rather than stdio: glibc's getline() does not
+	 * restart on EINTR, and LXCFS worker threads do get interrupted
+	 * (FUSE_INTERRUPT -> LXCFS_INTR_SIGNAL) whenever the reading task
+	 * receives a signal. A short read here used to be indistinguishable
+	 * from an empty cgroup file, which made callers such as get_cpuset()
+	 * fail spuriously.
+	 */
+	for (;;) {
+		char chunk[4096];
+		ssize_t bytes_read;
+		char *tmp;
 
-	while ((linelen = getline(&line, &len, f)) != -1) {
-		append_line(&buf, fulllen, line, linelen);
-		fulllen += linelen;
+		bytes_read = read_nointr(fd, chunk, sizeof(chunk));
+		if (bytes_read < 0)
+			return NULL;
+
+		if (bytes_read == 0)
+			break;
+
+		tmp = realloc(buf, fulllen + bytes_read + 1);
+		if (!tmp)
+			return NULL;
+
+		buf = tmp;
+		memcpy(buf + fulllen, chunk, bytes_read);
+		fulllen += bytes_read;
+		buf[fulllen] = '\0';
 	}
 
 	if (buf)
 		drop_trailing_newlines(buf);
 
-	return buf;
+	return move_ptr(buf);
 }
 
 bool mkdir_p(const char *dir, mode_t mode)

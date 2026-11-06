@@ -72,6 +72,13 @@ want_tests = get_option('tests')
 want_mocks = get_option('mocks')
 want_docs = get_option('docs')
 
+# Let the test scripts know whether the read fault injection is available.
+if want_mocks == true
+    conf.set_quoted('LXCFS_READ_FAULT_SUPPORTED', '1')
+else
+    conf.set_quoted('LXCFS_READ_FAULT_SUPPORTED', '')
+endif
+
 # Build flags.
 possible_cc_flags = [
     '-Wvla',
@@ -229,8 +236,8 @@ liblxcfs_common_dependencies = declare_dependency(
 liblxcfs_cargs = []
 liblxcfstest_cargs = ['-DRELOADTEST', '-DDEBUG']
 if want_mocks == true
-    liblxcfs_cargs = ['-DPSITRIGGERTEST', '-DDEBUG']
-    liblxcfstest_cargs += ['-DPSITRIGGERTEST']
+    liblxcfs_cargs = ['-DPSITRIGGERTEST', '-DDEBUG', '-DREADFAULTTEST']
+    liblxcfstest_cargs += ['-DPSITRIGGERTEST', '-DREADFAULTTEST']
 endif
 
 liblxcfs = shared_module(
